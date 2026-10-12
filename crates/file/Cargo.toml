@@ -1,0 +1,12 @@
+[package]
+name = "opendash-file"
+description = "Project and Package read/write (ADR 0003)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -26,7 +26,7 @@ People trust OpenDash BI with their numbers; a crash loses their work. **This ou
 - **Input-derived numbers are hostile** (files, data sources, DAX/M expressions, commands, MCP/control params): `get()` instead of indexing, checked/saturating arithmetic, cap input-sized allocations (huge tables, cross joins, `GENERATESERIES`, unbounded `List.Generate`).
 - **Bound recursion** (expression nesting, measure-references-measure chains, relationship paths).
 - **Every crash fix lands with a regression test.**
-- Crates carry `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`.
+- Lints are set once in the workspace `Cargo.toml` (`unsafe_code = "forbid"`; clippy `unwrap_used`, `expect_used`, `panic`, `unimplemented`, `todo`, `unreachable` denied); every crate has `[lints] workspace = true`. `clippy.toml` allows panicking only in tests.
 
 ## Non-negotiables
 - **Clean-room.** Power BI Desktop is *observed* black-box only, in a Windows VM: run it, use its UI with synthetic datasets. Screenshots live only in the gitignored `observations/` folder. Never read, disassemble or copy anything inside the Power BI install, never commit files produced by Power BI, never copy GPL/AGPL/LGPL code. DAX, M and file-format behaviour comes from public documentation and observation.
