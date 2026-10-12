@@ -768,6 +768,7 @@ dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "opendash-m",
  "parquet",
  "quick-xml",
  "rust_xlsxwriter",
