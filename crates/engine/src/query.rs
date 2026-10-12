@@ -3,7 +3,7 @@
 //! Refresh (see `load.rs`). All are [`Run::Edit`](crate::Run::Edit), so undo restores the steps
 //! and the Stale flags together, and a step that can't run changes nothing.
 
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Schema};
 use opendash_data::step::{
     ColumnType, Combine, Condition, JoinKind, MAX_CONDITIONS, Merge, Op, Step,
     Value as FilterValue, too_many_conditions,
@@ -113,9 +113,19 @@ pub(crate) fn filter_rows(doc: &mut Document, params: &Value) -> Result {
     if list.len() > MAX_CONDITIONS {
         return Err(invalid(ID, too_many_conditions(list.len())));
     }
+    // The columns' types after the Query's steps so far (its table may be Stale): one Preview
+    // for all the conditions.
+    let schema = doc.queries.get(q).and_then(|query| {
+        let step = query.steps.len().checked_sub(1);
+        let limit = default_memory_cap().saturating_sub(loaded(doc));
+        let preview = query
+            .preview_with(&doc.queries, &crate::load::fresh(doc), step, limit)
+            .ok()?;
+        Some(preview.batch.schema())
+    });
     let conditions = list
         .iter()
-        .map(|c| condition(doc, q, c))
+        .map(|c| condition(doc, q, schema.as_deref(), c))
         .collect::<Result<Vec<_>>>()?;
     add_step(doc, ID, params, |_| {
         Ok(Step::FilteredRows {
@@ -126,8 +136,8 @@ pub(crate) fn filter_rows(doc: &mut Document, params: &Value) -> Result {
 }
 
 /// One `{column, op, value}` of `transform.filterRows`. Text values for a date or datetime
-/// column (as loaded for Query `q`) are read as dates in the Query's Culture.
-fn condition(doc: &Document, q: usize, c: &Value) -> Result<Condition> {
+/// column (in `schema`, Query `q`'s Preview) are read as dates in the Query's Culture.
+fn condition(doc: &Document, q: usize, schema: Option<&Schema>, c: &Value) -> Result<Condition> {
     const ID: &str = "transform.filterRows";
     let column = text(c, "column", ID)?;
     let op = match text(c, "op", ID)?.as_str() {
@@ -143,21 +153,9 @@ fn condition(doc: &Document, q: usize, c: &Value) -> Result<Condition> {
         other => return Err(invalid(ID, format!("unknown op `{other}`"))),
     };
     let query = doc.queries.get(q);
-    // The column's type after the Query's steps so far (its table may be Stale).
-    let ty = query.and_then(|query| {
-        let step = query.steps.len().checked_sub(1);
-        let preview = query
-            .preview_with(
-                &doc.queries,
-                &crate::load::fresh(doc),
-                step,
-                default_memory_cap(),
-            )
-            .ok()?;
-        let schema = preview.batch.schema();
-        let f = schema.field_with_name(&column).ok()?;
-        Some(f.data_type().clone())
-    });
+    let ty = schema
+        .and_then(|s| s.field_with_name(&column).ok())
+        .map(|f| f.data_type().clone());
     let bad = |what: &str| invalid(ID, format!("`{column}`: {what}"));
     let value = match c.get("value") {
         None => return Err(bad("`value` is required (null for is null)")),
@@ -259,7 +257,7 @@ fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
         .get(q)
         .ok_or_else(|| invalid(id, "no such query".into()))?;
     if let Some(last) = query.steps.len().checked_sub(1) {
-        let limit = default_memory_cap().saturating_sub(doc.tables.iter().map(Table::memory).sum());
+        let limit = default_memory_cap().saturating_sub(loaded(doc));
         if let Err(e @ opendash_data::Error::Step { .. }) =
             query.preview_with(&doc.queries, &crate::load::fresh(doc), Some(last), limit)
         {
@@ -269,6 +267,11 @@ fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
     let name = query.name.clone();
     doc.stale.insert(name);
     Ok(())
+}
+
+/// Bytes of the Document's loaded tables.
+fn loaded(doc: &Document) -> usize {
+    doc.tables.iter().map(Table::memory).sum()
 }
 
 /// The index of the Query named by `params.query`.
