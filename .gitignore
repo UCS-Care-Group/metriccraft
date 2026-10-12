@@ -1,0 +1,16 @@
+context/transcripts/*
+!context/transcripts/.gitkeep
+.memsearch/
+
+# Rust / craft conventions (upstream also ignores plan/ — do so before going public)
+*~
+/target
+/target-*/
+/dist
+/corpus
+/log
+/craft-fonts/
+.DS_Store
+.env
+.env.*
+!.env.example
