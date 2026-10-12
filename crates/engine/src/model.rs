@@ -152,10 +152,15 @@ pub(crate) fn set_data_type(doc: &mut Document, params: &Value) -> Result {
     let converted = table
         .set_data_type(&data, &column, ty, culture, limit)
         .map_err(Error::Model)?;
-    if let Some(t) = doc.tables.iter_mut().find(|t| t.name() == converted.name()) {
+    let name = converted.name().to_string();
+    if let Some(t) = doc.tables.iter_mut().find(|t| t.name() == name) {
         *t = converted;
     }
-    Ok(())
+    // The converted values must still be keys where a Relationship's one side is this column
+    // (e.g. 1.1 and 1.2 both become 1 as whole numbers).
+    doc.model
+        .check_keys(&doc.tables, &name)
+        .map_err(Error::Model)
 }
 
 /// The model Table `params.table` and, if given, `params.column`'s name.
@@ -198,7 +203,7 @@ fn data(doc: &Document, params: &Value, id: &str) -> Result<Table> {
         .ok_or_else(|| invalid(id, format!("there is no table `{name}`")))
 }
 
-fn text(params: &Value, key: &str, id: &str) -> Result<String> {
+pub(crate) fn text(params: &Value, key: &str, id: &str) -> Result<String> {
     params
         .get(key)
         .and_then(Value::as_str)
@@ -206,7 +211,7 @@ fn text(params: &Value, key: &str, id: &str) -> Result<String> {
         .ok_or_else(|| invalid(id, format!("`{key}` must be text")))
 }
 
-fn invalid(command: &str, message: String) -> Error {
+pub(crate) fn invalid(command: &str, message: String) -> Error {
     Error::InvalidParams {
         command: command.into(),
         message,

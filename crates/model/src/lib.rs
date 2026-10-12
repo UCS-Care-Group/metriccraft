@@ -4,6 +4,8 @@
 //! column types), never the other way.
 
 pub mod parity;
+mod relationship;
 mod table;
 
+pub use relationship::Relationship;
 pub use table::{Column, Error, Model, ModelTable, SummarizeBy};

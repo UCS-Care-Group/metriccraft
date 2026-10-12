@@ -16,6 +16,10 @@
 //! - Every loaded Table's model is updated after the load (`opendash_model::ModelTable::load`):
 //!   column properties carried over by name, type overrides re-applied, sort by checked. A
 //!   failure there fails the whole load.
+//! - Then the Relationships (`opendash_model`, `relationship.rs`): those whose Table or Column is
+//!   gone are dropped; a one side that is no longer unique fails the whole load, naming the
+//!   Table and Column; with the Project's switch on, auto-detect adds Relationships for Tables
+//!   that weren't loaded before. Both are listed in the [`LoadReport`].
 //!
 //! Loading is all-or-nothing: the new tables are built beside the old ones (≈ 2× memory
 //! briefly, ADR 0005) and replace them only if every Query succeeds; otherwise nothing changes
@@ -36,7 +40,7 @@ use std::path::Path;
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
 use opendash_data::{Pass, Preview, Query, Table};
-use opendash_model::ModelTable;
+use opendash_model::{ModelTable, Relationship};
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -47,6 +51,10 @@ pub struct LoadReport {
     pub tables: Vec<Loaded>,
     /// Undo steps dropped (oldest first) to fit the new data under the memory cap.
     pub undo_dropped: usize,
+    /// Relationships auto-detect added for the new Tables.
+    pub relationships_added: Vec<Relationship>,
+    /// Relationships dropped because a Table or Column they use is gone.
+    pub relationships_removed: Vec<Relationship>,
 }
 
 /// One loaded table: its rows and its Cell errors (loaded as blank).
@@ -123,17 +131,19 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         let limit = limit.saturating_sub(table.memory());
         let (model, table) =
             ModelTable::load(None, table, query.culture, limit).map_err(Error::Model)?;
-        let report = LoadReport {
+        let mut report = LoadReport {
             tables: vec![Loaded {
                 table: name.clone(),
                 rows: table.rows(),
                 cell_errors,
             }],
-            undo_dropped: 0,
+            ..LoadReport::default()
         };
         doc.queries.push(query);
         doc.tables.push(table);
         doc.model.put(model);
+        let one = std::slice::from_ref(&name);
+        relate(doc, one, one, &mut report)?;
         Ok(report)
     })
 }
@@ -188,6 +198,7 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
     let mut models = Vec::with_capacity(doc.queries.len());
     let mut used = 0usize;
     let mut dropped = Vec::new();
+    let before: Vec<String> = doc.tables.iter().map(|t| t.name().to_string()).collect();
     for query in merged_first(&doc.queries).into_iter().filter(|q| pick(q)) {
         if doc.unloaded.contains(&query.name) {
             dropped.push(query.name.clone());
@@ -219,6 +230,7 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
     for model in models {
         doc.model.put(model);
     }
+    let loaded: Vec<String> = fresh.iter().map(|t| t.name().to_string()).collect();
     for table in fresh {
         doc.stale.remove(table.name());
         match doc.tables.iter_mut().find(|t| t.name() == table.name()) {
@@ -226,7 +238,34 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
             None => doc.tables.push(table),
         }
     }
+    let new: Vec<String> = loaded
+        .iter()
+        .filter(|n| !before.contains(n))
+        .cloned()
+        .collect();
+    relate(doc, &loaded, &new, &mut report)?;
     Ok(report)
+}
+
+/// The Relationships after a load of Tables `loaded` (`new`: those that weren't loaded
+/// before): drops the ones whose Table or Column is gone, fails if a one side is no longer
+/// unique, then auto-detects for the new Tables when the Project's switch is on.
+fn relate(
+    doc: &mut Document,
+    loaded: &[String],
+    new: &[String],
+    report: &mut LoadReport,
+) -> Result {
+    report.relationships_removed = doc
+        .model
+        .relationships_after_load(&doc.tables, loaded)
+        .map_err(Error::Model)?;
+    if doc.model.autodetect_relationships && !new.is_empty() {
+        report.relationships_added = doc
+            .model
+            .autodetect(&doc.tables, |n| new.iter().any(|x| x == n));
+    }
+    Ok(())
 }
 
 /// The Preview of Query `query` at Applied Step `step` (0 = first), or of its Source (`None`).

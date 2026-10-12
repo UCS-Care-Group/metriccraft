@@ -32,6 +32,8 @@ use opendash_data::Table;
 use opendash_data::culture::Culture;
 use opendash_data::step::{ColumnType, change_type};
 
+use crate::Relationship;
+
 /// A model error, naming the Table and Column.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
@@ -55,10 +57,26 @@ impl std::error::Error for Error {}
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
-/// The model: one [`ModelTable`] per loaded Table, same name.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// The model: one [`ModelTable`] per loaded Table, same name, and the Relationships between
+/// them (`relationship.rs`).
+#[derive(Clone, Debug, PartialEq)]
 pub struct Model {
     pub tables: Vec<ModelTable>,
+    /// In Manage relationships order.
+    pub relationships: Vec<Relationship>,
+    /// Power BI's *Autodetect new relationships after data is loaded* (Options > Current file >
+    /// Data Load); on by default.
+    pub autodetect_relationships: bool,
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            tables: Vec::new(),
+            relationships: Vec::new(),
+            autodetect_relationships: true,
+        }
+    }
 }
 
 impl Model {
@@ -412,7 +430,7 @@ fn type_name(ty: ColumnType) -> &'static str {
 /// `column` as text, any type.
 // ponytail: a transient text copy of both columns for the sort-by check; compare typed values
 // if it shows up in load benches.
-fn as_text(column: &ArrayRef) -> Option<StringArray> {
+pub(crate) fn as_text(column: &ArrayRef) -> Option<StringArray> {
     let text = cast(column, &DataType::Utf8).ok()?;
     text.as_any().downcast_ref::<StringArray>().cloned()
 }

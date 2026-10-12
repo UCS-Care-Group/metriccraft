@@ -8,6 +8,7 @@ mod cmd;
 mod load;
 mod model;
 mod query;
+mod relationship;
 
 pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};
@@ -32,7 +33,8 @@ pub enum Error {
     /// No Query has this name.
     UnknownQuery(String),
     /// A model change, or a load's model update (a type override that no longer converts, a
-    /// sort by column that no longer holds), failed; nothing was changed.
+    /// sort by column that no longer holds, a Relationship's one side no longer unique), failed;
+    /// nothing was changed.
     Model(opendash_model::Error),
 }
 

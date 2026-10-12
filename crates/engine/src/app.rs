@@ -40,6 +40,9 @@ pub struct App {
     last_load: Option<LoadReport>,
     /// The memory cap for loaded data (spec N-4), counted over the document, undo and redo.
     memory_cap: usize,
+    /// A warning from the last command, which still succeeded (e.g. a Relationship created
+    /// inactive). Not part of the Document.
+    notice: Option<String>,
 }
 
 impl Default for App {
@@ -62,6 +65,7 @@ impl App {
             redo: Vec::new(),
             last_load: None,
             memory_cap: default_memory_cap(),
+            notice: None,
         }
     }
 
@@ -108,20 +112,40 @@ impl App {
         let cmd = self
             .command(id)
             .ok_or_else(|| Error::UnknownCommand(id.into()))?;
+        self.notice = None;
         if !(cmd.enabled)(self) {
             return Err(Error::Disabled(id.into()));
         }
         match cmd.run {
-            Run::Edit(edit) => {
-                let mut next = self.doc.clone();
-                edit(&mut next, params)?;
-                let prev = std::mem::replace(&mut self.doc, next);
-                self.push_undo(prev);
-                self.redo.clear();
-                Ok(())
-            }
+            Run::Edit(edit) => self.edit_noting(|doc| edit(doc, params).map(|()| None)),
             Run::App(act) => act(self, params),
         }
+    }
+
+    /// Runs `edit` like a [`Run::Edit`] (on a copy, recorded for undo); its notice, if any,
+    /// becomes [`App::notice`].
+    pub(crate) fn edit_noting(
+        &mut self,
+        edit: impl FnOnce(&mut Document) -> Result<Option<String>>,
+    ) -> Result {
+        let mut next = self.doc.clone();
+        let notice = edit(&mut next)?;
+        let prev = std::mem::replace(&mut self.doc, next);
+        self.push_undo(prev);
+        self.redo.clear();
+        self.notice = notice;
+        Ok(())
+    }
+
+    /// Sets the notice of a command that succeeded without an edit.
+    pub(crate) fn note(&mut self, notice: &str) {
+        self.notice = Some(notice.into());
+    }
+
+    /// A warning from the last command, which still succeeded: e.g. a Relationship created
+    /// inactive because its pair already has an active one, or what auto-detect found.
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
     }
 
     /// Runs a loading edit (Get Data, Refresh, Close & Apply) like a [`Run::Edit`]: on a copy

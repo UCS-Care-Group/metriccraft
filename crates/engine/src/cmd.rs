@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::load;
 use crate::model::{self, has_tables};
 use crate::query::{self, has_queries};
+use crate::relationship;
 use crate::{App, Document, Result};
 
 /// What a command acts on.
@@ -264,5 +265,65 @@ pub static COMMANDS: &[Command] = &[
                  description: text — empty clears it",
         enabled: has_tables,
         run: Run::Edit(model::set_description),
+    },
+    // Relationships (spec D-2): Modeling > Manage relationships.
+    Command {
+        id: "modeling.newRelationship",
+        label: "New relationship",
+        ribbon: "Modeling > Relationships",
+        shortcut: None,
+        params: relationship::NEW_PARAMS,
+        enabled: has_tables,
+        run: Run::App(relationship::new_relationship),
+    },
+    Command {
+        id: "modeling.editRelationship",
+        label: "Edit relationship",
+        // Manage relationships > Edit.
+        ribbon: "",
+        shortcut: None,
+        params: relationship::EDIT_PARAMS,
+        enabled: has_tables,
+        run: Run::App(relationship::edit_relationship),
+    },
+    Command {
+        id: "modeling.deleteRelationship",
+        label: "Delete relationship",
+        // Manage relationships > Delete.
+        ribbon: "",
+        shortcut: None,
+        params: relationship::DELETE_PARAMS,
+        enabled: has_tables,
+        run: Run::Edit(relationship::delete_relationship),
+    },
+    Command {
+        id: "modeling.setRelationshipActive",
+        label: "Active",
+        // Manage relationships: the Active check box.
+        ribbon: "",
+        shortcut: None,
+        params: relationship::ACTIVE_PARAMS,
+        enabled: has_tables,
+        run: Run::Edit(relationship::set_active),
+    },
+    Command {
+        id: "modeling.autodetectRelationships",
+        label: "Autodetect",
+        // Manage relationships > Autodetect.
+        ribbon: "",
+        shortcut: None,
+        params: "",
+        enabled: has_tables,
+        run: Run::App(relationship::autodetect),
+    },
+    Command {
+        id: "options.autodetectRelationships",
+        label: "Autodetect new relationships after data is loaded",
+        // File > Options and settings > Options > Current file > Data Load.
+        ribbon: "",
+        shortcut: None,
+        params: "enabled: logical — default: the opposite of now",
+        enabled: |_| true,
+        run: Run::Edit(relationship::set_autodetect),
     },
 ];
