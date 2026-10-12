@@ -14,3 +14,6 @@ workspace = true
 [dependencies]
 opendash-model = { path = "../crates/model" }
 serde_json.workspace = true
+arrow-array.workspace = true
+parquet.workspace = true
+rust_xlsxwriter = "0.99"

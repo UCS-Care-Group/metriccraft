@@ -1,11 +1,14 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
 //! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
-//! `bench [--save]`, `parity [--update | --export]`.
+//! `bench [--save] [--reference]`, `parity [--update | --export]`; and
+//! `dataset [--rows N] [--out DIR] [--csv]` (the reference dataset, `docs/bench.md`).
 
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::{Command, ExitCode};
+
+mod dataset;
 
 type Result<T = ()> = std::result::Result<T, String>;
 
@@ -51,6 +54,7 @@ fn main() -> ExitCode {
         "layers" => layers(),
         "assets" => assets(),
         "wasm" => wasm(),
+        "dataset" => dataset::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
         "parity" if std::env::args().any(|a| a == "--export") => parity_export(),
         "parity" => parity(std::env::args().any(|a| a == "--update")),
@@ -269,44 +273,80 @@ fn check_assets<'a>(
 
 /// A result more than this factor slower than the machine's baseline fails.
 const BENCH_TOLERANCE: f64 = 1.25;
+/// A result using more than this factor of the baseline's memory fails (ADR 0005).
+const BENCH_MEMORY_TOLERANCE: f64 = 1.10;
+/// Rows of the import benches' files: Parquet, CSV, XLSX (`docs/bench.md`).
+const BENCH_IMPORTS: [(&str, usize); 3] =
+    [("parquet", 1_000_000), ("csv", 200_000), ("xlsx", 50_000)];
 
 /// Runs every `harness = false` bench, compares with `bench/<machine>.json` and, with `--save`,
-/// records the results as that machine's new baseline. Machines without a baseline only report.
+/// records the results as that machine's new baseline (merged into it, so a default run keeps
+/// the `--reference` results). Machines without a baseline only report. `--reference` adds the
+/// 10M-row Parquet import (spec N-2), from `observations/reference/`.
 fn bench(save: bool) -> Result {
+    let reference = std::env::args().any(|a| a == "--reference");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let out = output(&cargo, &["bench", "--workspace", "--benches", "--quiet"])?;
-    let results = parse_bench(&out);
-    if results.is_empty() {
+    let out = Command::new(cargo)
+        .args(["bench", "--workspace", "--benches", "--quiet"])
+        .env("OPENDASH_BENCH_IMPORTS", bench_imports(reference)?)
+        .output()
+        .map_err(|e| format!("running cargo bench: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "`cargo bench` failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let out = String::from_utf8_lossy(&out.stdout);
+    let times = parse_bench(&out, "BENCH ");
+    let memory = parse_bench(&out, "BENCHMEM ");
+    if times.is_empty() {
         return Err("no BENCH lines in `cargo bench` output".into());
     }
     let machine = machine_id();
     let path = format!("bench/{machine}.json");
     let baseline = std::fs::read_to_string(&path)
         .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-    let base = |name: &str| baseline.as_ref().and_then(|b| b["results"][name].as_f64());
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .unwrap_or_default();
     let mut errors = Vec::new();
-    for (name, ns) in &results {
-        match base(name) {
-            Some(was) => {
-                let ratio = ns / was;
-                eprintln!("  {name}: {ns:.1} ns (baseline {was:.1}, x{ratio:.2})");
-                if ratio > BENCH_TOLERANCE && !save {
-                    errors.push(format!(
-                        "{name}: x{ratio:.2} slower than the {machine} baseline"
-                    ));
+    for (key, results, tolerance, unit, worse) in [
+        ("results", &times, BENCH_TOLERANCE, "ns", "slower"),
+        (
+            "memory",
+            &memory,
+            BENCH_MEMORY_TOLERANCE,
+            "bytes",
+            "the memory of",
+        ),
+    ] {
+        for (name, value) in results {
+            match baseline[key][name].as_f64() {
+                Some(was) => {
+                    let ratio = value / was;
+                    eprintln!("  {name}: {value:.1} {unit} (baseline {was:.1}, x{ratio:.2})");
+                    if ratio > tolerance && !save {
+                        errors.push(format!(
+                            "{name}: x{ratio:.2} {worse} the {machine} baseline"
+                        ));
+                    }
                 }
+                None => eprintln!("  {name}: {value:.1} {unit} (no {machine} baseline)"),
             }
-            None => eprintln!("  {name}: {ns:.1} ns (no {machine} baseline)"),
         }
     }
     if save {
+        let merged = |key: &str, results: &[(String, f64)]| {
+            let mut map = baseline[key].as_object().cloned().unwrap_or_default();
+            for (n, v) in results {
+                map.insert(n.clone(), serde_json::json!(v));
+            }
+            serde_json::Value::Object(map)
+        };
         let json = serde_json::json!({
             "machine": machine_info(&machine),
-            "results": results
-                .iter()
-                .map(|(n, ns)| (n.clone(), serde_json::json!(ns)))
-                .collect::<serde_json::Map<_, _>>(),
+            "results": merged("results", &times),
+            "memory": merged("memory", &memory),
         });
         let text = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
         std::fs::create_dir_all("bench").map_err(|e| format!("creating bench/: {e}"))?;
@@ -316,9 +356,42 @@ fn bench(save: bool) -> Result {
     report(errors)
 }
 
-fn parse_bench(out: &str) -> Vec<(String, f64)> {
+/// The import bench files, generated once per size into `<target>/bench-data/` (the reference
+/// file into `observations/reference/`), as `OPENDASH_BENCH_IMPORTS` lines `<name>\t<path>`.
+fn bench_imports(reference: bool) -> Result<String> {
+    let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+    let cache = Path::new(&target).join(format!("bench-data/v{}", dataset::VERSION));
+    let mut files = Vec::new();
+    for (kind, rows) in BENCH_IMPORTS {
+        let write = match kind {
+            "csv" => dataset::write_csv,
+            "xlsx" => dataset::write_xlsx,
+            _ => dataset::write_parquet,
+        };
+        files.push((kind, rows, dataset::cached(&cache, kind, rows, write)?));
+    }
+    if reference {
+        let dir = Path::new("observations/reference");
+        let rows = dataset::REFERENCE_ROWS;
+        files.push((
+            "parquet",
+            rows,
+            dataset::cached(dir, "parquet", rows, dataset::write_parquet)?,
+        ));
+    }
+    let mut lines = String::new();
+    for (kind, rows, path) in files {
+        let path = std::path::absolute(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let label = dataset::label(rows);
+        lines += &format!("import/{kind}_{label}\t{}\n", path.display());
+    }
+    Ok(lines)
+}
+
+/// `<tag><name> <value>` lines.
+fn parse_bench(out: &str, tag: &str) -> Vec<(String, f64)> {
     out.lines()
-        .filter_map(|l| l.strip_prefix("BENCH "))
+        .filter_map(|l| l.strip_prefix(tag))
         .filter_map(|l| l.rsplit_once(' '))
         .filter_map(|(name, ns)| Some((name.to_owned(), ns.parse::<f64>().ok()?)))
         .collect()
@@ -460,11 +533,12 @@ mod tests {
 
     #[test]
     fn bench_lines_parse() {
-        let out = "running 0 tests\nBENCH engine/x 12.5\nBENCH bad\nBENCH a b 3\n";
-        let got = parse_bench(out);
+        let out = "running 0 tests\nBENCH engine/x 12.5\nBENCH bad\nBENCH a b 3\nBENCHMEM m 7\n";
+        let got = parse_bench(out, "BENCH ");
         assert_eq!(got.len(), 2, "{got:?}");
         assert_eq!(got[0].0, "engine/x");
         assert_eq!(got[1].0, "a b");
+        assert_eq!(parse_bench(out, "BENCHMEM "), [("m".to_owned(), 7.0)]);
     }
 
     #[test]

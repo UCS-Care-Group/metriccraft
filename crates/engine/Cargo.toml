@@ -22,3 +22,7 @@ arrow-array.workspace = true
 [[bench]]
 name = "engine"
 harness = false
+
+[[bench]]
+name = "import"
+harness = false
