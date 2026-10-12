@@ -25,7 +25,8 @@
 //! **Unknown content.** Keys, flags, blocks and objects we don't know, in any part, are kept
 //! ([`Preserved`], per object: model, relationships, each table, each query) and written back
 //! after the known items of the object they were in. Unknown parts listed in the Manifest are
-//! kept as they are; unknown Manifest keys too. Renaming an object loses its unknown items.
+//! kept as they are; unknown Manifest keys too. A rename carries an object's unknown items to
+//! its new name ([`Preserved::rename_table`], [`Preserved::rename_column`]).
 //!
 //! **No data.** M2.4 saves definitions only (the Data cache is M2.6), so on open every Table is
 //! empty and every loaded Query is Stale.
@@ -873,6 +874,8 @@ pub fn empty_table(table: &ModelTable) -> opendash_data::Result<Table> {
     b.push(&RecordBatch::new_empty(schema))?;
     b.finish()
 }
+
+mod rename;
 
 #[cfg(test)]
 mod tests;

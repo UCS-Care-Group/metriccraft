@@ -59,7 +59,8 @@ pub(crate) struct FileState {
     location: Option<Location>,
     /// The Project culture read from the files; `None` for a new document (en-US).
     culture: Option<String>,
-    preserved: Preserved,
+    /// Kept up to date by renames (`rename.rs`).
+    pub(crate) preserved: Preserved,
 }
 
 const OPEN: &str = "file.open";

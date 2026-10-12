@@ -363,3 +363,106 @@ fn duplicate_copies_the_steps_under_the_next_free_name() {
     let r = app.run("query.duplicate", &json!({"query": "Nope"}));
     assert!(matches!(r, Err(Error::InvalidParams { .. })));
 }
+
+/// `app`'s Package files, with `edit` applied to some parts and the Manifest rehashed.
+fn files_edited(app: &App, edit: &[(&str, &str, &str)]) -> opendash_file::FileSet {
+    use opendash_file::manifest::{Manifest, hash};
+    let mut files = opendash_file::unpack(&app.package_bytes().unwrap()).unwrap();
+    for (path, from, to) in edit {
+        let text = String::from_utf8(files[*path].clone()).unwrap();
+        assert!(text.contains(from), "{from:?} in {path}:\n{text}");
+        files.insert((*path).into(), text.replacen(from, to, 1).into_bytes());
+    }
+    let mut m = Manifest::parse(&files[opendash_file::MANIFEST]).unwrap();
+    for (p, h) in m.parts.iter_mut() {
+        *h = hash(&files[p]);
+    }
+    files.insert(opendash_file::MANIFEST.into(), m.print());
+    files
+}
+
+fn saved(app: &App, path: &str) -> String {
+    let files = opendash_file::unpack(&app.package_bytes().unwrap()).unwrap();
+    String::from_utf8(files.get(path).cloned().unwrap_or_default()).unwrap()
+}
+
+/// Column `name`'s lines in a saved table part.
+fn column<'a>(table: &'a str, name: &str) -> &'a str {
+    let rest = table
+        .split(&format!("  column {name}\n"))
+        .nth(1)
+        .unwrap_or_default();
+    rest.split("  column ").next().unwrap_or_default()
+}
+
+#[test]
+fn renames_keep_unknown_file_content_under_the_new_name() {
+    let files = files_edited(
+        &app(),
+        &[
+            (
+                "model/tables/Regions.odm",
+                "table Regions\n",
+                "table Regions\n  lineageTag: t1\n",
+            ),
+            (
+                "model/tables/Regions.odm",
+                "  column Manager\n",
+                "  column Manager\n    isKey\n",
+            ),
+            (
+                "queries/Regions.odq",
+                "  load: true\n",
+                "  load: true\n  note: kept\n",
+            ),
+            (
+                "model/relationships.odm",
+                "relationship Sales[Region] -> Regions[Region]\n",
+                "relationship Sales[Region] -> Regions[Region]\n  crossFilter: both\n",
+            ),
+        ],
+    );
+    let mut app = App::new();
+    app.open_package_bytes(&opendash_file::pack(&files).unwrap())
+        .unwrap();
+    app.run(
+        "modeling.renameTable",
+        &json!({"table": "Regions", "name": "Areas"}),
+    )
+    .unwrap();
+    app.run(
+        "modeling.renameColumn",
+        &json!({"table": "Areas", "column": "Region", "name": "Area"}),
+    )
+    .unwrap();
+    app.run(
+        "modeling.renameColumn",
+        &json!({"table": "Areas", "column": "Manager", "name": "Boss"}),
+    )
+    .unwrap();
+
+    let table = saved(&app, "model/tables/Areas.odm");
+    assert!(
+        table.starts_with("table Areas\n") && table.contains("  lineageTag: t1\n"),
+        "{table}"
+    );
+    assert!(column(&table, "Boss").contains("    isKey\n"), "{table}");
+    assert!(saved(&app, "queries/Areas.odq").contains("  note: kept\n"));
+    assert_eq!(
+        saved(&app, "model/relationships.odm"),
+        "relationship Sales[Region] -> Areas[Area]\n  crossFilter: both\n"
+    );
+    assert_eq!(saved(&app, "model/tables/Regions.odm"), "");
+
+    // Undone, they are under the old names again.
+    for _ in 0..3 {
+        app.run("edit.undo", &Value::Null).unwrap();
+    }
+    let table = saved(&app, "model/tables/Regions.odm");
+    assert!(
+        table.contains("  lineageTag: t1\n") && column(&table, "Manager").contains("    isKey\n"),
+        "{table}"
+    );
+    assert!(saved(&app, "queries/Regions.odq").contains("  note: kept\n"));
+    assert!(saved(&app, "model/relationships.odm").contains("crossFilter: both"));
+}

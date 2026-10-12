@@ -17,6 +17,10 @@
 //! columns those merges add keep their names). The loaded data already matches the new step,
 //! so nothing goes Stale.
 //!
+//! Both renames carry the object's unknown file content (what the opened files held beyond
+//! the model, kept per object) to the new name, so the next save still writes it. It is copied,
+//! not moved: it lives outside undo, and an undone rename must find it under the old name.
+//!
 //! Names are unique ignoring case (Tables with Queries; Columns within a Table), as Analysis
 //! Services compares them. Renaming to the very same name changes nothing and records no undo
 //! step; a change of case alone is a rename.
@@ -75,7 +79,9 @@ fn rename(app: &mut App, id: &str, old: String, params: &Value) -> Result {
     app.edit_noting(|doc| {
         rename_in(doc, &old, &new);
         Ok(None)
-    })
+    })?;
+    app.file.preserved.rename_table(&old, &new);
+    Ok(())
 }
 
 /// Renames Query and Table `old` to `new` everywhere (see the module doc).
@@ -144,7 +150,9 @@ pub(crate) fn rename_column(app: &mut App, params: &Value) -> Result {
             }
         }
         Ok(None)
-    })
+    })?;
+    app.file.preserved.rename_column(&table, &old, &new);
+    Ok(())
 }
 
 /// `query.delete`: deletes a Query and its Table.
