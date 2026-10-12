@@ -459,6 +459,41 @@ fn attr(
         .map(|v| v.into_owned())
 }
 
+/// The largest `uniqueCount="digits"` anywhere in an `<sst>` tag's raw attributes. A scan, not
+/// an attribute parse: calamine's own attribute reader tolerates malformed attributes before
+/// `uniqueCount` (`<sst xmlns"…" uniqueCount="…">`) that quick-xml's refuses, so a parse could
+/// miss the count calamine then reserves.
+fn unique_count(raw: &[u8]) -> u128 {
+    let key = b"uniqueCount";
+    let mut max = 0u128;
+    for start in 0..raw.len() {
+        if raw.get(start..start + key.len()) != Some(key) {
+            continue;
+        }
+        let rest = raw
+            .get(start + key.len()..)
+            .unwrap_or_default()
+            .trim_ascii_start();
+        let Some(rest) = rest.strip_prefix(b"=").map(<[u8]>::trim_ascii_start) else {
+            continue;
+        };
+        let Some((&quote, rest)) = rest
+            .split_first()
+            .filter(|(q, _)| matches!(q, b'"' | b'\''))
+        else {
+            continue;
+        };
+        let digits = rest.split(|b| *b == quote).next().unwrap_or_default();
+        if !digits.is_empty() && digits.iter().all(u8::is_ascii_digit) {
+            let n = digits.iter().fold(0u128, |n, d| {
+                n.saturating_mul(10).saturating_add(u128::from(d - b'0'))
+            });
+            max = max.max(n);
+        }
+    }
+    max
+}
+
 /// Checks the package before calamine reads it, and reads its Excel tables.
 fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<Vec<TablePart>> {
     let parts = Parts::new(zip);
@@ -486,14 +521,7 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
     let (mut unique, mut count) = (0u128, 0u128);
     walk(part(zip, &parts, &strings, limit)?, &strings, |e, _| {
         if is(e, b"sst") {
-            let n = e.try_get_attribute(b"uniqueCount").ok().flatten();
-            let digits = n.as_ref().map(|a| a.value.as_ref()).unwrap_or_default();
-            if !digits.is_empty() && digits.iter().all(u8::is_ascii_digit) {
-                let n = digits.iter().fold(0u128, |n, d| {
-                    n.saturating_mul(10).saturating_add(u128::from(d - b'0'))
-                });
-                unique = unique.max(n);
-            }
+            unique = unique.max(unique_count(e.attributes_raw()));
         } else if is(e, b"si") {
             count += 1;
         }
@@ -1517,9 +1545,11 @@ mod tests {
         assert!(load_all(good.clone(), usize::MAX));
         let parts = unzip(&good);
         assert!(load_all(rezip(&parts), usize::MAX), "rezipped sample loads");
+        // Under a memory limit, as every real import is: one damaged cell reference can make
+        // the sheet Excel's full 16,384 × 1,048,576 cells, refused only by the limit.
         let damaged = |fuzz: &mut crate::fuzz::Fuzz, v: Vec<u8>| {
             fuzz.case(&v, || {
-                load_all(v.clone(), usize::MAX);
+                load_all(v.clone(), 64 << 20);
             });
         };
         // Bit flips and cuts in every XML part (sampled to keep the debug run quick), then
@@ -1695,6 +1725,37 @@ mod tests {
             let bytes = edit(&good, sheet, |x| x.replacen(from, to, 1));
             load_all(bytes, usize::MAX);
         }
+    }
+
+    /// Fuzz soak find (seed 21, scale 20,000): a malformed attribute before `uniqueCount` hid
+    /// it from the check (quick-xml refuses the attribute list; calamine's reader reads past
+    /// it), and calamine reserved 4 trillion strings: an allocation failure, not an error.
+    #[test]
+    fn malformed_sst_attributes_cannot_hide_the_unique_count() {
+        let good = sample();
+        let huge = "uniqueCount=\"4275609393456\"";
+        for (from, to) in [
+            ("<sst xmlns=", "<sst xmlns"),
+            ("<sst xmlns=", "<sst a=\"1\" a=\"2\" xmlns="),
+            ("uniqueCount=\"6\"", "uniqueCount = '6'"),
+        ] {
+            let bytes = edit(&good, "xl/sharedStrings.xml", |x| {
+                x.replacen(from, to, 1)
+                    .replacen("uniqueCount=\"6\"", huge, 1)
+                    .replacen("uniqueCount = '6'", "uniqueCount = '4275609393456'", 1)
+            });
+            let err = Workbook::open(Cursor::new(bytes), usize::MAX).err();
+            assert!(
+                err.as_ref()
+                    .is_some_and(|e| e.to_string().contains("claim")),
+                "{to}: {err:?}"
+            );
+        }
+        assert_eq!(
+            unique_count(b" x\"y\" uniqueCount=\"12\" uniqueCount=\"7\""),
+            12
+        );
+        assert_eq!(unique_count(b" uniqueCount=\"+9\" x=\"uniqueCount\""), 0);
     }
 
     #[test]
