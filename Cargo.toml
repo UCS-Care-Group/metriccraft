@@ -12,10 +12,13 @@ publish = false
 
 [workspace.dependencies]
 serde_json = "1"
+bytes = "1"
 arrow-array = "60"
 arrow-buffer = "60"
+arrow-cast = { version = "60", default-features = false }
 arrow-schema = "60"
 arrow-select = "60"
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "flate2-rust_backend", "lz4", "brotli", "zstd"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
