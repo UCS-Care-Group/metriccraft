@@ -21,7 +21,7 @@ saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced
 | Milestone | Scope                                                              | State                                                               |
 |-----------|--------------------------------------------------------------------|---------------------------------------------------------------------|
 | M0        | **Foundations**: workspace, CI gates, command framework, benches   | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M1        | **Connect + shape**: CSV/XLSX/Parquet, Applied Steps, M            | ![4/10](https://img.shields.io/badge/-4%2F10-yellow)                  |
+| M1        | **Connect + shape**: CSV/XLSX/Parquet, Applied Steps, M            | ![4/11](https://img.shields.io/badge/-4%2F11-yellow)                  |
 | M2        | **Model + file**: tables, relationships, Project and Package       | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
