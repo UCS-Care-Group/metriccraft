@@ -206,9 +206,13 @@ mod tests {
 
     #[test]
     fn every_command_survives_empty_params() {
-        for cmd in App::new().commands().iter().chain(TEST_COMMANDS) {
+        // Each command against an app that has it: the real set, then the test set.
+        let real = COMMANDS.iter().map(|c| (c, App::new as fn() -> App));
+        let test = TEST_COMMANDS.iter().map(|c| (c, app as fn() -> App));
+        for (cmd, make) in real.chain(test) {
             for params in [Value::Null, json!({})] {
-                let mut app = app();
+                let mut app = make();
+                assert!(app.command(cmd.id).is_some(), "{} is known", cmd.id);
                 let before = app.document().clone();
                 // Ok or Err are both fine; a panic fails the test. An error must change nothing.
                 if app.run(cmd.id, &params).is_err() {
