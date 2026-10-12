@@ -32,6 +32,8 @@ pub const UNDO_LIMIT: usize = 100;
 pub struct App {
     doc: Document,
     commands: &'static [Command],
+    /// `commands` sorted by id, for binary search in [`App::command`].
+    by_id: Vec<&'static Command>,
     // ponytail: whole-Document snapshots — cheap because table columns are shared (ADR 0005).
     // Switch to inverse operations if cloning a Document shows up in benchmarks.
     undo: VecDeque<Document>,
@@ -58,9 +60,12 @@ impl App {
 
     /// An app with a custom command set (tests, embedding).
     pub fn with_commands(commands: &'static [Command]) -> Self {
+        let mut by_id: Vec<&'static Command> = commands.iter().collect();
+        by_id.sort_unstable_by_key(|c| c.id);
         Self {
             doc: Document::default(),
             commands,
+            by_id,
             undo: VecDeque::new(),
             redo: Vec::new(),
             last_load: None,
@@ -102,9 +107,8 @@ impl App {
     }
 
     pub fn command(&self, id: &str) -> Option<&'static Command> {
-        // ponytail: linear scan, ~1.5 ns per command (bench engine/dispatch_unknown). Switch to a
-        // sorted slice + binary search once the ribbon has hundreds of commands.
-        self.commands.iter().find(|c| c.id == id)
+        let i = self.by_id.binary_search_by_key(&id, |c| c.id).ok()?;
+        self.by_id.get(i).copied()
     }
 
     /// Runs a command by id. The single entry point for UI, control channel, CLI and MCP.
