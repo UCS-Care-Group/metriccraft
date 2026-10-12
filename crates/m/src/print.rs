@@ -14,7 +14,7 @@ pub fn print(expr: &Expr) -> String {
 
 /// A name as an M identifier: plain when it is a regular identifier, else `#"…"`.
 pub fn quote_identifier(name: &str) -> String {
-    if is_regular(name) && !KEYWORDS.contains(&name) {
+    if (is_regular(name) && !KEYWORDS.contains(&name)) || matches!(name, "#date" | "#datetime") {
         name.to_string()
     } else {
         format!("#{}", quote_text(name))

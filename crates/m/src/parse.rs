@@ -110,7 +110,24 @@ impl<'a> Lexer<'a> {
                 let name = self.text()?;
                 return Ok(Tok::Ident { name, quoted: true });
             }
-            return Err(self.err("`#` forms other than `#\"…\"` are not supported"));
+            // `#date(…)` / `#datetime(…)`: literal constructors, read as function names.
+            let rest = self.src.get(self.pos..).unwrap_or("");
+            for name in ["#datetime", "#date"] {
+                let after = rest.get(name.len()..).unwrap_or("");
+                if rest.starts_with(name)
+                    && !after.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                {
+                    for _ in 0..name.len() {
+                        self.bump();
+                    }
+                    return Ok(Tok::Ident {
+                        name: name.into(),
+                        quoted: false,
+                    });
+                }
+            }
+            return Err(self
+                .err("`#` forms other than `#\"…\"`, `#date` and `#datetime` are not supported"));
         }
         if c.is_ascii_digit() || (c == '.' && self.peek2().is_some_and(|d| d.is_ascii_digit())) {
             return self.number();
@@ -692,7 +709,7 @@ mod tests {
             ("let\n    a = 1\n    b = 2\nin\n    b", 3, "`,` or `in`"),
             ("let\n    a = \"open\nin a", 2, "closing"),
             ("let\n  a = 1 // note\nin a", 2, "comments"),
-            ("{1,\n2,\n#date(2020,1,1)}", 3, "`#`"),
+            ("{1,\n2,\n#table({},{})}", 3, "`#`"),
             ("\"#(xyz)\"", 1, "escape"),
             ("type foo", 1, "primitive type"),
             ("1e99999", 1, "out of range"),

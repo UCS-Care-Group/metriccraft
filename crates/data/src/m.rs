@@ -13,14 +13,19 @@
 //! - the culture form `Table.TransformColumnTypes(x, {{…}}, "en-GB")` spacing;
 //! - `QuoteStyle.Csv` vs Power Query's `QuoteStyle.None` default for files without multi-line
 //!   cells; codepages beyond 65001/1252/1200/1201;
-//! - steps renamed in Power Query lose their names here (a [`Step`] has no name of its own).
+//! - steps renamed in Power Query lose their names here (a [`Step`] has no name of its own);
+//! - `Table.SelectRows(prev, each ([A] = 1 and [B] > 2))`: parentheses around comparisons only,
+//!   `#date`/`#datetime` argument spacing, and how Power Query prints negative numbers;
+//! - a Merge prints as two steps, `#"Merged Queries"` (`Table.NestedJoin`, spaced arguments) and
+//!   `#"Expanded <column>"` (`Table.ExpandTableColumn`); parsing folds them back into one.
 
 use std::collections::HashSet;
 
-use opendash_m::{Binding, Error, Expr, Let};
+use opendash_m::{BinOp, Binding, Error, Expr, Let};
 
-use crate::culture::Culture;
-use crate::step::{ColumnType, Step};
+use crate::culture::{Culture, days_from_civil};
+use crate::source::xlsx::civil;
+use crate::step::{ColumnType, Combine, Condition, JoinKind, Merge, Op, Step, Value};
 
 /// Where a Query's data comes from, as its M `Source` step describes it.
 // ponytail: M1.8 makes this the Query's real source (today `Query::source` is an in-memory table).
@@ -87,7 +92,82 @@ fn texts(names: &[String]) -> Expr {
     Expr::list(names.iter().map(Expr::text).collect(), false)
 }
 
-/// A step's M: the call that turns `prev` (the previous step) into its result.
+/// A number literal; M has no negative literals, so `-5` is a negation.
+fn number(n: f64) -> Expr {
+    if n < 0.0 {
+        Expr::Negate(Box::new(Expr::Number(-n)))
+    } else {
+        Expr::Number(n)
+    }
+}
+
+const DAY_MICROS: i64 = 86_400_000_000;
+
+fn date_parts(days: i64) -> Vec<Expr> {
+    let (y, m, d) = civil(days);
+    [y, m, d].iter().map(|v| number(*v as f64)).collect()
+}
+
+fn value_m(v: &Value) -> Expr {
+    match v {
+        Value::Null => Expr::Null,
+        Value::Number(n) => number(*n),
+        Value::Text(s) => Expr::text(s),
+        Value::Logical(b) => Expr::Logical(*b),
+        Value::Date(d) => Expr::call("#date", date_parts(i64::from(*d)), false),
+        Value::DateTime(t) => {
+            let rem = t.rem_euclid(DAY_MICROS);
+            let mut parts = date_parts(t.div_euclid(DAY_MICROS));
+            parts.push(number((rem / 3_600_000_000) as f64));
+            parts.push(number((rem / 60_000_000 % 60) as f64));
+            parts.push(number((rem % 60_000_000) as f64 / 1e6));
+            Expr::call("#datetime", parts, false)
+        }
+    }
+}
+
+fn cond_m(c: &Condition) -> Expr {
+    let field = Expr::Field(None, c.column.clone());
+    let value = value_m(&c.value);
+    let op = match c.op {
+        Op::Equals => BinOp::Equal,
+        Op::NotEquals => BinOp::NotEqual,
+        Op::Greater => BinOp::Greater,
+        Op::GreaterOrEqual => BinOp::GreaterEqual,
+        Op::Less => BinOp::Less,
+        Op::LessOrEqual => BinOp::LessEqual,
+        Op::Contains => return Expr::call("Text.Contains", vec![field, value], false),
+        Op::BeginsWith => return Expr::call("Text.StartsWith", vec![field, value], false),
+        Op::EndsWith => return Expr::call("Text.EndsWith", vec![field, value], false),
+    };
+    Expr::Binary(op, Box::new(field), Box::new(value))
+}
+
+fn join_kind(kind: JoinKind) -> &'static str {
+    match kind {
+        JoinKind::LeftOuter => "JoinKind.LeftOuter",
+        JoinKind::Inner => "JoinKind.Inner",
+        JoinKind::FullOuter => "JoinKind.FullOuter",
+    }
+}
+
+/// `Table.ExpandTableColumn`, the second M step of a Merge.
+fn expand_m(m: &Merge, merged: &str) -> Expr {
+    let (cols, names): (Vec<String>, Vec<String>) = m.expand.iter().cloned().unzip();
+    Expr::call(
+        "Table.ExpandTableColumn",
+        vec![
+            Expr::ident(merged),
+            Expr::text(&m.column),
+            texts(&cols),
+            texts(&names),
+        ],
+        false,
+    )
+}
+
+/// A step's M: the call that turns `prev` (the previous step) into its result. A Merge's
+/// `Table.ExpandTableColumn` step is added by [`print`].
 fn step_m(step: &Step, prev: Expr, culture: Option<&Culture>) -> Expr {
     match step {
         Step::PromotedHeaders => Expr::call(
@@ -126,7 +206,60 @@ fn step_m(step: &Step, prev: Expr, culture: Option<&Culture>) -> Expr {
         Step::ReorderedColumns(names) => {
             Expr::call("Table.ReorderColumns", vec![prev, texts(names)], true)
         }
+        Step::FilteredRows {
+            combine,
+            conditions,
+        } => {
+            let op = match combine {
+                Combine::And => BinOp::And,
+                Combine::Or => BinOp::Or,
+            };
+            let body = conditions
+                .iter()
+                .map(cond_m)
+                .reduce(|a, b| Expr::Binary(op, Box::new(a), Box::new(b)));
+            let body = match body {
+                // An empty And keeps every row, an empty Or none.
+                None => Expr::Logical(*combine == Combine::And),
+                // Power Query brackets comparisons, not `Text.Contains(…)` calls.
+                Some(b) if conditions.iter().all(|c| !is_text_op(c.op)) => Expr::Paren(Box::new(b)),
+                Some(b) => b,
+            };
+            Expr::call(
+                "Table.SelectRows",
+                vec![prev, Expr::Each(Box::new(body))],
+                false,
+            )
+        }
+        Step::MergedQueries(m) => Expr::call(
+            "Table.NestedJoin",
+            vec![
+                prev,
+                texts(&m.keys),
+                Expr::ident(&m.query),
+                texts(&m.other_keys),
+                Expr::text(&m.column),
+                Expr::ident(join_kind(m.kind)),
+            ],
+            false,
+        ),
     }
+}
+
+fn is_text_op(op: Op) -> bool {
+    matches!(op, Op::Contains | Op::BeginsWith | Op::EndsWith)
+}
+
+/// The step name, numbered the way Power Query numbers repeats: `Changed Type`, `Changed Type1`…
+fn unique(used: &mut HashSet<String>, base: &str) -> String {
+    let mut name = base.to_string();
+    let mut n = 0u32;
+    while used.contains(&name) {
+        n = n.saturating_add(1);
+        name = format!("{base}{n}");
+    }
+    used.insert(name.clone());
+    name
 }
 
 /// Prints a Query as Power Query's M (no trailing newline).
@@ -185,18 +318,17 @@ pub fn print(q: &MQuery) -> String {
     let mut used: HashSet<String> = bindings.iter().map(|b| b.name.clone()).collect();
     for step in &q.steps {
         let prev = bindings.last().map_or_else(String::new, |b| b.name.clone());
-        // Power Query numbers repeats: `Changed Type`, `Changed Type1`, `Changed Type2`…
-        let mut name = step.name().to_string();
-        let mut n = 0u32;
-        while used.contains(&name) {
-            n = n.saturating_add(1);
-            name = format!("{}{n}", step.name());
-        }
-        used.insert(name.clone());
+        let name = unique(&mut used, step.name());
         bindings.push(Binding::new(
-            name,
+            name.clone(),
             step_m(step, Expr::Ident(prev), q.culture),
         ));
+        if let Step::MergedQueries(m) = step
+            && !m.expand.is_empty()
+        {
+            let expanded = unique(&mut used, &format!("Expanded {}", m.column));
+            bindings.push(Binding::new(expanded, expand_m(m, &name)));
+        }
     }
     let last = bindings.last().map_or_else(String::new, |b| b.name.clone());
     opendash_m::print(&Expr::Let(Let {
@@ -331,6 +463,153 @@ fn navigation(e: &Expr, source: &str) -> Option<(String, String)> {
     ))
 }
 
+fn whole_i64(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::Negate(n) => whole(n).map(|v| -i64::from(v)),
+        e => whole(e).map(i64::from),
+    }
+}
+
+fn value_from(e: &Expr) -> Option<Value> {
+    Some(match e {
+        Expr::Null => Value::Null,
+        Expr::Number(n) => Value::Number(*n),
+        Expr::Negate(n) => match n.as_ref() {
+            Expr::Number(n) => Value::Number(-n),
+            _ => return None,
+        },
+        Expr::Text(s) => Value::Text(s.clone()),
+        Expr::Logical(b) => Value::Logical(*b),
+        _ => match call(e)? {
+            ("#date", [y, m, d]) => Value::Date(days_from_civil(whole(y)?, whole(m)?, whole(d)?)?),
+            ("#datetime", [y, m, d, h, mi, s]) => {
+                let days = days_from_civil(whole(y)?, whole(m)?, whole(d)?)?;
+                let (h, mi) = (whole_i64(h)?, whole_i64(mi)?);
+                let s = match s {
+                    Expr::Number(s) if (0.0..60.0).contains(s) => (s * 1e6).round() as i64,
+                    _ => return None,
+                };
+                if !(0..24).contains(&h) || !(0..60).contains(&mi) {
+                    return None;
+                }
+                let time = (h * 3600 + mi * 60) * 1_000_000 + s;
+                Value::DateTime(i64::from(days).checked_mul(DAY_MICROS)?.checked_add(time)?)
+            }
+            _ => return None,
+        },
+    })
+}
+
+fn unparen(mut e: &Expr) -> &Expr {
+    while let Expr::Paren(inner) = e {
+        e = inner;
+    }
+    e
+}
+
+fn cond_from(e: &Expr) -> Option<Condition> {
+    let e = unparen(e);
+    let (op, column, value) = match e {
+        Expr::Binary(op, a, b) => {
+            let op = match op {
+                BinOp::Equal => Op::Equals,
+                BinOp::NotEqual => Op::NotEquals,
+                BinOp::Greater => Op::Greater,
+                BinOp::GreaterEqual => Op::GreaterOrEqual,
+                BinOp::Less => Op::Less,
+                BinOp::LessEqual => Op::LessOrEqual,
+                _ => return None,
+            };
+            (op, a.as_ref(), b.as_ref())
+        }
+        _ => match call(e)? {
+            ("Text.Contains", [a, b]) => (Op::Contains, a, b),
+            ("Text.StartsWith", [a, b]) => (Op::BeginsWith, a, b),
+            ("Text.EndsWith", [a, b]) => (Op::EndsWith, a, b),
+            _ => return None,
+        },
+    };
+    let Expr::Field(None, column) = column else {
+        return None;
+    };
+    Some(Condition {
+        column: column.clone(),
+        op,
+        value: value_from(value)?,
+    })
+}
+
+/// `a and b and c` → its conditions; a different operator inside is unsupported (`None`).
+fn flatten(e: &Expr, op: BinOp, out: &mut Vec<Condition>) -> Option<()> {
+    match unparen(e) {
+        Expr::Binary(o, a, b) if *o == op => {
+            flatten(a, op, out)?;
+            flatten(b, op, out)
+        }
+        e => {
+            out.push(cond_from(e)?);
+            Some(())
+        }
+    }
+}
+
+fn filter_from(body: &Expr) -> Option<Step> {
+    let body = unparen(body);
+    let (combine, op) = match body {
+        Expr::Logical(true) => (Combine::And, BinOp::And),
+        Expr::Logical(false) => (Combine::Or, BinOp::Or),
+        Expr::Binary(BinOp::Or, ..) => (Combine::Or, BinOp::Or),
+        _ => (Combine::And, BinOp::And),
+    };
+    let mut conditions = Vec::new();
+    if !matches!(body, Expr::Logical(_)) {
+        flatten(body, op, &mut conditions)?;
+    }
+    Some(Step::FilteredRows {
+        combine,
+        conditions,
+    })
+}
+
+fn merge_from(args: &[Expr]) -> Option<Step> {
+    let [
+        keys,
+        Expr::Ident(query),
+        other_keys,
+        column,
+        Expr::Ident(kind),
+    ] = args
+    else {
+        return None;
+    };
+    let kind = match kind.as_str() {
+        "JoinKind.LeftOuter" => JoinKind::LeftOuter,
+        "JoinKind.Inner" => JoinKind::Inner,
+        "JoinKind.FullOuter" => JoinKind::FullOuter,
+        _ => return None,
+    };
+    Some(Step::MergedQueries(Merge {
+        keys: text_list(keys)?,
+        query: query.clone(),
+        other_keys: text_list(other_keys)?,
+        kind,
+        column: text(column)?.to_string(),
+        expand: Vec::new(),
+    }))
+}
+
+/// `Table.ExpandTableColumn(<merged>, "<column>", {cols}, {names})` after a Merge.
+fn expand_from(e: &Expr, merged: &str, column: &str) -> Option<Vec<(String, String)>> {
+    let ("Table.ExpandTableColumn", [Expr::Ident(input), col, cols, names]) = call(e)? else {
+        return None;
+    };
+    if input != merged || text(col)? != column {
+        return None;
+    }
+    let (cols, names) = (text_list(cols)?, text_list(names)?);
+    (cols.len() == names.len()).then(|| cols.into_iter().zip(names).collect())
+}
+
 /// A step from its M function and arguments after the input table (and the step's culture).
 fn step_from(func: &str, args: &[Expr]) -> Result<(Step, Option<String>), String> {
     let bad = || format!("`{func}` has arguments OpenDash BI doesn't support yet");
@@ -375,13 +654,20 @@ fn step_from(func: &str, args: &[Expr]) -> Result<(Step, Option<String>), String
         ("Table.ReorderColumns", [list]) => {
             Step::ReorderedColumns(text_list(list).ok_or_else(bad)?)
         }
+        ("Table.SelectRows", [Expr::Each(body)]) => filter_from(body).ok_or_else(|| {
+            "the filter must be comparisons of `[Column]` with a literal, or \
+             `Text.Contains`/`StartsWith`/`EndsWith`, joined by all `and` or all `or`"
+                .to_string()
+        })?,
+        ("Table.NestedJoin", args) => merge_from(args).ok_or_else(bad)?,
         // A known function with arguments outside the forms above.
         (
             "Table.PromoteHeaders"
             | "Table.TransformColumnTypes"
             | "Table.RenameColumns"
             | "Table.RemoveColumns"
-            | "Table.ReorderColumns",
+            | "Table.ReorderColumns"
+            | "Table.SelectRows",
             _,
         ) => return Err(bad()),
         _ => return Err(format!("`{func}` is not a step OpenDash BI supports yet")),
@@ -399,7 +685,7 @@ pub fn parse(src: &str) -> Result<MQuery, Error> {
         ));
     };
     let at = |b: &Binding, m: String| Error::new(b.line, b.column, m);
-    let mut bindings = l.bindings.iter();
+    let mut bindings = l.bindings.iter().peekable();
     let Some(first) = bindings.next() else {
         return Err(Error::new(1, 1, "a Query needs a Source step"));
     };
@@ -432,7 +718,7 @@ pub fn parse(src: &str) -> Result<MQuery, Error> {
     }
     let mut steps = Vec::new();
     let mut culture: Option<&'static Culture> = None;
-    for b in bindings {
+    while let Some(b) = bindings.next() {
         let (func, args) = call(&b.value)
             .ok_or_else(|| at(b, "expected a step like `Table.RenameColumns(…)`".into()))?;
         let rest = match args {
@@ -459,8 +745,21 @@ pub fn parse(src: &str) -> Result<MQuery, Error> {
             }
             culture = Some(c);
         }
-        steps.push(step);
         prev = b;
+        let step = match step {
+            Step::MergedQueries(mut m) => {
+                if let Some(next) = bindings.peek()
+                    && let Some(expand) = expand_from(&next.value, &b.name, &m.column)
+                {
+                    m.expand = expand;
+                    prev = next;
+                    bindings.next();
+                }
+                Step::MergedQueries(m)
+            }
+            step => step,
+        };
+        steps.push(step);
     }
     if !matches!(l.body.as_ref(), Expr::Ident(n) if *n == prev.name) {
         return Err(at(
@@ -554,6 +853,17 @@ in
             Step::RenamedColumns(vec![("C0".into(), "Say \"hi\"\n#(x)".into())]),
             Step::RemovedColumns(vec!["C1".into(), "C2".into()]),
             Step::ReorderedColumns(vec!["C3".into(), "C0".into()]),
+            filter(),
+            Step::FilteredRows {
+                combine: Combine::Or,
+                conditions: vec![],
+            },
+            Step::FilteredRows {
+                combine: Combine::And,
+                conditions: vec![],
+            },
+            merge(vec![("Manager".into(), "Regions.Manager".into())]),
+            merge(vec![]),
         ];
         for step in &steps {
             round_trip(&query(csv(), vec![step.clone()]));
@@ -574,6 +884,83 @@ in
             "{m}"
         );
         assert!(m.contains(r#"{"C5", type logical}"#), "{m}");
+    }
+
+    fn filter() -> Step {
+        let c = |column: &str, op, value| Condition {
+            column: column.into(),
+            op,
+            value,
+        };
+        Step::FilteredRows {
+            combine: Combine::Or,
+            conditions: vec![
+                c("Qty", Op::GreaterOrEqual, Value::Number(-2.5)),
+                c("Unit Price", Op::Equals, Value::Null),
+                c("Region", Op::BeginsWith, Value::Text("N\"o".into())),
+                c("Day", Op::Less, Value::Date(20_000)),
+                c("At", Op::NotEquals, Value::DateTime(1_700_000_000_123_456)),
+                c("Ok", Op::Equals, Value::Logical(false)),
+            ],
+        }
+    }
+
+    fn merge(expand: Vec<(String, String)>) -> Step {
+        Step::MergedQueries(Merge {
+            keys: vec!["Region".into(), "Year".into()],
+            query: "Region Targets".into(),
+            other_keys: vec!["Region".into(), "Year".into()],
+            kind: JoinKind::FullOuter,
+            column: "Region Targets".into(),
+            expand,
+        })
+    }
+
+    #[test]
+    fn filter_and_merge_print_power_querys_m() {
+        let parquet = || Source::Parquet { path: "p".into() };
+        let m = round_trip(&query(
+            parquet(),
+            vec![
+                merge(vec![("Manager".into(), "Region Targets.Manager".into())]),
+                merge(vec![]),
+                filter(),
+            ],
+        ));
+        assert_eq!(
+            m,
+            r#"let
+    Source = Parquet.Document(File.Contents("p")),
+    #"Merged Queries" = Table.NestedJoin(Source, {"Region", "Year"}, #"Region Targets", {"Region", "Year"}, "Region Targets", JoinKind.FullOuter),
+    #"Expanded Region Targets" = Table.ExpandTableColumn(#"Merged Queries", "Region Targets", {"Manager"}, {"Region Targets.Manager"}),
+    #"Merged Queries1" = Table.NestedJoin(#"Expanded Region Targets", {"Region", "Year"}, #"Region Targets", {"Region", "Year"}, "Region Targets", JoinKind.FullOuter),
+    #"Filtered Rows" = Table.SelectRows(#"Merged Queries1", each [Qty] >= -2.5 or [Unit Price] = null or Text.StartsWith([Region], "N""o") or [Day] < #date(2024, 10, 4) or [At] <> #datetime(2023, 11, 14, 22, 13, 20.123456) or [Ok] = false)
+in
+    #"Filtered Rows""#
+        );
+        let simple = Step::FilteredRows {
+            combine: Combine::And,
+            conditions: vec![Condition {
+                column: "Region".into(),
+                op: Op::Equals,
+                value: Value::Text("North".into()),
+            }],
+        };
+        let m = round_trip(&query(parquet(), vec![simple]));
+        assert!(
+            m.contains(r#"Table.SelectRows(Source, each ([Region] = "North"))"#),
+            "{m}"
+        );
+        // Mixed and/or, and a filter on something other than a column, are errors.
+        for bad in [
+            "each [A] = 1 and [B] = 2 or [C] = 3",
+            "each [A] = [B]",
+            "each #date(2024, 2, 30) = [A]",
+        ] {
+            let src = m.replace(r#"each ([Region] = "North")"#, bad);
+            let e = parse(&src).expect_err(&src);
+            assert_eq!(e.line, 3, "{src}\n{e}");
+        }
     }
 
     #[test]
