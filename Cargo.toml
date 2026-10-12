@@ -16,6 +16,7 @@ arrow-array = "60"
 arrow-buffer = "60"
 arrow-schema = "60"
 arrow-select = "60"
+calamine = "0.36"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
