@@ -74,6 +74,8 @@ impl App {
     }
 
     pub fn command(&self, id: &str) -> Option<&'static Command> {
+        // ponytail: linear scan, ~1.5 ns per command (bench engine/dispatch_unknown). Switch to a
+        // sorted slice + binary search once the ribbon has hundreds of commands.
         self.commands.iter().find(|c| c.id == id)
     }
 

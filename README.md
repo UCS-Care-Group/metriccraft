@@ -3,7 +3,7 @@
 ![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M0%20done-orange)
 ![DAX parity](https://img.shields.io/badge/DAX%20MVP%20functions-0%20of%2017-lightgrey)
 ![parity checks](https://img.shields.io/badge/parity%20checks-0%20of%2028%20passing-lightgrey)
-![tests](https://img.shields.io/badge/tests-132%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-140%20passing-brightgreen)
 ![unsafe](https://img.shields.io/badge/unsafe-forbidden-success)
 ![rust](https://img.shields.io/badge/rust-1.98%2B%20%C2%B7%20edition%202024-b7410e)
 ![platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20Windows%20%C2%B7%20macOS%20%C2%B7%20WASM-informational)
@@ -21,7 +21,7 @@ saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced
 | Milestone | Scope                                                              | State                                                               |
 |-----------|--------------------------------------------------------------------|---------------------------------------------------------------------|
 | M0        | **Foundations**: workspace, CI gates, command framework, benches   | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M1        | **Connect + shape**: CSV/XLSX/Parquet, Applied Steps, M            | ![8/11](https://img.shields.io/badge/-8%2F11-yellow)                  |
+| M1        | **Connect + shape**: CSV/XLSX/Parquet, Applied Steps, M            | ![9/11](https://img.shields.io/badge/-9%2F11-yellow)                  |
 | M2        | **Model + file**: tables, relationships, Project and Package       | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
