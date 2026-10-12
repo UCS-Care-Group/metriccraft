@@ -53,13 +53,14 @@ impl Query {
 
     /// [`Query::run`], with `queries` (the Document's; this one may be among them) supplying the
     /// other side of Merged Queries steps. Each other Query runs at most once per call, from its
-    /// Source; a Query that merges itself, directly or through others, is an error.
+    /// Source; a Query that merges itself, directly or through others, is an error. To load
+    /// several Queries, use one [`Pass`], so each Source is read once in all.
     ///
     /// Streams (ADR 0005): the leading steps that work batch by batch run as each batch is read;
     /// from the first step that needs the whole table on (a merge), steps run on the loaded
     /// result.
     pub fn run_with(&self, queries: &[Query], limit: usize) -> Result<(Table, usize)> {
-        Ctx::new(queries, limit).table(self)
+        Pass::new(queries, limit).run(self)
     }
 
     /// Whether this Query has a Merged Queries step taking in the Query `name`.
@@ -115,14 +116,39 @@ impl Query {
 /// How deep merges may nest (A merges B merges C …).
 const MAX_DEPTH: usize = 32;
 
+/// One load pass (Refresh, Close & Apply): runs Queries in full from their Sources, each at most
+/// once. A Query's result is kept for the rest of the pass, so loading it and merging it into
+/// other Queries share one read of its Source. Power Query itself re-runs a referenced Query for
+/// every Query that uses it (docs: "Referencing Power Query queries"); the results are the same,
+/// so this saves reads without changing what loads.
+///
+/// The results kept count against the pass's memory `limit`: the tables it returns and the
+/// merged-from Queries it ran must fit in it together.
+pub struct Pass<'a>(Ctx<'a>);
+
+impl<'a> Pass<'a> {
+    /// A pass over `queries` (the Document's), holding at most `limit` bytes of results.
+    pub fn new(queries: &'a [Query], limit: usize) -> Self {
+        Self(Ctx::new(queries, limit))
+    }
+
+    /// `q`'s table and Cell errors: run now, unless this pass already ran it (to load it or to
+    /// merge it into another). The error is `q`'s own or a merged-from Query's.
+    pub fn run(&mut self, q: &'a Query) -> Result<(Table, usize)> {
+        self.0.table(q)
+    }
+}
+
 /// One run (or Preview) that may merge other Queries: resolves them, each once.
 pub(crate) struct Ctx<'a> {
     queries: &'a [Query],
     limit: usize,
     /// The Queries being run, outermost first.
     stack: Vec<&'a str>,
-    /// Results of other Queries already run in this call.
-    done: HashMap<&'a str, (RecordBatch, usize)>,
+    /// Results of the Queries already run.
+    done: HashMap<&'a str, (Table, usize)>,
+    /// Bytes held by `done`.
+    held: usize,
 }
 
 impl<'a> Ctx<'a> {
@@ -132,12 +158,29 @@ impl<'a> Ctx<'a> {
             limit,
             stack: Vec::new(),
             done: HashMap::new(),
+            held: 0,
         }
     }
 
-    /// `q`'s loaded table and Cell errors.
+    /// The limit less the results held.
+    fn free(&self) -> usize {
+        self.limit.saturating_sub(self.held)
+    }
+
+    /// `q`'s loaded table and Cell errors: run once, then reused.
     fn table(&mut self, q: &'a Query) -> Result<(Table, usize)> {
-        let (table, mut errors, tail) = q.stream(self.limit)?;
+        if let Some(done) = self.done.get(q.name.as_str()) {
+            return Ok(done.clone());
+        }
+        let r = self.compute(q)?;
+        self.held = self.held.saturating_add(r.0.memory());
+        self.done.insert(&q.name, r.clone());
+        Ok(r)
+    }
+
+    /// Runs `q` from its Source.
+    fn compute(&mut self, q: &'a Query) -> Result<(Table, usize)> {
+        let (table, mut errors, tail) = q.stream(self.free())?;
         if tail.is_empty() {
             return Ok((table, errors));
         }
@@ -148,7 +191,7 @@ impl<'a> Ctx<'a> {
             batch = next;
             errors = errors.saturating_add(n);
         }
-        let mut b = TableBuilder::new(&q.name, batch.schema(), self.limit);
+        let mut b = TableBuilder::new(&q.name, batch.schema(), self.free());
         b.push(&batch)?;
         Ok((b.finish()?, errors))
     }
@@ -163,7 +206,7 @@ impl<'a> Ctx<'a> {
         match step {
             Step::MergedQueries(m) => {
                 let (other, n) = self.other(&q.name, &m.query)?;
-                Ok((merge::join(batch, &other, m, &q.name, self.limit)?, n))
+                Ok((merge::join(batch, &other, m, &q.name, self.free())?, n))
             }
             step => step.apply(batch, q.culture),
         }
@@ -180,8 +223,8 @@ impl<'a> Ctx<'a> {
                 "`{into}` can't merge `{name}`: `{name}` depends on `{into}`"
             )));
         }
-        if let Some(done) = self.done.get(name) {
-            return Ok(done.clone());
+        if let Some((table, n)) = self.done.get(name) {
+            return Ok((table.batch().clone(), *n));
         }
         let q = self
             .queries
@@ -195,9 +238,7 @@ impl<'a> Ctx<'a> {
         let r = self.table(q);
         self.stack.pop();
         let (table, n) = r?;
-        let r = (table.batch().clone(), n);
-        self.done.insert(&q.name, r.clone());
-        Ok(r)
+        Ok((table.batch().clone(), n))
     }
 }
 
@@ -384,6 +425,63 @@ mod tests {
         assert!(sales.merges("Targets") && !sales.merges("Sales"));
         let e = sales.run(usize::MAX).unwrap_err();
         assert!(e.to_string().contains("no query `Targets`"), "{e}");
+    }
+
+    /// The rows asked of each Source read since the last call, by file.
+    fn reads() -> Vec<(String, usize)> {
+        crate::source::READS.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+
+    #[test]
+    fn a_pass_reads_each_source_once() {
+        // A and B both merge T; loading all three reads T's file once, not three times.
+        let file = |name: &str, text: &str| {
+            let file = File::Bytes {
+                name: name.into(),
+                bytes: Bytes::from(text.to_string()),
+            };
+            Source::csv(name, file, csv::Options::default()).unwrap()
+        };
+        let mut t = query(vec![Step::PromotedHeaders]);
+        t.name = "T".into();
+        t.source = file("t.csv", "Region,Qty\nNorth,10\n");
+        let (a, mut b) = (merging("A", "T"), merging("B", "T"));
+        b.source = file("b.csv", "Region,Qty\nSouth,1\n");
+        let queries = [a, b, t];
+        reads();
+        let mut pass = Pass::new(&queries, usize::MAX);
+        // A first: T runs as its merge, then is reused for B and for loading T itself.
+        let tables: Vec<Table> = queries.iter().map(|q| pass.run(q).unwrap().0).collect();
+        let mut files: Vec<String> = reads().into_iter().map(|(f, _)| f).collect();
+        files.sort();
+        assert_eq!(files, ["b.csv", "sales.csv", "t.csv"]);
+        assert_eq!(tables[2].rows(), 1);
+        assert_eq!(tables[0].batch().schema().field(2).name(), "T.Qty");
+        // The same results as running each Query on its own.
+        for (q, t) in queries.iter().zip(&tables) {
+            assert_eq!(&q.run_with(&queries, usize::MAX).unwrap().0, t);
+        }
+    }
+
+    #[test]
+    fn a_pass_counts_what_it_holds_against_its_limit() {
+        let mut other = query(vec![Step::PromotedHeaders]);
+        other.name = "Targets".into();
+        let sales = merging("Sales", "Targets");
+        let queries = [sales, other];
+        let targets = queries[1].run(usize::MAX).unwrap().0.memory();
+        let sales = queries[0]
+            .run_with(&queries, usize::MAX)
+            .unwrap()
+            .0
+            .memory();
+        // Room for either table, not for both.
+        let mut pass = Pass::new(&queries, targets + sales - 1);
+        assert!(pass.run(&queries[1]).is_ok());
+        assert!(matches!(
+            pass.run(&queries[0]),
+            Err(Error::MemoryCap { .. })
+        ));
     }
 
     #[test]

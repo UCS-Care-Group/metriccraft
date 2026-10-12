@@ -113,6 +113,13 @@ enum Input {
     Memory(Bytes),
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Every [`Source::read`] on this thread: the file and the rows asked for (tests count reads).
+    pub(crate) static READS: std::cell::RefCell<Vec<(String, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Receives a Source's batches in order. There is always at least one (empty if the Source has
 /// no rows, so the schema is known).
 pub type Sink<'a> = dyn FnMut(RecordBatch) -> Result + 'a;
@@ -150,6 +157,8 @@ impl Source {
         limit: usize,
         sink: &mut Sink<'_>,
     ) -> Result<usize> {
+        #[cfg(test)]
+        READS.with(|r| r.borrow_mut().push((self.file().path(), rows)));
         match self {
             Self::Csv {
                 file,

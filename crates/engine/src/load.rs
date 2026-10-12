@@ -12,7 +12,8 @@
 //!
 //! Loading is all-or-nothing: the new tables are built beside the old ones (≈ 2× memory
 //! briefly, ADR 0005) and replace them only if every Query succeeds; otherwise nothing changes
-//! and the error names the Query. Queries a Query merges load first. Every command here is an
+//! and the error names the Query. Queries a Query merges load first, and a load reads each
+//! Source once, sharing a merged-from Query's result (`Pass`). Every command here is an
 //! undoable edit (undoing a refresh is something Power BI can't do): undo puts back the previous
 //! tables, steps and Stale flags together.
 
@@ -20,7 +21,7 @@ use std::path::Path;
 
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
-use opendash_data::{Preview, Query, Table, default_memory_cap};
+use opendash_data::{Pass, Preview, Query, Table, default_memory_cap};
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -155,19 +156,16 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool) -> Result<LoadReport>
         .filter(|t| !doc.queries.iter().any(|q| q.name == t.name() && pick(q)))
         .map(Table::memory)
         .sum();
-    let cap = default_memory_cap().saturating_sub(kept);
+    // The new tables (and the merged-from Queries run for them) must fit the cap together; the
+    // old ones are held beside them. One pass, so each Source is read once.
+    let mut pass = Pass::new(&doc.queries, default_memory_cap().saturating_sub(kept));
     let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
     let mut report = LoadReport::default();
     for query in merged_first(&doc.queries).into_iter().filter(|q| pick(q)) {
-        // The new tables together must fit the cap; the old ones are held beside them.
-        let limit = cap.saturating_sub(loaded(&fresh));
-        let (table, cell_errors) =
-            query
-                .run_with(&doc.queries, limit)
-                .map_err(|error| Error::Refresh {
-                    query: query.name.clone(),
-                    error,
-                })?;
+        let (table, cell_errors) = pass.run(query).map_err(|error| Error::Refresh {
+            query: query.name.clone(),
+            error,
+        })?;
         report.tables.push(Loaded {
             table: table.name().into(),
             rows: table.rows(),
