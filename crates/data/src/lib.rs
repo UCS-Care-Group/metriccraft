@@ -13,7 +13,7 @@ pub mod step;
 mod table;
 
 pub use preview::Preview;
-pub use query::Query;
+pub use query::{Pass, Query};
 pub use table::{Table, TableBuilder, default_memory_cap};
 
 /// Errors from loading data.

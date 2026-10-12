@@ -2,10 +2,21 @@
 //! [`PREVIEW_ROWS`] Source rows, with its Cell errors per cell — an error mask plus messages per
 //! column (ADR 0005). Derived and cheap: nothing is stored.
 //!
-//! A Cell error is a value a Changed Type step couldn't produce (null in the data). Later steps
-//! carry it: renames and Promoted Headers follow the column, and any other step (remove,
-//! reorder, filter, merge…) is run once more with a hidden row-number column to see where each
-//! row went. A step that drops that column drops the errors it can't place.
+//! A Cell error is a value a Changed Type step couldn't produce, or an Excel error cell in the
+//! Source (both null in the data). Later steps carry it: renames and Promoted Headers follow the
+//! column, and any other step (remove, reorder, filter, merge…) is run once more with a hidden
+//! row-number column to see where each row went. A step that drops that column drops the errors
+//! it can't place.
+//!
+//! **Through a merge**, the other Query's rows come from its loaded Table when that is loaded
+//! and not Stale, else from its own Preview (its first 1,000 Source rows, at its last step); a
+//! Preview never runs another Query in full. Power Query's editor works the same way in spirit:
+//! it caches up to 1,000 preview rows per query and shows steps from that cache, flagging
+//! preview data that is out of date (Microsoft Learn, "Disable Power Query background
+//! refresh"). *Parity uncertainty* (to observe in the VM): whether Power Query's preview of a
+//! merge joins the other query's cached preview, its full result, or something else; until
+//! then, rows past the other side's first 1,000 may be missing from a merge preview of a Stale
+//! or unloaded Query, though they load.
 
 use std::sync::Arc;
 
@@ -16,7 +27,7 @@ use arrow_schema::{DataType, Field, Schema};
 use crate::query::Ctx;
 use crate::source::PREVIEW_ROWS;
 use crate::step::{ColumnType, Step};
-use crate::{Error, Query, Result};
+use crate::{Error, Query, Result, Table};
 
 /// A Query's result at one step, on the first [`PREVIEW_ROWS`] Source rows.
 #[derive(Clone, Debug, PartialEq)]
@@ -56,15 +67,17 @@ impl Query {
     /// holding at most `limit` bytes. A step that can't run is an error naming it.
     /// A Merged Queries step fails here; use [`Query::preview_with`].
     pub fn preview(&self, step: Option<usize>, limit: usize) -> Result<Preview> {
-        self.preview_with(&[], step, limit)
+        self.preview_with(&[], &[], step, limit)
     }
 
     /// [`Query::preview`], with `queries` (the Document's) supplying the other side of Merged
-    /// Queries steps. The other Query's full result is joined, so the previewed rows match
-    /// what loads.
+    /// Queries steps: the other Query's Table in `loaded` (the loaded Tables that aren't Stale),
+    /// else that Query's own Preview at its last step. Never a full run of the other Query (see
+    /// the module docs).
     pub fn preview_with<'a>(
         &'a self,
         queries: &'a [Query],
+        loaded: &'a [&'a Table],
         step: Option<usize>,
         limit: usize,
     ) -> Result<Preview> {
@@ -78,11 +91,22 @@ impl Query {
                 });
             }
         };
-        let (mut batch, _) =
+        self.preview_in(&mut Ctx::preview(queries, loaded, limit), upto)
+    }
+
+    /// The Preview after the first `upto` steps, merges resolved by `ctx`.
+    pub(crate) fn preview_in<'a>(&'a self, ctx: &mut Ctx<'a>, upto: usize) -> Result<Preview> {
+        let (mut batch, source_errors) =
             self.source
-                .read_batch(&self.name, PREVIEW_ROWS, self.culture, limit)?;
-        let mut errors = Errors::new();
-        let mut ctx = Ctx::new(queries, limit);
+                .read_batch(&self.name, PREVIEW_ROWS, self.culture, ctx.limit())?;
+        // The Source's own Cell errors (Excel error cells).
+        let mut errors: Errors = batch
+            .schema()
+            .fields()
+            .iter()
+            .zip(source_errors)
+            .filter_map(|(f, e)| Some((f.name().clone(), e?)))
+            .collect();
         for step in self.steps.get(..upto).unwrap_or_default() {
             let (next, _) = ctx.apply(self, step, &batch)?;
             errors = carry(step, &batch, &next, errors, &mut |b| {
@@ -345,10 +369,158 @@ mod tests {
             "needs the queries"
         );
         let queries = [sales.clone(), targets];
-        let p = sales.preview_with(&queries, Some(2), usize::MAX).unwrap();
+        let p = sales
+            .preview_with(&queries, &[], Some(2), usize::MAX)
+            .unwrap();
         assert_eq!(p.batch.num_rows(), PREVIEW_ROWS - 1);
         assert_eq!(p.batch.schema().field(3).name(), "Targets.Target");
         assert!(p.error(250, 1).is_some_and(|m| m.ends_with("oops")));
         assert_eq!(p.error_count(), 1);
+    }
+
+    /// `Region, Qty` with Qty 7, `#DIV/0!`, `#N/A`, as a sheet `Data` and an Excel table `T`.
+    fn workbook(kind: crate::source::ExcelKind) -> Query {
+        use rust_xlsxwriter::{Formula, Table as XTable, TableColumn, Workbook};
+        let mut book = Workbook::new();
+        let ws = book.add_worksheet().set_name("Data").unwrap();
+        ws.write_string(0, 0, "Region").unwrap();
+        ws.write_string(0, 1, "Qty").unwrap();
+        for (r, region) in ["North", "South", "East"].iter().enumerate() {
+            ws.write_string(r as u32 + 1, 0, *region).unwrap();
+        }
+        ws.write_number(1, 1, 7).unwrap();
+        ws.write_formula(2, 1, Formula::new("=1/0").set_result("#DIV/0!"))
+            .unwrap();
+        ws.write_formula(3, 1, Formula::new("=NA()").set_result("#N/A"))
+            .unwrap();
+        let columns = [
+            TableColumn::new().set_header("Region"),
+            TableColumn::new().set_header("Qty"),
+        ];
+        let table = XTable::new().set_name("T").set_columns(&columns);
+        ws.add_table(0, 0, 3, 1, &table).unwrap();
+        let item = match kind {
+            crate::source::ExcelKind::Sheet => "Data",
+            crate::source::ExcelKind::Table => "T",
+        };
+        let source = Source::Excel {
+            file: File::Bytes {
+                name: "book.xlsx".into(),
+                bytes: Bytes::from(book.save_to_buffer().unwrap()),
+            },
+            item: item.into(),
+            kind,
+        };
+        Query::connect("Book", source, Culture::get("en-US").unwrap(), usize::MAX).unwrap()
+    }
+
+    #[test]
+    fn excel_error_cells_are_cell_errors_in_the_preview_and_blank_on_load() {
+        const DIV0: &str = "DataFormat.Error: Invalid cell value '#DIV/0!'.";
+        const NA: &str = "DataFormat.Error: Invalid cell value '#N/A'.";
+        // A sheet reads raw (headers are row 0 until Promoted Headers).
+        let q = workbook(crate::source::ExcelKind::Sheet);
+        assert_eq!(q.steps.len(), 2, "{:?}", q.steps);
+        let raw = q.preview(None, usize::MAX).unwrap();
+        assert_eq!((raw.error(2, 1), raw.error(3, 1)), (Some(DIV0), Some(NA)));
+        assert_eq!(raw.error_count(), 2);
+        let typed = q.preview(Some(1), usize::MAX).unwrap();
+        assert_eq!(typed.batch.schema().field(1).name(), "Qty");
+        assert_eq!(
+            (typed.error(1, 1), typed.error(2, 1)),
+            (Some(DIV0), Some(NA))
+        );
+        assert_eq!((typed.error(0, 1), typed.error_count()), (None, 2));
+        assert!(typed.batch.column(1).is_null(1));
+        // Loading blanks and counts them, as before.
+        let (t, errors) = q.run(usize::MAX).unwrap();
+        assert_eq!(
+            (t.rows(), errors, t.batch().column(1).null_count()),
+            (3, 2, 2)
+        );
+        // An Excel table: its header row is the names already.
+        let q = workbook(crate::source::ExcelKind::Table);
+        let p = q.preview(None, usize::MAX).unwrap();
+        assert_eq!((p.error(1, 1), p.error(2, 1)), (Some(DIV0), Some(NA)));
+        assert_eq!(q.run(usize::MAX).unwrap().1, 2);
+    }
+
+    /// The rows asked of each Source read since the last call, by file.
+    fn reads() -> Vec<(String, usize)> {
+        crate::source::READS.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+
+    /// `Orders` (Region, Qty) merging `Targets` (5,000 rows: region `t<i>`, Target `i`), each
+    /// from its own file.
+    fn merged() -> [Query; 2] {
+        let file = |name: &str, text: String| {
+            let file = File::Bytes {
+                name: name.into(),
+                bytes: Bytes::from(text),
+            };
+            Source::csv(name, file, csv::Options::default()).unwrap()
+        };
+        let culture = Culture::get("en-US").unwrap();
+        let mut csv = String::from("Region,Target\n");
+        for i in 0..5000 {
+            csv.push_str(&format!("t{i},{i}\n"));
+        }
+        let targets =
+            Query::connect("Targets", file("targets.csv", csv), culture, usize::MAX).unwrap();
+        let orders = "Region,Qty\nt5,1\nt4000,2\n".to_string();
+        let mut orders =
+            Query::connect("Orders", file("orders.csv", orders), culture, usize::MAX).unwrap();
+        orders.steps.push(Step::MergedQueries(Merge {
+            keys: vec!["Region".into()],
+            query: "Targets".into(),
+            other_keys: vec!["Region".into()],
+            kind: JoinKind::LeftOuter,
+            column: "Targets".into(),
+            expand: vec![("Target".into(), "Targets.Target".into())],
+        }));
+        [orders, targets]
+    }
+
+    /// Targets.Target as text, per Orders row.
+    fn targets(p: &Preview) -> Vec<Option<String>> {
+        let c = cast(p.batch.column(2), &DataType::Utf8).unwrap();
+        let c = c.as_any().downcast_ref::<StringArray>().unwrap();
+        c.iter().map(|v| v.map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_merge_previews_against_the_other_querys_preview_never_its_full_run() {
+        let queries = merged();
+        reads();
+        let p = queries[0]
+            .preview_with(&queries, &[], Some(2), usize::MAX)
+            .unwrap();
+        // t4000 is past Targets' first 1,000 rows: not in its Preview (parity uncertainty).
+        assert_eq!(targets(&p), [Some("5".into()), None]);
+        let targets_reads: Vec<usize> = reads()
+            .into_iter()
+            .filter(|(f, _)| f == "targets.csv")
+            .map(|(_, rows)| rows)
+            .collect();
+        assert_eq!(
+            targets_reads,
+            [PREVIEW_ROWS],
+            "one Preview read, not a full run"
+        );
+    }
+
+    #[test]
+    fn a_merge_previews_against_the_other_querys_loaded_table() {
+        let queries = merged();
+        let (loaded, _) = queries[1].run(usize::MAX).unwrap();
+        reads();
+        let p = queries[0]
+            .preview_with(&queries, &[&loaded], Some(2), usize::MAX)
+            .unwrap();
+        assert_eq!(targets(&p), [Some("5".into()), Some("4000".into())]);
+        assert!(
+            reads().iter().all(|(f, _)| f != "targets.csv"),
+            "Targets isn't read"
+        );
     }
 }

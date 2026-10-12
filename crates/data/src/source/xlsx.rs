@@ -6,7 +6,11 @@
 //! booleans → `Boolean`, dates → `Date32` (all date-only) else `Timestamp(µs)`, text → `Utf8`.
 //! A column mixing kinds (number and text, date and number…) becomes `Utf8`, other kinds
 //! rendered as text (numbers as Rust prints them, dates ISO 8601, booleans `true`/`false`).
-//! Excel error cells (`#DIV/0!`, `#N/A`…) become blank and are counted (Cell errors).
+//! Excel error cells (`#DIV/0!`, `#N/A`…) become blank and are counted (Cell errors); a raw read
+//! can also list each one ([`CellError`]) for a Preview, with Power Query's message
+//! `DataFormat.Error: Invalid cell value '#REF!'.` (Microsoft Learn, "Error handling" in Power
+//! Query: reason `DataFormat.Error`, message `Invalid cell value '#REF!'.`). A date cell outside
+//! Excel's range is a Cell error too; its message is ours (parity uncertainty).
 //!
 //! **Hostile files** (spec N-1, N-4). [`Workbook::open`] reads every XML part calamine will
 //! parse (relationships, workbook, shared strings, styles, each sheet) once itself first, with
@@ -56,6 +60,15 @@ const DAY_US: i64 = 86_400_000_000;
 pub struct Import {
     pub table: Table,
     pub cell_errors: usize,
+}
+
+/// One Excel error cell of a raw read: its row (0 = the first row read) and column, and its
+/// Cell error message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CellError {
+    pub row: usize,
+    pub column: usize,
+    pub message: String,
 }
 
 /// An open workbook.
@@ -138,7 +151,7 @@ impl<R: Read + Seek> Workbook<R> {
     /// batch — the sheet is never held whole.
     pub fn load_sheet(&mut self, name: &str, limit: usize) -> Result<Import> {
         let (table, cell_errors) = collect(name, limit, |sink| {
-            self.sheet(name, true, usize::MAX, '.', limit, sink)
+            self.sheet(name, true, usize::MAX, '.', limit, sink, None)
         })?;
         Ok(Import { table, cell_errors })
     }
@@ -146,7 +159,8 @@ impl<R: Read + Seek> Workbook<R> {
     /// Reads a worksheet raw, as Power Query's `Excel.Workbook` gives it: `Column1..N` over the
     /// used columns, the first used row kept as data; at most `rows` rows (both passes stop
     /// there) into `sink`. Numbers in a text column are written with the `decimal` separator so
-    /// the Culture reads them back. Returns the error cells, read as blank.
+    /// the Culture reads them back. Returns the error cells, read as blank; `errors`, if given,
+    /// gets each one read.
     pub fn read_sheet(
         &mut self,
         name: &str,
@@ -154,11 +168,13 @@ impl<R: Read + Seek> Workbook<R> {
         decimal: char,
         limit: usize,
         sink: &mut Sink<'_>,
+        errors: Option<&mut Vec<CellError>>,
     ) -> Result<usize> {
-        self.sheet(name, false, rows, decimal, limit, sink)
+        self.sheet(name, false, rows, decimal, limit, sink, errors)
     }
 
     /// A sheet with (`header`) or without its first used row as the column names.
+    #[allow(clippy::too_many_arguments)]
     fn sheet(
         &mut self,
         name: &str,
@@ -167,6 +183,7 @@ impl<R: Read + Seek> Workbook<R> {
         decimal: char,
         limit: usize,
         sink: &mut Sink<'_>,
+        errors: Option<&mut Vec<CellError>>,
     ) -> Result<usize> {
         let is_1904 = self.xlsx.has_1904_epoch();
         let scan = scan(self.sheet_cells(name)?, header, is_1904, max)?;
@@ -180,7 +197,7 @@ impl<R: Read + Seek> Workbook<R> {
                 rows: 0,
             };
             return import(
-                name, headers, kinds, at, cells, 0, is_1904, decimal, limit, sink,
+                name, headers, kinds, at, cells, 0, is_1904, decimal, limit, sink, errors,
             );
         };
         let width = to_usize(right.saturating_sub(left)).saturating_add(1);
@@ -214,6 +231,7 @@ impl<R: Read + Seek> Workbook<R> {
             decimal,
             limit,
             sink,
+            errors,
         )
     }
 
@@ -221,14 +239,14 @@ impl<R: Read + Seek> Workbook<R> {
     /// sheet like [`Workbook::load_sheet`]'s.
     pub fn load_table(&mut self, name: &str, limit: usize) -> Result<Import> {
         let (table, cell_errors) = collect(name, limit, |sink| {
-            self.read_table(name, usize::MAX, '.', limit, sink)
+            self.read_table(name, usize::MAX, '.', limit, sink, None)
         })?;
         Ok(Import { table, cell_errors })
     }
 
     /// Reads an Excel table as Power Query gives it (its header row names the columns): at most
-    /// `rows` rows into `sink`, `decimal` as in [`Workbook::read_sheet`]. Returns the error
-    /// cells, read as blank.
+    /// `rows` rows into `sink`, `decimal` and `errors` as in [`Workbook::read_sheet`]. Returns
+    /// the error cells, read as blank.
     pub fn read_table(
         &mut self,
         name: &str,
@@ -236,6 +254,7 @@ impl<R: Read + Seek> Workbook<R> {
         decimal: char,
         limit: usize,
         sink: &mut Sink<'_>,
+        errors: Option<&mut Vec<CellError>>,
     ) -> Result<usize> {
         let is_1904 = self.xlsx.has_1904_epoch();
         let table = self
@@ -281,6 +300,7 @@ impl<R: Read + Seek> Workbook<R> {
             decimal,
             limit,
             sink,
+            errors,
         )
     }
 
@@ -671,6 +691,7 @@ fn import<'a>(
     decimal: char,
     limit: usize,
     sink: &mut Sink<'_>,
+    errors: Option<&mut Vec<CellError>>,
 ) -> Result<usize> {
     let Place { top, left, rows } = at;
     let fields: Vec<Field> = unique_names(headers)
@@ -692,6 +713,8 @@ fn import<'a>(
         decimal,
         name,
         limit,
+        errors,
+        listed: 0,
     };
     emit(schema, batches, usize::MAX, sink)?;
     Ok(cell_errors)
@@ -830,6 +853,10 @@ struct Batches<'n, I> {
     decimal: char,
     name: &'n str,
     limit: usize,
+    /// Gets each error cell written, if given.
+    errors: Option<&'n mut Vec<CellError>>,
+    /// About how many bytes `errors` holds.
+    listed: usize,
 }
 
 impl<I: Iterator<Item = Result<(u32, u32, Data)>>> Iterator for Batches<'_, I> {
@@ -875,9 +902,24 @@ impl<I: Iterator<Item = Result<(u32, u32, Data)>>> Iterator for Batches<'_, I> {
             if let Some(col) = col {
                 bytes = bytes.saturating_add(col.put(row, &d, self.is_1904, self.decimal));
                 last = row;
+                if let (Some(errors), None) = (self.errors.as_mut(), Kind::of(&d, self.is_1904)) {
+                    let message = match &d {
+                        Data::Error(e) => format!("DataFormat.Error: Invalid cell value '{e}'."),
+                        _ => "DataFormat.Error: the date is outside Excel's range.".into(),
+                    };
+                    // The list is held too: it counts against the limit like the cells.
+                    self.listed = self
+                        .listed
+                        .saturating_add(std::mem::size_of::<CellError>() + message.len());
+                    errors.push(CellError {
+                        row: self.done.saturating_add(row),
+                        column: to_usize(c.saturating_sub(self.left)),
+                        message,
+                    });
+                }
             }
             // One row alone can't outgrow the memory limit (a shared string repeated).
-            if bytes > self.limit {
+            if bytes > self.limit || self.listed > self.limit {
                 self.done = self.rows;
                 return Some(Err(Error::MemoryCap {
                     table: self.name.into(),
@@ -1695,8 +1737,8 @@ mod tests {
         rows: usize,
     ) -> (Table, usize) {
         collect(item, usize::MAX, |sink| match table {
-            false => wb.read_sheet(item, rows, ',', usize::MAX, sink),
-            true => wb.read_table(item, rows, ',', usize::MAX, sink),
+            false => wb.read_sheet(item, rows, ',', usize::MAX, sink, None),
+            true => wb.read_table(item, rows, ',', usize::MAX, sink, None),
         })
         .unwrap()
     }
