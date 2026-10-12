@@ -73,43 +73,93 @@ impl Query {
     /// Reads the Source and runs the leading streaming steps batch by batch: the loaded table,
     /// its Cell errors, and the steps left to run on it.
     fn stream(&self, limit: usize) -> Result<(Table, usize, &[Step])> {
-        let culture = self.culture;
         let streamed = self.steps.iter().take_while(|s| streams(s)).count();
         let (head, tail) = self.steps.split_at(streamed);
-        // Promoted Headers takes the names from the first row of the first batch only; later
-        // batches get those names.
-        let mut headers: Vec<Option<SchemaRef>> = vec![None; head.len()];
-        let mut errors = 0usize;
+        let mut head = Head {
+            steps: head,
+            culture: self.culture,
+            headers: vec![None; head.len()],
+            errors: 0,
+            held: None,
+        };
         let mut builder: Option<TableBuilder> = None;
-        let source_errors =
-            self.source
-                .read(&self.name, usize::MAX, culture, limit, &mut |mut batch| {
-                    for (step, names) in head.iter().zip(headers.iter_mut()) {
-                        batch = match (step, &*names) {
-                            (Step::PromotedHeaders, Some(names)) => rename(&batch, names)?,
-                            _ => {
-                                let promotes =
-                                    *step == Step::PromotedHeaders && batch.num_rows() > 0;
-                                let (next, n) = step.apply(&batch, culture)?;
-                                errors = errors.saturating_add(n);
-                                if promotes {
-                                    *names = Some(next.schema());
-                                }
-                                next
-                            }
-                        };
-                    }
-                    builder
-                        .get_or_insert_with(|| TableBuilder::new(&self.name, batch.schema(), limit))
-                        .push(&batch)
-                })?;
+        let mut push = |batch: RecordBatch| {
+            builder
+                .get_or_insert_with(|| TableBuilder::new(&self.name, batch.schema(), limit))
+                .push(&batch)
+        };
+        let source_errors = self.source.read(
+            &self.name,
+            usize::MAX,
+            self.culture,
+            limit,
+            &mut |batch| match head.run(batch, 0, true)? {
+                Some(batch) => push(batch),
+                None => Ok(()),
+            },
+        )?;
+        // No row ever reached a Promoted Headers: run the rest of the steps on the empty batch
+        // it held, as the whole table would (nothing to promote).
+        if let Some((from, batch)) = head.held.take() {
+            if let Some(batch) = head.run(batch, from, false)? {
+                push(batch)?;
+            }
+        }
         let table = builder
             .ok_or_else(|| Error::Source {
                 source: self.name.clone(),
                 message: "the source gave no data".into(),
             })?
             .finish()?;
-        Ok((table, errors.saturating_add(source_errors), tail))
+        Ok((table, head.errors.saturating_add(source_errors), tail))
+    }
+}
+
+/// The streaming steps of a run, applied batch by batch.
+struct Head<'a> {
+    steps: &'a [Step],
+    culture: &'static Culture,
+    /// Per step: for Promoted Headers, the names it took from the first row that reached it
+    /// (whichever batch that was); later batches get those names.
+    headers: Vec<Option<SchemaRef>>,
+    errors: usize,
+    /// The first empty batch stopped at a Promoted Headers no row has reached yet, and that
+    /// step's index: kept in case no row ever does.
+    held: Option<(usize, RecordBatch)>,
+}
+
+impl Head<'_> {
+    /// Runs steps `from..` on `batch`. `None` when `hold` and the batch is empty at a Promoted
+    /// Headers still waiting for its first row: the step and everything after it wait too,
+    /// since they depend on the names that row will give.
+    fn run(
+        &mut self,
+        mut batch: RecordBatch,
+        from: usize,
+        hold: bool,
+    ) -> Result<Option<RecordBatch>> {
+        let steps = self.steps.iter().zip(self.headers.iter_mut()).enumerate();
+        for (i, (step, names)) in steps.skip(from) {
+            batch = match (step, &*names) {
+                (Step::PromotedHeaders, Some(names)) => rename(&batch, names)?,
+                (Step::PromotedHeaders, None) if hold && batch.num_rows() == 0 => {
+                    if self.held.is_none() {
+                        self.held = Some((i, batch));
+                    }
+                    return Ok(None);
+                }
+                _ => {
+                    let promotes = *step == Step::PromotedHeaders && batch.num_rows() > 0;
+                    let (next, n) = step.apply(&batch, self.culture)?;
+                    self.errors = self.errors.saturating_add(n);
+                    if promotes {
+                        *names = Some(next.schema());
+                    }
+                    next
+                }
+            };
+        }
+        Ok(Some(batch))
     }
 }
 
@@ -422,6 +472,66 @@ mod tests {
             .map(|f| f.name().clone())
             .collect();
         assert_eq!(names, ["Id", "Group"]);
+    }
+
+    #[test]
+    fn promoted_headers_after_a_filter_that_empties_the_first_batch() {
+        use crate::step::{Combine, Condition, Op, Value};
+        // The first batch is all `drop` rows; the header row is the first one left.
+        let mut csv = "drop,1\n".repeat(BATCH_ROWS + 10);
+        csv.push_str("Name,Qty\na,2\n");
+        let filter = Step::FilteredRows {
+            combine: Combine::And,
+            conditions: vec![Condition {
+                column: "Column1".into(),
+                op: Op::NotEquals,
+                value: Value::Text("drop".into()),
+            }],
+        };
+        let culture = Culture::get("en-US").unwrap();
+        let cases = [
+            vec![filter.clone(), Step::PromotedHeaders],
+            vec![
+                filter.clone(),
+                Step::PromotedHeaders,
+                Step::ChangedType(vec![("Qty".into(), ColumnType::Whole)]),
+            ],
+        ];
+        for steps in cases {
+            let q = Query {
+                name: "S".into(),
+                source: source(&csv),
+                steps,
+                culture,
+            };
+            // The same steps on the whole table at once.
+            let (mut whole, _) = q
+                .source
+                .read_batch("S", usize::MAX, culture, usize::MAX)
+                .unwrap();
+            for step in &q.steps {
+                whole = step.apply(&whole, culture).unwrap().0;
+            }
+            let (t, _) = q.run(usize::MAX).unwrap();
+            let names = |s: SchemaRef| -> Vec<String> {
+                s.fields().iter().map(|f| f.name().clone()).collect()
+            };
+            assert_eq!(names(t.batch().schema()), ["Name", "Qty"], "{:?}", q.steps);
+            assert_eq!(names(t.batch().schema()), names(whole.schema()));
+            assert_eq!(t.rows(), 1);
+        }
+        // Every row filtered out: no header to promote, as on the whole table.
+        let q = Query {
+            name: "S".into(),
+            source: source(&"drop,1\n".repeat(BATCH_ROWS + 10)),
+            steps: vec![filter, Step::PromotedHeaders],
+            culture,
+        };
+        let (t, _) = q.run(usize::MAX).unwrap();
+        assert_eq!(
+            (t.rows(), t.batch().schema().field(0).name().as_str()),
+            (0, "Column1")
+        );
     }
 
     use crate::step::{JoinKind, Merge};

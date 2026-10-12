@@ -129,11 +129,17 @@ impl TableBuilder {
         }
     }
 
-    /// Appends one batch; errors if it doesn't match the schema or the table outgrows its limit.
+    /// Appends one batch; errors if its column names or types don't match the schema, or the
+    /// table outgrows its limit.
     pub fn push(&mut self, batch: &RecordBatch) -> Result {
-        let types = |s: &Schema| s.fields().iter().map(|f| f.data_type().clone()).collect();
-        let (got, want): (Vec<DataType>, Vec<DataType>) =
-            (types(&batch.schema()), types(&self.schema));
+        let columns = |s: &Schema| {
+            s.fields()
+                .iter()
+                .map(|f| (f.name().clone(), f.data_type().clone()))
+                .collect()
+        };
+        let (got, want): (Vec<(String, DataType)>, Vec<(String, DataType)>) =
+            (columns(&batch.schema()), columns(&self.schema));
         if got != want {
             return Err(self.error(format!("batch columns {got:?} don't match {want:?}")));
         }
@@ -439,6 +445,22 @@ mod tests {
         )
         .unwrap();
         assert!(b.push(&other).is_err());
+    }
+
+    #[test]
+    fn a_batch_with_other_column_names_is_an_error() {
+        let mut b = TableBuilder::new("Sales", schema(), usize::MAX);
+        let renamed = Arc::new(Schema::new(vec![
+            Field::new("Column1", DataType::Utf8, true),
+            Field::new("Qty", DataType::Int64, true),
+            Field::new("Amount", DataType::Float64, true),
+        ]));
+        let columns = batch(vec![Some("x")], vec![Some(1)], vec![0.0])
+            .columns()
+            .to_vec();
+        let other = RecordBatch::try_new(renamed, columns).unwrap();
+        let e = b.push(&other).unwrap_err();
+        assert!(e.to_string().contains("Column1"), "{e}");
     }
 
     #[test]

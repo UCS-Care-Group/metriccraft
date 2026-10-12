@@ -283,7 +283,10 @@ impl Source {
         };
         let mut steps = Vec::with_capacity(2);
         // `slice` panics past the end: a zero-row sample (an empty sheet) has nothing below.
-        let below = sample.slice(sample.num_rows().min(1), sample.num_rows().saturating_sub(1));
+        let below = sample.slice(
+            sample.num_rows().min(1),
+            sample.num_rows().saturating_sub(1),
+        );
         let mut batch = sample.slice(0, sample.num_rows().min(SAMPLE_ROWS));
         if headerless
             && sample.num_rows() > 1
