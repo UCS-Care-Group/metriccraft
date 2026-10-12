@@ -1,6 +1,6 @@
 //! Model commands (spec D-1): Enable load, and the Table and Column properties of Power BI's
 //! Column tools ribbon and Properties pane. All are [`Run::Edit`](crate::Run::Edit): undoable,
-//! and a change that fails changes nothing. Renames are M2.5's.
+//! and a change that fails changes nothing. Renames and deletes are in `rename.rs`.
 //!
 //! Data-type override: see `opendash_model` (`table.rs`) for the rules and parity
 //! uncertainties.

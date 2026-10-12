@@ -9,6 +9,7 @@ mod load;
 mod model;
 mod query;
 mod relationship;
+mod rename;
 
 pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};

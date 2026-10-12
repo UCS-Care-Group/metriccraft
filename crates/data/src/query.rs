@@ -70,6 +70,37 @@ impl Query {
             .any(|s| matches!(s, Step::MergedQueries(m) if m.query == name))
     }
 
+    /// Points this Query's Merged Queries steps that take in Query `old` at `new` instead
+    /// (a Query rename). The merged column's name (`Merge::column`) is kept: it is this
+    /// Query's own column, named once when the merge was made.
+    pub fn rename_merged_query(&mut self, old: &str, new: &str) {
+        for step in &mut self.steps {
+            if let Step::MergedQueries(m) = step
+                && m.query == old
+            {
+                m.query = new.into();
+            }
+        }
+    }
+
+    /// Renames column `old` of Query `query` to `new` where this Query's Merged Queries steps
+    /// take it in: its key columns and the columns expanded from it (their new names, this
+    /// Query's own columns, are kept).
+    pub fn rename_merged_column(&mut self, query: &str, old: &str, new: &str) {
+        for step in &mut self.steps {
+            if let Step::MergedQueries(m) = step
+                && m.query == query
+            {
+                for key in m.other_keys.iter_mut().filter(|k| *k == old) {
+                    *key = new.into();
+                }
+                for (from, _) in m.expand.iter_mut().filter(|(from, _)| from == old) {
+                    *from = new.into();
+                }
+            }
+        }
+    }
+
     /// Reads the Source and runs the leading streaming steps batch by batch: the loaded table,
     /// its Cell errors, and the steps left to run on it.
     fn stream(&self, limit: usize) -> Result<(Table, usize, &[Step])> {

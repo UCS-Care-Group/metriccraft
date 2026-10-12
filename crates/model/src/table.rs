@@ -99,7 +99,86 @@ impl Model {
     pub fn remove(&mut self, name: &str) {
         self.tables.retain(|t| t.name != name);
     }
+
+    /// Renames Table `old` to `new` and every Relationship end on it. The caller checks `new`
+    /// is free (Table and Query names are unique ignoring case). No model Table `old` (its
+    /// Query isn't loaded) renames nothing.
+    // TODO(M3.6): rewrite DAX references (measures, calculated columns) to the Table too.
+    pub fn rename_table(&mut self, old: &str, new: &str) {
+        if let Some(t) = self.table_mut(old) {
+            t.name = new.into();
+        }
+        for r in &mut self.relationships {
+            for end in [&mut r.from_table, &mut r.to_table] {
+                if end == old {
+                    *end = new.into();
+                }
+            }
+        }
+    }
+
+    /// Renames Column `old` of Table `table` to `new`, with every sort by and Relationship end
+    /// on it. Fails, changing nothing, if there is no such column or `new` is taken: column
+    /// names are unique in a Table ignoring case, as in Power BI.
+    // TODO(M3.6): rewrite DAX references (measures, calculated columns) to the Column too.
+    pub fn rename_column(&mut self, table: &str, old: &str, new: &str) -> Result {
+        let t = self.table_mut(table).ok_or_else(|| Error {
+            table: table.into(),
+            column: String::new(),
+            message: "there is no such table".into(),
+        })?;
+        t.column_mut(old)?;
+        if let Some(other) = t
+            .columns
+            .iter()
+            .find(|c| c.name != old && same_name(&c.name, new))
+        {
+            return Err(t.error(
+                old,
+                format!("the table already has a column `{}`", other.name),
+            ));
+        }
+        for c in &mut t.columns {
+            if c.name == old {
+                c.name = new.into();
+            }
+            if c.sort_by.as_deref() == Some(old) {
+                c.sort_by = Some(new.into());
+            }
+        }
+        for r in &mut self.relationships {
+            for (t, c) in [
+                (&r.from_table, &mut r.from_column),
+                (&r.to_table, &mut r.to_column),
+            ] {
+                if t == table && c == old {
+                    *c = new.into();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes Table `name` and every Relationship on it (deleting a Table in Power BI deletes
+    /// its Relationships); returns those.
+    pub fn delete_table(&mut self, name: &str) -> Vec<crate::Relationship> {
+        self.remove(name);
+        let (gone, keep) = std::mem::take(&mut self.relationships)
+            .into_iter()
+            .partition(|r| r.uses(name));
+        self.relationships = keep;
+        gone
+    }
 }
+
+/// Whether two Table, Query or Column names are the same to Power BI: ignoring case.
+// ponytail: Unicode lowercase; Analysis Services compares names under the model's collation,
+// which may fold differently beyond ASCII (parity uncertainty).
+pub fn same_name(a: &str, b: &str) -> bool {
+    a == b || a.to_lowercase() == b.to_lowercase()
+}
+
+impl Model {}
 
 /// A Table's model properties. `columns` follow the loaded Table's column order.
 #[derive(Clone, Debug, Default, PartialEq)]

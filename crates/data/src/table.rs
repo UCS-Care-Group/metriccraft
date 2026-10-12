@@ -75,6 +75,33 @@ impl Table {
         })
     }
 
+    /// This table under another name (a Table rename); the columns are shared.
+    pub fn renamed(&self, name: &str) -> Table {
+        Table {
+            name: Arc::from(name),
+            batch: self.batch.clone(),
+        }
+    }
+
+    /// This table with column `old` named `new` (a model column rename); the data is shared.
+    pub fn with_column_renamed(&self, old: &str, new: &str) -> Result<Table> {
+        let schema = self.batch.schema();
+        let index = schema
+            .index_of(old)
+            .map_err(|_| self.error(format!("there is no column `{old}`")))?;
+        let mut fields: Vec<_> = schema.fields().iter().cloned().collect();
+        if let Some(f) = fields.get_mut(index) {
+            *f = Arc::new(f.as_ref().clone().with_name(new));
+        }
+        let batch =
+            RecordBatch::try_new(Arc::new(Schema::new(fields)), self.batch.columns().to_vec())
+                .map_err(|e| self.error(e.to_string()))?;
+        Ok(Table {
+            name: Arc::clone(&self.name),
+            batch,
+        })
+    }
+
     fn error(&self, message: String) -> Error {
         Error::Arrow {
             table: self.name.to_string(),

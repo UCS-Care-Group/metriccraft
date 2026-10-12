@@ -8,4 +8,4 @@ mod relationship;
 mod table;
 
 pub use relationship::Relationship;
-pub use table::{Column, Error, Model, ModelTable, SummarizeBy};
+pub use table::{Column, Error, Model, ModelTable, SummarizeBy, same_name};
