@@ -597,6 +597,48 @@ mod tests {
         assert_eq!(app.document(), &before);
     }
 
+    #[test]
+    fn a_date_filter_added_offline_still_matches_dates() {
+        let dir = Dir::new();
+        let text = "Day,Qty\n2024-01-31,1\n2024-02-01,2\n";
+        let path = dir.write("Sales.csv", text);
+        for op in ["equals", "greater"] {
+            let mut app = App::new();
+            app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+                .unwrap();
+            app.run(
+                "transform.changeType",
+                &json!({"query": "Sales", "columns": ["Day"], "type": "date"}),
+            )
+            .unwrap();
+            app.run(
+                "transform.renameColumn",
+                &json!({"query": "Sales", "column": "Day", "name": "Date"}),
+            )
+            .unwrap();
+            // The Source is offline while the filter is added (editing works offline).
+            std::fs::remove_file(&path).unwrap();
+            app.run(
+                "transform.filterRows",
+                &json!({"query": "Sales", "conditions": [
+                    {"column": "Date", "op": op, "value": "2024-01-31"}]}),
+            )
+            .unwrap();
+            let bad = json!({"query": "Sales", "conditions": [
+                {"column": "Date", "op": op, "value": "soon"}]});
+            assert!(
+                matches!(
+                    app.run("transform.filterRows", &bad),
+                    Err(Error::InvalidParams { .. })
+                ),
+                "{op}"
+            );
+            dir.write("Sales.csv", text);
+            app.run("home.closeApply", &Value::Null).unwrap();
+            assert_eq!(app.document().tables[0].rows(), 1, "{op}");
+        }
+    }
+
     /// The first column's value buffer: which load's data the document holds.
     fn data(app: &App) -> usize {
         app.document().tables[0].buffers()[0].0

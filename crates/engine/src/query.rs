@@ -3,7 +3,7 @@
 //! Refresh (see `load.rs`). All are [`Run::Edit`](crate::Run::Edit), so undo restores the steps
 //! and the Stale flags together, and a step that can't run changes nothing.
 
-use arrow_schema::{DataType, Schema};
+use arrow_schema::{DataType, Schema, TimeUnit};
 use opendash_data::step::{
     ColumnType, Combine, Condition, JoinKind, MAX_CONDITIONS, Merge, Op, Step,
     Value as FilterValue, too_many_conditions,
@@ -136,7 +136,8 @@ pub(crate) fn filter_rows(doc: &mut Document, params: &Value) -> Result {
 }
 
 /// One `{column, op, value}` of `transform.filterRows`. Text values for a date or datetime
-/// column (in `schema`, Query `q`'s Preview) are read as dates in the Query's Culture.
+/// column (in `schema`, Query `q`'s Preview, or if there is none, as its Changed Type steps
+/// declare) are read as dates in the Query's Culture.
 fn condition(doc: &Document, q: usize, schema: Option<&Schema>, c: &Value) -> Result<Condition> {
     const ID: &str = "transform.filterRows";
     let column = text(c, "column", ID)?;
@@ -153,9 +154,19 @@ fn condition(doc: &Document, q: usize, schema: Option<&Schema>, c: &Value) -> Re
         other => return Err(invalid(ID, format!("unknown op `{other}`"))),
     };
     let query = doc.queries.get(q);
-    let ty = schema
-        .and_then(|s| s.field_with_name(&column).ok())
-        .map(|f| f.data_type().clone());
+    let ty = match schema {
+        Some(s) => s
+            .field_with_name(&column)
+            .ok()
+            .map(|f| f.data_type().clone()),
+        // No Preview (the Source is offline): what the steps declare, so a date isn't stored
+        // as text that would never match.
+        None => query.and_then(|q| match declared_type(&q.steps, &column)? {
+            ColumnType::Date => Some(DataType::Date32),
+            ColumnType::DateTime => Some(DataType::Timestamp(TimeUnit::Microsecond, None)),
+            _ => None,
+        }),
+    };
     let bad = |what: &str| invalid(ID, format!("`{column}`: {what}"));
     let value = match c.get("value") {
         None => return Err(bad("`value` is required (null for is null)")),
@@ -267,6 +278,30 @@ fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
     let name = query.name.clone();
     doc.stale.insert(name);
     Ok(())
+}
+
+/// The type `steps` give `column` at their end: its last Changed Type, following renames back.
+/// `None` when no step sets it (or it comes from before a Promoted Headers, or a merge).
+fn declared_type(steps: &[Step], column: &str) -> Option<ColumnType> {
+    let mut name = column;
+    for step in steps.iter().rev() {
+        match step {
+            Step::ChangedType(types) => {
+                if let Some((_, ty)) = types.iter().rev().find(|(c, _)| c == name) {
+                    return Some(*ty);
+                }
+            }
+            Step::RenamedColumns(pairs) => {
+                if let Some((old, _)) = pairs.iter().find(|(_, new)| new == name) {
+                    name = old;
+                }
+            }
+            Step::PromotedHeaders => return None,
+            Step::MergedQueries(m) if m.expand.iter().any(|(_, new)| new == name) => return None,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Bytes of the Document's loaded tables.
