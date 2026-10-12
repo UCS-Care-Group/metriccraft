@@ -40,6 +40,29 @@ impl Table {
     pub fn memory(&self) -> usize {
         self.batch.get_array_memory_size()
     }
+
+    /// The column buffers' allocations, as `(address, bytes)`. Clones of a table (undo
+    /// snapshots) share them: counting distinct addresses gives the memory really held.
+    pub fn buffers(&self) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        for column in self.batch.columns() {
+            buffers(column.as_ref(), &mut out);
+        }
+        out
+    }
+}
+
+/// Appends `array`'s buffers (values, offsets, validity, and its children's: a dictionary's
+/// values) to `out`. Recursion follows the type's nesting, which our tables keep to one level.
+fn buffers(array: &dyn Array, out: &mut Vec<(usize, usize)>) {
+    let data = array.to_data();
+    let nulls = data.nulls().map(NullBuffer::buffer);
+    for b in data.buffers().iter().chain(nulls) {
+        out.push((b.data_ptr().as_ptr().addr(), b.capacity()));
+    }
+    for child in data.child_data() {
+        buffers(arrow_array::make_array(child.clone()).as_ref(), out);
+    }
 }
 
 /// Default memory cap for loaded data: half of physical RAM (1 GB if unknown), 1 GB on the web.

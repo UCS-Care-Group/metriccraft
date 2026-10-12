@@ -16,12 +16,19 @@
 //! Source once, sharing a merged-from Query's result (`Pass`). Every command here is an
 //! undoable edit (undoing a refresh is something Power BI can't do): undo puts back the previous
 //! tables, steps and Stale flags together.
+//!
+//! **Memory cap** (spec N-4, [`App::memory_cap`]): a load may use the cap less every distinct
+//! column buffer held by the document, undo and redo ([`App::memory`]; snapshots share
+//! buffers, so each counts once), the tables being replaced included. When the new data won't
+//! fit, the oldest undo steps are dropped while they hold data the document and redo don't
+//! (counted in [`LoadReport::undo_dropped`]); if it still doesn't fit with none left, the load
+//! fails with the memory-cap error naming the table.
 
 use std::path::Path;
 
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
-use opendash_data::{Pass, Preview, Query, Table, default_memory_cap};
+use opendash_data::{Pass, Preview, Query, Table};
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -30,6 +37,8 @@ use crate::{App, Document, Error, Result};
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LoadReport {
     pub tables: Vec<Loaded>,
+    /// Undo steps dropped (oldest first) to fit the new data under the memory cap.
+    pub undo_dropped: usize,
 }
 
 /// One loaded table: its rows and its Cell errors (loaded as blank).
@@ -96,13 +105,12 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
     if name.is_empty() {
         return Err(invalid(GET_DATA, "`name` must not be empty".into()));
     }
-    app.edit_loading(|doc| {
+    app.edit_loading(0, |doc, limit| {
         if doc.queries.iter().any(|q| q.name == name) || doc.tables.iter().any(|t| t.name() == name)
         {
             return Err(invalid(GET_DATA, format!("`{name}` already exists")));
         }
-        let limit = default_memory_cap().saturating_sub(loaded(&doc.tables));
-        let query = Query::connect(&name, source, culture, limit).map_err(Error::Data)?;
+        let query = Query::connect(&name, source.clone(), culture, limit).map_err(Error::Data)?;
         let (table, cell_errors) = query.run(limit).map_err(Error::Data)?;
         let report = LoadReport {
             tables: vec![Loaded {
@@ -110,6 +118,7 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
                 rows: table.rows(),
                 cell_errors,
             }],
+            undo_dropped: 0,
         };
         doc.queries.push(query);
         doc.tables.push(table);
@@ -118,7 +127,8 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
 }
 
 pub(crate) fn refresh(app: &mut App, _params: &Value) -> Result {
-    app.edit_loading(|doc| load(doc, |_| true))
+    let estimate = loaded(&app.document().tables);
+    app.edit_loading(estimate, |doc, limit| load(doc, |_| true, limit))
 }
 
 /// Whether Close & Apply has anything to load.
@@ -128,37 +138,38 @@ pub(crate) fn has_stale(app: &App) -> bool {
 
 /// Close & Apply: loads every Stale Query, and every Query that merges one (transitively).
 pub(crate) fn close_apply(app: &mut App, _params: &Value) -> Result {
-    app.edit_loading(|doc| {
-        let mut names: Vec<String> = doc.stale.iter().cloned().collect();
-        // Each pass adds at least one Query or stops, so this ends within `queries.len()` passes.
-        loop {
-            let more: Vec<String> = doc
-                .queries
-                .iter()
-                .filter(|q| !names.contains(&q.name) && names.iter().any(|n| q.merges(n)))
-                .map(|q| q.name.clone())
-                .collect();
-            if more.is_empty() {
-                break;
-            }
-            names.extend(more);
+    let doc = app.document();
+    let mut names: Vec<String> = doc.stale.iter().cloned().collect();
+    // Each pass adds at least one Query or stops, so this ends within `queries.len()` passes.
+    loop {
+        let more: Vec<String> = doc
+            .queries
+            .iter()
+            .filter(|q| !names.contains(&q.name) && names.iter().any(|n| q.merges(n)))
+            .map(|q| q.name.clone())
+            .collect();
+        if more.is_empty() {
+            break;
         }
-        load(doc, |q| names.contains(&q.name))
+        names.extend(more);
+    }
+    let estimate = doc
+        .tables
+        .iter()
+        .filter(|t| names.iter().any(|n| n == t.name()))
+        .map(Table::memory)
+        .sum();
+    app.edit_loading(estimate, |doc, limit| {
+        load(doc, |q| names.contains(&q.name), limit)
     })
 }
 
 /// Re-runs the Queries `pick` selects, from their Sources, and replaces their tables;
 /// all-or-nothing (the caller runs on a copy of the Document). Clears their Stale flags.
-fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool) -> Result<LoadReport> {
-    let kept: usize = doc
-        .tables
-        .iter()
-        .filter(|t| !doc.queries.iter().any(|q| q.name == t.name() && pick(q)))
-        .map(Table::memory)
-        .sum();
-    // The new tables (and the merged-from Queries run for them) must fit the cap together; the
-    // old ones are held beside them. One pass, so each Source is read once.
-    let mut pass = Pass::new(&doc.queries, default_memory_cap().saturating_sub(kept));
+fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Result<LoadReport> {
+    // The new tables (and the merged-from Queries run for them) must fit `limit` together: the
+    // cap less everything held, the old tables included. One pass, so each Source is read once.
+    let mut pass = Pass::new(&doc.queries, limit);
     let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
     let mut report = LoadReport::default();
     for query in merged_first(&doc.queries).into_iter().filter(|q| pick(q)) {
@@ -184,13 +195,18 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool) -> Result<LoadReport>
 }
 
 /// The Preview of Query `query` at Applied Step `step` (0 = first), or of its Source (`None`).
-pub(crate) fn preview(doc: &Document, query: &str, step: Option<usize>) -> Result<Preview> {
+pub(crate) fn preview(
+    doc: &Document,
+    query: &str,
+    step: Option<usize>,
+    cap: usize,
+) -> Result<Preview> {
     let q = doc
         .queries
         .iter()
         .find(|q| q.name == query)
         .ok_or_else(|| Error::UnknownQuery(query.into()))?;
-    let limit = default_memory_cap().saturating_sub(loaded(&doc.tables));
+    let limit = cap.saturating_sub(loaded(&doc.tables));
     q.preview_with(&doc.queries, &fresh(doc), step, limit)
         .map_err(Error::Data)
 }
@@ -576,6 +592,79 @@ mod tests {
         let e = app.run("home.closeApply", &Value::Null).unwrap_err();
         assert!(
             matches!(&e, Error::Refresh { query, .. } if query == "Stock"),
+            "{e:?}"
+        );
+        assert_eq!(app.document(), &before);
+    }
+
+    /// The first column's value buffer: which load's data the document holds.
+    fn data(app: &App) -> usize {
+        app.document().tables[0].buffers()[0].0
+    }
+
+    #[test]
+    fn undo_keeps_every_load_while_the_cap_allows() {
+        let dir = Dir::new();
+        let path = dir.write("Sales.csv", "Region,Qty\nNorth,3\nSouth,4\n");
+        let mut app = App::new();
+        app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+            .unwrap();
+        let p1 = data(&app);
+        app.run("home.refresh", &Value::Null).unwrap();
+        let p2 = data(&app);
+        app.run("home.refresh", &Value::Null).unwrap();
+        assert_eq!(app.last_load().unwrap().undo_dropped, 0);
+        app.run("edit.undo", &Value::Null).unwrap();
+        assert_eq!(data(&app), p2);
+        app.run("edit.undo", &Value::Null).unwrap();
+        assert_eq!(data(&app), p1);
+    }
+
+    #[test]
+    fn undo_held_data_counts_against_the_memory_cap() {
+        let dir = Dir::new();
+        let mut csv = String::from("Amount\n");
+        for i in 0..50_000 {
+            csv.push_str(&format!("{i}.5\n"));
+        }
+        let path = dir.write("Sales.csv", &csv);
+        let mut app = App::new();
+        app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+            .unwrap();
+        let one = app.memory();
+        assert!(one >= 50_000 * 8, "{one}");
+        // Room for three and a half copies of the table.
+        let cap = one * 7 / 2;
+        app.set_memory_cap(cap);
+        let mut dropped = Vec::new();
+        for _ in 0..5 {
+            app.run("home.refresh", &Value::Null).unwrap();
+            assert!(app.memory() <= cap, "{} held, cap {cap}", app.memory());
+            dropped.push(app.last_load().unwrap().undo_dropped);
+        }
+        // Two refreshes fit beside the first load (3 copies); then each refresh drops the
+        // oldest data (the first also drops the empty document before Get Data).
+        assert_eq!(dropped, [0, 0, 2, 1, 1]);
+        let mut undos = 0;
+        while app.can_undo() {
+            app.run("edit.undo", &Value::Null).unwrap();
+            undos += 1;
+        }
+        assert_eq!((undos, app.document().tables.len()), (2, 1));
+
+        // No undo data to drop and no room beside the old table: the load fails, naming it.
+        let mut app = App::new();
+        app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+            .unwrap();
+        app.set_memory_cap(one * 3 / 2);
+        let before = app.document().clone();
+        let e = app.run("home.refresh", &Value::Null).unwrap_err();
+        assert!(
+            matches!(
+                &e,
+                Error::Refresh { query, error: opendash_data::Error::MemoryCap { table, .. } }
+                    if query == "Sales" && table == "Sales"
+            ),
             "{e:?}"
         );
         assert_eq!(app.document(), &before);

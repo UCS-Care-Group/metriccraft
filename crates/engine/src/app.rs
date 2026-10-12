@@ -1,6 +1,6 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
-use opendash_data::{Preview, Query, Table};
+use opendash_data::{Preview, Query, Table, default_memory_cap};
 use serde_json::Value;
 
 use crate::{COMMANDS, Command, Error, LoadReport, Result, Run};
@@ -33,6 +33,8 @@ pub struct App {
     redo: Vec<Document>,
     /// What the last Get Data or Refresh loaded (not part of the Document: not undone).
     last_load: Option<LoadReport>,
+    /// The memory cap for loaded data (spec N-4), counted over the document, undo and redo.
+    memory_cap: usize,
 }
 
 impl Default for App {
@@ -54,6 +56,7 @@ impl App {
             undo: VecDeque::new(),
             redo: Vec::new(),
             last_load: None,
+            memory_cap: default_memory_cap(),
         }
     }
 
@@ -67,6 +70,22 @@ impl App {
             doc,
             ..Self::default()
         }
+    }
+
+    /// The memory cap for loaded data (spec N-4): half of physical RAM unless set.
+    pub fn memory_cap(&self) -> usize {
+        self.memory_cap
+    }
+
+    /// Sets the memory cap for loaded data (spec N-4); checked by the next load.
+    pub fn set_memory_cap(&mut self, bytes: usize) {
+        self.memory_cap = bytes;
+    }
+
+    /// Bytes of column data held: every distinct buffer of the document, undo and redo
+    /// (snapshots share buffers, so each is counted once). What the memory cap is checked against.
+    pub fn memory(&self) -> usize {
+        Held::new(self.undo.iter().chain(&self.redo).chain([&self.doc])).total
     }
 
     pub fn commands(&self) -> &'static [Command] {
@@ -100,14 +119,45 @@ impl App {
         }
     }
 
-    /// Runs a loading edit (Get Data, Refresh) like a [`Run::Edit`]: on a copy that replaces the
-    /// document only on success, recorded for undo. Keeps its report.
+    /// Runs a loading edit (Get Data, Refresh, Close & Apply) like a [`Run::Edit`]: on a copy
+    /// that replaces the document only on success, recorded for undo. Keeps its report.
+    ///
+    /// `edit` gets the bytes it may load: the cap less everything held (see [`App::memory`]).
+    /// To make room, the oldest undo steps are dropped while they hold data the document and
+    /// redo don't: first until `estimate` (the new data's expected size, e.g. the tables it
+    /// replaces) fits, then, if the load still hits the cap, all of them and it runs once more.
+    /// Dropped steps stay dropped even if the load then fails; the report counts them.
     pub(crate) fn edit_loading(
         &mut self,
-        edit: impl FnOnce(&mut Document) -> Result<LoadReport>,
+        estimate: usize,
+        edit: impl Fn(&mut Document, usize) -> Result<LoadReport>,
     ) -> Result {
-        let mut next = self.doc.clone();
-        let report = edit(&mut next)?;
+        let mut held = Held::new(self.undo.iter().chain(&self.redo).chain([&self.doc]));
+        // What dropping every undo step would leave.
+        let base = Held::new(self.redo.iter().chain([&self.doc])).total;
+        let mut dropped = 0usize;
+        let mut room = |undo: &mut VecDeque<Document>, held: &mut Held, need: usize| {
+            while held.total.saturating_add(need) > self.memory_cap && held.total > base {
+                let Some(oldest) = undo.pop_front() else {
+                    break;
+                };
+                held.remove(&oldest);
+                dropped = dropped.saturating_add(1);
+            }
+        };
+        room(&mut self.undo, &mut held, estimate);
+        let report = loop {
+            let mut next = self.doc.clone();
+            match edit(&mut next, self.memory_cap.saturating_sub(held.total)) {
+                Ok(report) => break (next, report),
+                Err(e) if is_memory_cap(&e) && held.total > base => {
+                    room(&mut self.undo, &mut held, usize::MAX);
+                }
+                Err(e) => return Err(e),
+            }
+        };
+        let (next, mut report) = report;
+        report.undo_dropped = dropped;
         let prev = std::mem::replace(&mut self.doc, next);
         self.push_undo(prev);
         self.redo.clear();
@@ -123,7 +173,7 @@ impl App {
     /// The Preview of `query` at Applied Step `step` (0 = first), or of its Source for `None`:
     /// the first 1,000 Source rows, with Cell errors per cell. Derived, not stored.
     pub fn preview(&self, query: &str, step: Option<usize>) -> Result<Preview> {
-        crate::load::preview(&self.doc, query, step)
+        crate::load::preview(&self.doc, query, step, self.memory_cap)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -159,6 +209,62 @@ impl App {
         }
         self.undo.push_back(doc);
     }
+}
+
+/// Whether `e` is a load stopped by the memory cap.
+fn is_memory_cap(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Data(opendash_data::Error::MemoryCap { .. })
+            | Error::Refresh {
+                error: opendash_data::Error::MemoryCap { .. },
+                ..
+            }
+    )
+}
+
+/// The distinct column buffers held by some Documents: by address, its bytes and how many of
+/// the Documents hold it. O(buffers) to build; removing a Document is O(its buffers).
+struct Held {
+    buffers: HashMap<usize, (usize, usize)>,
+    total: usize,
+}
+
+impl Held {
+    fn new<'a>(docs: impl IntoIterator<Item = &'a Document>) -> Self {
+        let mut held = Self {
+            buffers: HashMap::new(),
+            total: 0,
+        };
+        for doc in docs {
+            for (addr, bytes) in distinct(doc) {
+                let entry = held.buffers.entry(addr).or_insert((bytes, 0));
+                if entry.1 == 0 {
+                    held.total = held.total.saturating_add(bytes);
+                }
+                entry.1 = entry.1.saturating_add(1);
+            }
+        }
+        held
+    }
+
+    /// `doc` is no longer held: frees the buffers only it held.
+    fn remove(&mut self, doc: &Document) {
+        for (addr, _) in distinct(doc) {
+            if let Some(entry) = self.buffers.get_mut(&addr) {
+                entry.1 = entry.1.saturating_sub(1);
+                if entry.1 == 0 {
+                    self.total = self.total.saturating_sub(entry.0);
+                    self.buffers.remove(&addr);
+                }
+            }
+        }
+    }
+}
+
+/// `doc`'s column buffers, each once.
+fn distinct(doc: &Document) -> HashMap<usize, usize> {
+    doc.tables.iter().flat_map(Table::buffers).collect()
 }
 
 #[cfg(test)]
