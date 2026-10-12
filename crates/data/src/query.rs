@@ -100,10 +100,10 @@ impl Query {
         )?;
         // No row ever reached a Promoted Headers: run the rest of the steps on the empty batch
         // it held, as the whole table would (nothing to promote).
-        if let Some((from, batch)) = head.held.take() {
-            if let Some(batch) = head.run(batch, from, false)? {
-                push(batch)?;
-            }
+        if let Some((from, batch)) = head.held.take()
+            && let Some(batch) = head.run(batch, from, false)?
+        {
+            push(batch)?;
         }
         let table = builder
             .ok_or_else(|| Error::Source {

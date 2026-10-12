@@ -161,8 +161,8 @@ impl TableBuilder {
                 .map(|f| (f.name().clone(), f.data_type().clone()))
                 .collect()
         };
-        let (got, want): (Vec<(String, DataType)>, Vec<(String, DataType)>) =
-            (columns(&batch.schema()), columns(&self.schema));
+        type Columns = Vec<(String, DataType)>;
+        let (got, want): (Columns, Columns) = (columns(&batch.schema()), columns(&self.schema));
         if got != want {
             return Err(self.error(format!("batch columns {got:?} don't match {want:?}")));
         }
