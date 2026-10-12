@@ -5,6 +5,7 @@
 
 mod app;
 mod cmd;
+mod file;
 mod load;
 mod model;
 mod query;
@@ -12,6 +13,7 @@ mod relationship;
 
 pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};
+pub use file::Location;
 pub use load::{LoadReport, Loaded};
 
 /// Errors from running commands.
@@ -36,6 +38,9 @@ pub enum Error {
     /// sort by column that no longer holds, a Relationship's one side no longer unique), failed;
     /// nothing was changed.
     Model(opendash_model::Error),
+    /// Opening or saving a Project or Package failed; nothing was changed. An interrupted save
+    /// ([`opendash_file::Error::Interrupted`]) is retried with `file.open`'s `recover`.
+    File(opendash_file::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -55,6 +60,7 @@ impl std::fmt::Display for Error {
             }
             Self::UnknownQuery(name) => write!(f, "there is no query `{name}`"),
             Self::Model(e) => e.fmt(f),
+            Self::File(e) => e.fmt(f),
         }
     }
 }

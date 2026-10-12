@@ -43,6 +43,9 @@ pub struct App {
     /// A warning from the last command, which still succeeded (e.g. a Relationship created
     /// inactive). Not part of the Document.
     notice: Option<String>,
+    /// Where the document was opened from or last saved to, and what its files held beyond it
+    /// (`file.rs`). Not part of the Document: not undone.
+    pub(crate) file: crate::file::FileState,
 }
 
 impl Default for App {
@@ -66,7 +69,17 @@ impl App {
             last_load: None,
             memory_cap: default_memory_cap(),
             notice: None,
+            file: crate::file::FileState::default(),
         }
+    }
+
+    /// Replaces the document (File > Open, File > New): not undoable, as in Power BI; clears
+    /// the undo and redo history and the last load report.
+    pub(crate) fn replace(&mut self, doc: Document) {
+        self.doc = doc;
+        self.undo.clear();
+        self.redo.clear();
+        self.last_load = None;
     }
 
     pub fn document(&self) -> &Document {
