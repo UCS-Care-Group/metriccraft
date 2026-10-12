@@ -217,16 +217,27 @@ pub(crate) fn merge_queries(doc: &mut Document, params: &Value) -> Result {
     };
     let expand = match params.get("expand") {
         Some(_) => list(params, "expand", ID)?,
-        // Power Query's expand dialog ticks every column of the other table.
-        None => doc
-            .tables
-            .iter()
-            .find(|t| t.name() == other)
-            .map(|t| {
-                let schema = t.batch().schema();
-                schema.fields().iter().map(|f| f.name().clone()).collect()
-            })
-            .ok_or_else(|| invalid(ID, format!("`{other}` isn't loaded; list `expand`")))?,
+        // Power Query's expand dialog ticks every column of the other table: as its steps
+        // now give it (its table may be Stale), else as loaded (its Source offline).
+        None => {
+            let previewed = doc.queries.iter().find(|q| q.name == other).and_then(|q| {
+                let limit = default_memory_cap().saturating_sub(loaded(doc));
+                let step = q.steps.len().checked_sub(1);
+                q.preview_with(&doc.queries, &crate::load::fresh(doc), step, limit)
+                    .ok()
+                    .map(|p| p.batch.schema())
+            });
+            let loaded = || {
+                doc.tables
+                    .iter()
+                    .find(|t| t.name() == other)
+                    .map(|t| t.batch().schema())
+            };
+            previewed
+                .or_else(loaded)
+                .map(|schema| schema.fields().iter().map(|f| f.name().clone()).collect())
+                .ok_or_else(|| invalid(ID, format!("`{other}` can't be read; list `expand`")))?
+        }
     };
     let prefix = match params.get("prefix") {
         None => true,
@@ -665,6 +676,23 @@ mod tests {
 
     fn merge_params() -> Value {
         json!({"query": "Sales", "keys": ["Region"], "with": "Targets", "withKeys": ["Region"]})
+    }
+
+    #[test]
+    fn merge_expands_the_other_querys_current_columns() {
+        let mut app = two();
+        // Targets is edited (Stale): its loaded table still has `Target`.
+        app.run(
+            "transform.renameColumn",
+            &json!({"query": "Targets", "column": "Target", "name": "Goal"}),
+        )
+        .unwrap();
+        app.run("home.mergeQueries", &merge_params()).unwrap();
+        let Some(Step::MergedQueries(m)) = app.document().queries[0].steps.last() else {
+            panic!("no merge step");
+        };
+        let expanded: Vec<&str> = m.expand.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(expanded, ["Region", "Goal"]);
     }
 
     #[test]
