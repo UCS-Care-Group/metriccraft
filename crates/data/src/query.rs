@@ -143,6 +143,11 @@ impl<'a> Pass<'a> {
 pub(crate) struct Ctx<'a> {
     queries: &'a [Query],
     limit: usize,
+    /// For a Preview: the loaded Tables that aren't Stale. A merged-from Query uses its Table
+    /// here, else its own Preview; never a full run (see `crate::preview`).
+    preview: Option<&'a [&'a Table]>,
+    /// Previews of merged-from Queries already made.
+    previews: HashMap<&'a str, (RecordBatch, usize)>,
     /// The Queries being run, outermost first.
     stack: Vec<&'a str>,
     /// Results of the Queries already run.
@@ -156,10 +161,25 @@ impl<'a> Ctx<'a> {
         Self {
             queries,
             limit,
+            preview: None,
+            previews: HashMap::new(),
             stack: Vec::new(),
             done: HashMap::new(),
             held: 0,
         }
+    }
+
+    /// A Preview's: merged-from Queries use `loaded` (the Tables that aren't Stale) or their own
+    /// Preview.
+    pub(crate) fn preview(queries: &'a [Query], loaded: &'a [&'a Table], limit: usize) -> Self {
+        Self {
+            preview: Some(loaded),
+            ..Self::new(queries, limit)
+        }
+    }
+
+    pub(crate) fn limit(&self) -> usize {
+        self.limit
     }
 
     /// The limit less the results held.
@@ -223,7 +243,14 @@ impl<'a> Ctx<'a> {
                 "`{into}` can't merge `{name}`: `{name}` depends on `{into}`"
             )));
         }
-        if let Some((table, n)) = self.done.get(name) {
+        if let Some(loaded) = self.preview {
+            if let Some(t) = loaded.iter().find(|t| t.name() == name) {
+                return Ok((t.batch().clone(), 0));
+            }
+            if let Some(p) = self.previews.get(name) {
+                return Ok(p.clone());
+            }
+        } else if let Some((table, n)) = self.done.get(name) {
             return Ok((table.batch().clone(), *n));
         }
         let q = self
@@ -235,10 +262,19 @@ impl<'a> Ctx<'a> {
             return Err(err(format!("merges nest more than {MAX_DEPTH} deep")));
         }
         self.stack.push(into);
-        let r = self.table(q);
+        let r = match self.preview {
+            None => self.table(q).map(|(t, n)| (t.batch().clone(), n)),
+            Some(_) => q.preview_in(self, q.steps.len()).map(|p| {
+                let n = p.error_count();
+                (p.batch, n)
+            }),
+        };
         self.stack.pop();
-        let (table, n) = r?;
-        Ok((table.batch().clone(), n))
+        let r = r?;
+        if self.preview.is_some() {
+            self.previews.insert(&q.name, r.clone());
+        }
+        Ok(r)
     }
 }
 

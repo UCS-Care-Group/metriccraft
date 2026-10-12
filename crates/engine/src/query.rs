@@ -143,7 +143,12 @@ fn condition(doc: &Document, q: usize, c: &Value) -> Result<Condition> {
     let ty = query.and_then(|query| {
         let step = query.steps.len().checked_sub(1);
         let preview = query
-            .preview_with(&doc.queries, step, default_memory_cap())
+            .preview_with(
+                &doc.queries,
+                &crate::load::fresh(doc),
+                step,
+                default_memory_cap(),
+            )
             .ok()?;
         let schema = preview.batch.schema();
         let f = schema.field_with_name(&column).ok()?;
@@ -252,7 +257,7 @@ fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
     if let Some(last) = query.steps.len().checked_sub(1) {
         let limit = default_memory_cap().saturating_sub(doc.tables.iter().map(Table::memory).sum());
         if let Err(e @ opendash_data::Error::Step { .. }) =
-            query.preview_with(&doc.queries, Some(last), limit)
+            query.preview_with(&doc.queries, &crate::load::fresh(doc), Some(last), limit)
         {
             return Err(invalid(id, e.to_string()));
         }

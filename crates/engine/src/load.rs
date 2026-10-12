@@ -191,8 +191,16 @@ pub(crate) fn preview(doc: &Document, query: &str, step: Option<usize>) -> Resul
         .find(|q| q.name == query)
         .ok_or_else(|| Error::UnknownQuery(query.into()))?;
     let limit = default_memory_cap().saturating_sub(loaded(&doc.tables));
-    q.preview_with(&doc.queries, step, limit)
+    q.preview_with(&doc.queries, &fresh(doc), step, limit)
         .map_err(Error::Data)
+}
+
+/// The loaded Tables that aren't Stale: what a Preview through a merge may use.
+pub(crate) fn fresh(doc: &Document) -> Vec<&Table> {
+    doc.tables
+        .iter()
+        .filter(|t| !doc.stale.contains(t.name()))
+        .collect()
 }
 
 /// `queries` with each one after the Queries it merges, so a failure names the Query whose own
@@ -473,6 +481,38 @@ mod tests {
             "{e:?}"
         );
         assert_eq!(app.document(), &before);
+    }
+
+    #[test]
+    fn a_merge_previews_against_the_loaded_table_unless_stale() {
+        let dir = Dir::new();
+        let sales = dir.write("Sales.csv", "Region,Qty\nNorth,3\n");
+        let targets = dir.write("Targets.csv", "Region,Target\nNorth,10\n");
+        let mut app = App::new();
+        for path in [&sales, &targets] {
+            app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+                .unwrap();
+        }
+        let merge = json!({"query": "Sales", "keys": ["Region"], "with": "Targets",
+            "withKeys": ["Region"], "expand": ["Target"]});
+        app.run("home.mergeQueries", &merge).unwrap();
+        // Sales' Targets.Target column, printed.
+        let target = |app: &App| {
+            let p = app.preview("Sales", Some(2)).unwrap();
+            format!("{:?}", p.batch.column(2))
+        };
+        // The file changes, Targets isn't reloaded: its loaded table is used.
+        dir.write("Targets.csv", "Region,Target\nNorth,20\n");
+        assert!(target(&app).contains("10"), "{}", target(&app));
+        // Targets edited (Stale): its own Preview, which reads the file.
+        app.run(
+            "transform.filterRows",
+            &json!({"query": "Targets", "conditions": [
+                {"column": "Target", "op": "greater", "value": 0}]}),
+        )
+        .unwrap();
+        assert!(app.document().stale.contains("Targets"));
+        assert!(target(&app).contains("20"), "{}", target(&app));
     }
 
     #[test]
