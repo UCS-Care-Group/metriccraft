@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::file;
 use crate::load;
 use crate::model::{self, has_tables};
 use crate::query::{self, has_queries};
@@ -51,6 +52,43 @@ pub static COMMANDS: &[Command] = &[
         params: "",
         enabled: App::can_redo,
         run: Run::App(|app, _| app.redo()),
+    },
+    // The File menu (ADR 0003, spec F-1). Open and New replace the document: not undoable.
+    Command {
+        id: "file.new",
+        label: "New",
+        ribbon: "File",
+        shortcut: Some("Ctrl+N"),
+        params: "",
+        enabled: |_| true,
+        run: Run::App(file::new),
+    },
+    Command {
+        id: "file.open",
+        label: "Open",
+        ribbon: "File",
+        shortcut: Some("Ctrl+O"),
+        params: file::OPEN_PARAMS,
+        enabled: |_| true,
+        run: Run::App(file::open),
+    },
+    Command {
+        id: "file.save",
+        label: "Save",
+        ribbon: "File",
+        shortcut: Some("Ctrl+S"),
+        params: file::SAVE_PARAMS,
+        enabled: |_| true,
+        run: Run::App(file::save),
+    },
+    Command {
+        id: "file.saveAs",
+        label: "Save as",
+        ribbon: "File",
+        shortcut: None,
+        params: file::SAVE_AS_PARAMS,
+        enabled: |_| true,
+        run: Run::App(file::save_as),
     },
     // Get Data and Refresh (spec S-1, S-2); both undoable, both report what they loaded.
     Command {
