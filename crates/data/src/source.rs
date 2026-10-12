@@ -7,6 +7,8 @@ use arrow_schema::SchemaRef;
 
 use crate::{Result, Table, TableBuilder};
 
+pub mod csv;
+
 /// Rows per batch read from a Source.
 pub const BATCH_ROWS: usize = 8192;
 
