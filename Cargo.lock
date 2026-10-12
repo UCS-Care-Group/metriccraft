@@ -805,6 +805,12 @@ version = "0.0.0"
 [[package]]
 name = "opendash-model"
 version = "0.0.0"
+dependencies = [
+ "arrow-array",
+ "arrow-cast",
+ "arrow-schema",
+ "opendash-data",
+]
 
 [[package]]
 name = "opendash-ui-egui"

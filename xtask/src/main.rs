@@ -381,25 +381,30 @@ fn parity(update: bool) -> Result {
     report(run.problems())
 }
 
-/// Writes each case's datasets and query as plain CRLF files into the gitignored
-/// `observations/cases/`, ready to copy from Notepad in the Windows VM.
+/// Writes one folder per case into the gitignored `observations/cases/` (cleared first), ready
+/// to copy to `C:\opendash-parity\` in the Windows VM: query, datasets, CSV files byte-exact,
+/// M with the VM path, and a README (`opendash_model::parity::export`, docs/parity.md).
 fn parity_export() -> Result {
     let out = Path::new("observations/cases");
-    std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
-    let crlf = |lines: Vec<String>| (lines.join("\n") + "\n").replace('\n', "\r\n");
-    for case in opendash_model::parity::cases(Path::new("parity"))? {
-        let mut files = vec![(format!("{}.dax", case.id), crlf(vec![case.query.clone()]))];
-        for t in &case.tables {
-            let mut lines = vec![t.columns.join("\t")];
-            lines.extend(t.rows.iter().map(|r| r.join("\t")));
-            files.push((format!("{}.{}.tsv", case.id, t.name), crlf(lines)));
-        }
-        for (name, body) in files {
-            let path = out.join(&name);
-            std::fs::write(&path, body).map_err(|e| format!("writing {}: {e}", path.display()))?;
-            eprintln!("  {}", path.display());
-        }
+    if out.exists() {
+        std::fs::remove_dir_all(out).map_err(|e| format!("clearing {}: {e}", out.display()))?;
     }
+    for case in opendash_model::parity::cases(Path::new("parity"))? {
+        for (name, body) in opendash_model::parity::export(&case)? {
+            let path = out.join(&name);
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("creating {}: {e}", dir.display()))?;
+            }
+            std::fs::write(&path, body).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        }
+        eprintln!("  {}", out.join(&case.id).display());
+    }
+    eprintln!(
+        "copy {} to {} in the VM",
+        out.display(),
+        opendash_model::parity::VM_DIR
+    );
     Ok(())
 }
 

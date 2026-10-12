@@ -5,9 +5,16 @@
 //! exactly. `parity/passing.txt` lists the Checks that have passed (one `case/Check` per line);
 //! everything else is **Pending**. A listed Check that fails, or an unlisted one that passes,
 //! is a problem until `cargo xtask parity --update` rewrites the list.
+//!
+//! **Shaping cases** (datasets given as `Source: csv` files) run now, without a DAX evaluator:
+//! see [`shaping`]. Every other case waits for the M3 evaluator.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+
+pub mod shaping;
+
+pub use shaping::{VM_DIR, copy_text, export};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -33,24 +40,52 @@ impl Table {
     }
 }
 
+/// A dataset given as a CSV file (`Source: csv Sales.csv` + a ```` ```csv ```` block), loaded
+/// through Get Data as the Query named after the file (`Sales`).
+#[derive(Debug, PartialEq)]
+pub struct CsvSource {
+    /// The file name, e.g. `Sales.csv`.
+    pub file: String,
+    /// The Query (and table) name: the file name without `.csv`.
+    pub query: String,
+    /// The file's bytes: the block's lines, each ended by `\n`.
+    pub text: String,
+}
+
 #[derive(Debug)]
 pub struct Case {
     pub id: String,
     pub covers: Vec<String>,
+    /// *Enter data* tables.
     pub tables: Vec<Table>,
+    pub sources: Vec<CsvSource>,
+    /// The Culture (`Culture: en-GB`) Get Data reads the CSV files in.
+    pub culture: Option<String>,
+    /// `## M` blocks: a Query's whole M as OpenDash BI prints it, its file named without a
+    /// folder (`File.Contents("Sales.csv")`).
+    pub m: Vec<String>,
     pub query: String,
     pub observed: Table,
+    /// Observed facts beyond the result columns, as (Check name, observed text):
+    /// `Get Data M <Query>`, `M accepted`, `Load errors <Query>`, `Column order`.
+    pub observed_extra: Vec<(String, String)>,
 }
 
 /// Parses one case file. Malformed cases are errors, never skipped.
 pub fn parse(id: &str, text: &str) -> Result<Case> {
     let mut covers = Vec::new();
     let mut tables = Vec::new();
+    let mut sources: Vec<CsvSource> = Vec::new();
+    let mut culture = None;
+    let mut m = Vec::new();
     let mut query = None;
     let mut observed = None;
+    let mut extra = Vec::new();
     let mut versioned = false;
     let mut section = "";
     let mut next_table: Option<(String, Vec<(String, String)>)> = None;
+    let mut next_source: Option<String> = None;
+    let mut next_get_data: Option<String> = None;
     let mut fence: Option<(&str, Vec<&str>)> = None;
 
     for line in text.lines() {
@@ -63,6 +98,21 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
             match *info {
                 "dax" if section == "Query" => query = Some(body.join("\n")),
                 "tsv" if section == "Observed" => observed = Some(tsv(body, true)?),
+                "csv" if section == "Dataset" => {
+                    let file = next_source
+                        .take()
+                        .ok_or("csv block needs a `Source: csv <File>.csv` line above it")?;
+                    let query = file.strip_suffix(".csv").unwrap_or(&file).to_string();
+                    let text = body.iter().map(|l| format!("{l}\n")).collect();
+                    sources.push(CsvSource { file, query, text });
+                }
+                "m" if section == "M" => m.push(body.join("\n")),
+                "m" if section == "Observed" => {
+                    let q = next_get_data
+                        .take()
+                        .ok_or("observed m block needs a `Get Data M: <Query>` line above it")?;
+                    extra.push((format!("Get Data M {q}"), body.join("\n")));
+                }
                 "tsv" if section == "Dataset" => {
                     let (name, typed) = next_table
                         .take()
@@ -98,6 +148,40 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
                 .collect();
         } else if let Some(spec) = line.strip_prefix("Table:") {
             next_table = Some(table_line(spec)?);
+        } else if let Some(spec) = line.strip_prefix("Source:") {
+            let file = spec
+                .trim()
+                .strip_prefix("csv ")
+                .map(str::trim)
+                .filter(|f| f.len() > 4 && f.ends_with(".csv") && !f.contains(['/', '\\']))
+                .ok_or("`Source:` line needs `csv <File>.csv` (a file name, no folder)")?;
+            if sources.iter().any(|s| s.file == file) {
+                return Err(format!("`{file}` is given twice"));
+            }
+            next_source = Some(file.to_string());
+        } else if let Some(name) = line.strip_prefix("Culture:") {
+            let c = opendash_data::culture::Culture::get(name.trim())
+                .ok_or(format!("unknown Culture `{}`", name.trim()))?;
+            culture = Some(c.name.to_string());
+        } else if let Some(answer) = line.strip_prefix("M accepted:") {
+            let word = answer
+                .split_whitespace()
+                .next()
+                .map(str::to_lowercase)
+                .unwrap_or_default();
+            if word != "yes" && word != "no" {
+                return Err("`M accepted:` must start with `yes` or `no`".into());
+            }
+            extra.push(("M accepted".to_string(), word));
+        } else if let Some(q) = line.strip_prefix("Get Data M:") {
+            next_get_data = Some(q.trim().to_string());
+        } else if let Some(spec) = line.strip_prefix("Load errors:") {
+            let (q, n) = spec
+                .trim()
+                .rsplit_once(' ')
+                .filter(|(_, n)| n.parse::<usize>().is_ok())
+                .ok_or("`Load errors:` needs `<Query> <count>`")?;
+            extra.push((format!("Load errors {}", q.trim()), n.to_string()));
         } else if line.starts_with("Power BI Desktop version:") {
             versioned = true;
         }
@@ -109,32 +193,61 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
     if covers.is_empty() {
         return Err("missing `Covers:` line".into());
     }
+    if next_source.is_some() {
+        return Err("`Source:` line without a ```csv block below it".into());
+    }
+    if !sources.is_empty() && culture.is_none() {
+        return Err("a case with `Source: csv` datasets needs a `Culture:` line".into());
+    }
+    if !m.is_empty() && sources.is_empty() {
+        return Err("## M blocks need `Source: csv` datasets".into());
+    }
+    let mut seen = BTreeSet::new();
+    for (name, _) in &extra {
+        let known = if name == "M accepted" {
+            !m.is_empty()
+        } else {
+            sources.iter().any(|s| {
+                *name == format!("Get Data M {}", s.query)
+                    || *name == format!("Load errors {}", s.query)
+            })
+        };
+        if !known {
+            return Err(format!(
+                "observed `{name}` doesn't match this case's Queries or ## M"
+            ));
+        }
+        if !seen.insert(name) {
+            return Err(format!("observed `{name}` is given twice"));
+        }
+    }
     let query = query.ok_or("missing ```dax block under ## Query")?;
     // A case awaiting observation has no Observed block yet, so no Checks.
-    let Some(observed) = observed else {
-        return Ok(Case {
-            id: id.into(),
-            covers,
-            tables,
-            query,
-            observed: Table::default(),
-        });
-    };
-    if !versioned {
+    let observed = observed.unwrap_or_default();
+    if (!observed.columns.is_empty() || !extra.is_empty()) && !versioned {
         return Err("missing `Power BI Desktop version:` line".into());
     }
-    if observed.rows.is_empty() {
-        return Err("observed result has no rows".into());
-    }
-    if observed.rows.len() > 1 && !query.to_uppercase().contains("ORDER BY") {
-        return Err("multi-row result needs ORDER BY in the query".into());
+    if !observed.columns.is_empty() {
+        if observed.rows.is_empty() {
+            return Err("observed result has no rows".into());
+        }
+        if observed.rows.len() > 1 && !query.to_uppercase().contains("ORDER BY") {
+            return Err("multi-row result needs ORDER BY in the query".into());
+        }
+        if !sources.is_empty() {
+            extra.push(("Column order".into(), observed.columns.join(", ")));
+        }
     }
     Ok(Case {
         id: id.into(),
         covers,
         tables,
+        sources,
+        culture,
+        m,
         query,
         observed,
+        observed_extra: extra,
     })
 }
 
@@ -159,21 +272,23 @@ fn table_line(spec: &str) -> Result<(String, Vec<(String, String)>)> {
     Ok((name.trim().to_string(), cols))
 }
 
-/// Tab-separated header + rows. Power BI's copy wraps headers in `[ ]`; strip them.
+/// The column name in a copied header: `[Name]`, or `Table[Name]` for a table's column.
+fn header_name(c: &str) -> Option<&str> {
+    let (table, name) = c.strip_suffix(']')?.split_once('[')?;
+    (!table.contains(']')).then_some(name)
+}
+
+/// Tab-separated header + rows. Power BI's copy wraps headers in `[ ]` (with the table name in
+/// front for a table's column); keep only the column name.
 fn tsv(lines: &[&str], bracketed: bool) -> Result<Table> {
     let mut lines = lines.iter();
     let header = lines.next().ok_or("empty ```tsv block")?;
     let columns: Vec<String> = header
         .split('\t')
-        .map(|c| {
-            match (
-                bracketed,
-                c.strip_prefix('[').and_then(|c| c.strip_suffix(']')),
-            ) {
-                (true, Some(inner)) => Ok(inner.to_string()),
-                (true, None) => Err(format!("observed header `{c}` is not `[Name]`")),
-                (false, _) => Ok(c.to_string()),
-            }
+        .map(|c| match (bracketed, header_name(c)) {
+            (true, Some(inner)) => Ok(inner.to_string()),
+            (true, None) => Err(format!("observed header `{c}` is not `[Name]`")),
+            (false, _) => Ok(c.to_string()),
         })
         .collect::<Result<_>>()?;
     let rows = lines
@@ -197,10 +312,13 @@ fn tsv(lines: &[&str], bracketed: bool) -> Result<Table> {
     })
 }
 
+/// Why a query can't be evaluated yet.
+const NO_EVALUATOR: &str = "no DAX evaluator yet (M3)";
+
 /// Runs a case's query against its dataset and renders the result as Power BI copies it.
 fn evaluate(_case: &Case) -> Result<Table> {
     // ponytail: no evaluator until M3; every Check stays Pending.
-    Err("no DAX evaluator yet (M3)".into())
+    Err(NO_EVALUATOR.into())
 }
 
 #[derive(Debug)]
@@ -261,7 +379,13 @@ pub fn run(root: &Path) -> Result<Report> {
     let mut checks = Vec::new();
     for case in cases(root)? {
         let id = case.id.clone();
-        let result = evaluate(&case);
+        // A shaping case that doesn't load (or whose M isn't ours) is malformed, observed or not.
+        let shaping = shaping::prepare(&case).map_err(|e| format!("{id}: {e}"))?;
+        let (result, extras) = match &shaping {
+            Some(s) => s.outcome(&case),
+            None => (evaluate(&case), BTreeMap::new()),
+        };
+        let mut found = Vec::new();
         for name in &case.observed.columns {
             let expected = case.observed.column(name);
             let (pass, detail) = match &result {
@@ -271,11 +395,23 @@ pub fn run(root: &Path) -> Result<Report> {
                 },
                 Err(e) => (false, e.clone()),
             };
+            found.push((name.clone(), pass, detail));
+        }
+        for (name, expected) in &case.observed_extra {
+            let (pass, detail) = match extras.get(name) {
+                Some(Ok(got)) if got.trim_end() == expected.trim_end() => (true, String::new()),
+                Some(Ok(got)) => (false, format!("expected\n{expected}\ngot\n{got}")),
+                Some(Err(e)) => (false, e.clone()),
+                None => (false, "not checked by the runner".into()),
+            };
+            found.push((name.clone(), pass, detail));
+        }
+        for (name, pass, detail) in found {
             let key = format!("{id}/{name}");
             checks.push(Check {
                 listed: listed.remove(key.as_str()),
                 case: id.clone(),
-                name: name.clone(),
+                name,
                 covers: case.covers.clone(),
                 pass,
                 detail,
