@@ -784,6 +784,7 @@ name = "opendash-engine"
 version = "0.0.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
  "opendash-data",
  "serde_json",
 ]

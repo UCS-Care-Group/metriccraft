@@ -9,7 +9,15 @@
 //!   text in Arrow's invariant format. Other pairs (date to number…) are Cell errors for now;
 //!   Power Query gives serial numbers.
 //! - Removing every column is an error (Power Query allows a table with no columns).
+//! - Filtered Rows: a condition that is null in M (`null > 3`, `Text.Contains(null, "a")`)
+//!   drops the row; `<>` keeps nulls (`null <> 3` is true); `=` between different types is
+//!   false; ordering different types (`"a" > 3`) or a text operator on a non-text column fails
+//!   the step (M raises an error). Text compares ordinally by code point, case-sensitive
+//!   (M's default `Comparer.Ordinal` orders by UTF-16 unit, which differs only beyond U+FFFF).
+//!   Whole numbers order against decimals as f64.
+//! - Merged Queries: see `merge.rs`.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -20,7 +28,9 @@ use arrow_array::{
 };
 use arrow_cast::{CastOptions, cast, cast_with_options};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
+use arrow_select::filter::filter_record_batch;
 
+use crate::cell::{Cell, Cells, is_text};
 use crate::culture::Culture;
 use crate::{Error, Result};
 
@@ -41,6 +51,110 @@ pub enum Step {
     /// `Table.ReorderColumns`: the listed columns, in this order, fill the positions they held;
     /// unlisted columns stay put.
     ReorderedColumns(Vec<String>),
+    /// `Table.SelectRows(prev, each c1 and c2 …)` (or `or`): keeps the rows where the
+    /// conditions hold. An empty list keeps every row.
+    FilteredRows {
+        combine: Combine,
+        conditions: Vec<Condition>,
+    },
+    /// `Table.NestedJoin` followed by `Table.ExpandTableColumn`: two M steps, one Applied Step
+    /// here (there are no nested-table columns). Runs through [`crate::Query::run_with`], which
+    /// supplies the other Query's result.
+    MergedQueries(Merge),
+}
+
+/// How a Filtered Rows step joins its conditions (M `and` / `or`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Combine {
+    And,
+    Or,
+}
+
+/// One filter condition on one column: `[column] <op> value`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Condition {
+    pub column: String,
+    pub op: Op,
+    pub value: Value,
+}
+
+/// A filter operator, as Power Query's filter menus emit them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Op {
+    /// `=` (with [`Value::Null`]: "is null").
+    Equals,
+    /// `<>` (with [`Value::Null`]: "is not null").
+    NotEquals,
+    /// `>`
+    Greater,
+    /// `>=`
+    GreaterOrEqual,
+    /// `<`
+    Less,
+    /// `<=`
+    LessOrEqual,
+    /// `Text.Contains([column], value)`
+    Contains,
+    /// `Text.StartsWith([column], value)`
+    BeginsWith,
+    /// `Text.EndsWith([column], value)`
+    EndsWith,
+}
+
+/// An M literal in a step.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    /// `null`
+    Null,
+    /// A number literal (`3`, `1.5`).
+    Number(f64),
+    /// `"text"`
+    Text(String),
+    /// `true` / `false`
+    Logical(bool),
+    /// `#date(y, m, d)`: days since 1970-01-01.
+    Date(i32),
+    /// `#datetime(y, m, d, h, min, s)`: microseconds since 1970-01-01 00:00.
+    DateTime(i64),
+}
+
+impl Value {
+    fn cell(&self) -> Cell<'_> {
+        match self {
+            Self::Null => Cell::Null,
+            Self::Number(n) => Cell::Number(*n),
+            Self::Text(s) => Cell::Text(s),
+            Self::Logical(b) => Cell::Logical(*b),
+            Self::Date(d) => Cell::Date(*d),
+            Self::DateTime(t) => Cell::DateTime(*t),
+        }
+    }
+}
+
+/// A merge of another Query into this one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Merge {
+    /// This table's key columns.
+    pub keys: Vec<String>,
+    /// The other Query (M: its name as an identifier, e.g. `Customers`).
+    pub query: String,
+    /// The other table's key columns, matched to `keys` in order.
+    pub other_keys: Vec<String>,
+    pub kind: JoinKind,
+    /// `newColumnName` of `Table.NestedJoin`, the column `Table.ExpandTableColumn` expands
+    /// (Power Query's default: the other Query's name).
+    pub column: String,
+    /// The other table's columns to expand, each with its new name (Power Query's default
+    /// with "Use original column name as prefix": `<column>.<name>`).
+    pub expand: Vec<(String, String)>,
+}
+
+/// `JoinKind.LeftOuter`, `JoinKind.Inner`, `JoinKind.FullOuter`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JoinKind {
+    LeftOuter,
+    Inner,
+    FullOuter,
 }
 
 impl Step {
@@ -52,6 +166,8 @@ impl Step {
             Self::RenamedColumns(_) => "Renamed Columns",
             Self::RemovedColumns(_) => "Removed Columns",
             Self::ReorderedColumns(_) => "Reordered Columns",
+            Self::FilteredRows { .. } => "Filtered Rows",
+            Self::MergedQueries(_) => "Merged Queries",
         }
     }
 
@@ -143,12 +259,81 @@ impl Step {
                 }
                 (fields, columns) = pick(&fields, &columns, &order);
             }
+            Self::FilteredRows {
+                combine,
+                conditions,
+            } => {
+                let mut tests = Vec::with_capacity(conditions.len());
+                for c in conditions {
+                    let column = columns
+                        .get(index(&c.column)?)
+                        .ok_or_else(|| err(format!("the column `{}` wasn't found", c.column)))?;
+                    let cells = Cells::new(column).ok_or_else(|| {
+                        err(format!("the column `{}` can't be filtered yet", c.column))
+                    })?;
+                    tests.push((cells, c));
+                }
+                let mut keep = Vec::with_capacity(rows);
+                for row in 0..rows {
+                    let mut hits = tests.iter().map(|(cells, c)| holds(cells.get(row), c));
+                    let hit = match combine {
+                        Combine::And => hits.try_fold(true, |a, h| Ok::<_, String>(a && h?)),
+                        Combine::Or => hits.try_fold(false, |a, h| Ok::<_, String>(a || h?)),
+                    };
+                    keep.push(hit.map_err(err)?);
+                }
+                let mask = BooleanArray::from(keep);
+                let kept = filter_record_batch(batch, &mask).map_err(|e| err(e.to_string()))?;
+                return Ok((kept, 0));
+            }
+            Self::MergedQueries(m) => {
+                return Err(err(format!(
+                    "merging `{}` needs the other queries (run the Query, not the step)",
+                    m.query
+                )));
+            }
         }
         let options = RecordBatchOptions::new().with_row_count(Some(rows));
         let schema = Arc::new(Schema::new(fields));
         let batch = RecordBatch::try_new_with_options(schema, columns, &options)
             .map_err(|e| err(e.to_string()))?;
         Ok((batch, errors))
+    }
+}
+
+/// Whether one filter condition holds for `cell`; an error where M raises one. M's three-valued
+/// logic reduces to two values here: there is no `not`, and a null condition drops the row.
+fn holds(cell: Cell<'_>, c: &Condition) -> std::result::Result<bool, String> {
+    let value = c.value.cell();
+    let order = |want: fn(Ordering) -> bool| {
+        if cell == Cell::Null || value == Cell::Null {
+            return Ok(false);
+        }
+        cell.compare(value).map(want).ok_or_else(|| {
+            format!(
+                "`{}` holds {cell:?}, which can't be compared with {:?}",
+                c.column, c.value
+            )
+        })
+    };
+    let text = |f: fn(&str, &str) -> bool| match (cell, value) {
+        (Cell::Text(a), Cell::Text(b)) => Ok(f(a, b)),
+        (Cell::Null, Cell::Text(_)) => Ok(false),
+        _ => Err(format!(
+            "{:?} needs a text column and text value (`{}`)",
+            c.op, c.column
+        )),
+    };
+    match c.op {
+        Op::Equals => Ok(cell.equals(value)),
+        Op::NotEquals => Ok(!cell.equals(value)),
+        Op::Greater => order(Ordering::is_gt),
+        Op::GreaterOrEqual => order(Ordering::is_ge),
+        Op::Less => order(Ordering::is_lt),
+        Op::LessOrEqual => order(Ordering::is_le),
+        Op::Contains => text(|a, b| a.contains(b)),
+        Op::BeginsWith => text(|a, b| a.starts_with(b)),
+        Op::EndsWith => text(|a, b| a.ends_with(b)),
     }
 }
 
@@ -188,14 +373,6 @@ fn unique_names(headers: impl Iterator<Item = Option<String>>) -> Vec<String> {
             name
         })
         .collect()
-}
-
-fn is_text(t: &DataType) -> bool {
-    match t {
-        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => true,
-        DataType::Dictionary(_, v) => is_text(v),
-        _ => false,
-    }
 }
 
 /// The Changed Type kernel for any column: text parses with the Culture, other types cast.
@@ -598,6 +775,161 @@ mod tests {
         assert!(e.to_string().contains("`Nope` wasn't found"), "{e}");
         let all = Step::RemovedColumns(col(&["Region", "Qty", "Price"]));
         assert!(run(all, &promoted()).is_err());
+    }
+
+    /// Region (dictionary text), Qty (Int8), Day (Date32), with nulls in each.
+    fn filterable() -> RecordBatch {
+        use arrow_array::types::Int8Type;
+        use arrow_array::{DictionaryArray, Int8Array};
+        let region: DictionaryArray<Int8Type> = vec![
+            Some("North"),
+            Some("South"),
+            None,
+            Some("Northeast"),
+            Some("north"),
+        ]
+        .into_iter()
+        .collect();
+        RecordBatch::try_from_iter([
+            ("Region", Arc::new(region) as ArrayRef),
+            (
+                "Qty",
+                Arc::new(Int8Array::from(vec![
+                    Some(3),
+                    None,
+                    Some(5),
+                    Some(1),
+                    Some(3),
+                ])) as _,
+            ),
+            (
+                "Day",
+                Arc::new(Date32Array::from(vec![
+                    Some(10),
+                    Some(20),
+                    None,
+                    Some(30),
+                    Some(40),
+                ])) as _,
+            ),
+        ])
+        .unwrap()
+    }
+
+    fn cond(column: &str, op: Op, value: Value) -> Condition {
+        Condition {
+            column: column.into(),
+            op,
+            value,
+        }
+    }
+
+    /// The kept rows' positions in [`filterable`] (Qty is unique enough with Day).
+    fn kept(combine: Combine, conditions: Vec<Condition>) -> Result<Vec<Option<i32>>> {
+        let step = Step::FilteredRows {
+            combine,
+            conditions,
+        };
+        let (b, _) = run(step, &filterable())?;
+        let day = b.column(2).as_any().downcast_ref::<Date32Array>().unwrap();
+        Ok(day.iter().collect())
+    }
+
+    #[test]
+    fn filter_single_conditions() {
+        use Value::*;
+        let t = |s: &str| Text(s.into());
+        for (c, want) in [
+            (
+                cond("Qty", Op::Equals, Number(3.0)),
+                vec![Some(10), Some(40)],
+            ),
+            (
+                cond("Qty", Op::NotEquals, Number(3.0)),
+                vec![Some(20), None, Some(30)],
+            ),
+            (cond("Qty", Op::Equals, Null), vec![Some(20)]),
+            (
+                cond("Qty", Op::NotEquals, Null),
+                vec![Some(10), None, Some(30), Some(40)],
+            ),
+            (cond("Qty", Op::Greater, Number(3.0)), vec![None]),
+            (
+                cond("Qty", Op::GreaterOrEqual, Number(3.0)),
+                vec![Some(10), None, Some(40)],
+            ),
+            (cond("Qty", Op::Less, Number(2.5)), vec![Some(30)]),
+            (cond("Qty", Op::LessOrEqual, Number(1.0)), vec![Some(30)]),
+            (cond("Qty", Op::Greater, Null), vec![]),
+            (cond("Qty", Op::Equals, t("3")), vec![]),
+            (cond("Region", Op::Equals, t("North")), vec![Some(10)]),
+            (
+                cond("Region", Op::Contains, t("orth")),
+                vec![Some(10), Some(30), Some(40)],
+            ),
+            (
+                cond("Region", Op::BeginsWith, t("North")),
+                vec![Some(10), Some(30)],
+            ),
+            (
+                cond("Region", Op::EndsWith, t("th")),
+                vec![Some(10), Some(20), Some(40)],
+            ),
+            (cond("Region", Op::Less, t("O")), vec![Some(10), Some(30)]),
+            (cond("Day", Op::Greater, Date(20)), vec![Some(30), Some(40)]),
+            (cond("Day", Op::Equals, Null), vec![None]),
+        ] {
+            assert_eq!(kept(Combine::And, vec![c.clone()]).unwrap(), want, "{c:?}");
+        }
+    }
+
+    #[test]
+    fn filter_and_or() {
+        let north = cond("Region", Op::BeginsWith, Value::Text("North".into()));
+        let three = cond("Qty", Op::Equals, Value::Number(3.0));
+        assert_eq!(
+            kept(Combine::And, vec![north.clone(), three.clone()]).unwrap(),
+            [Some(10)]
+        );
+        assert_eq!(
+            kept(Combine::Or, vec![north, three]).unwrap(),
+            [Some(10), Some(30), Some(40)]
+        );
+        assert_eq!(kept(Combine::And, vec![]).unwrap().len(), 5);
+        assert_eq!(kept(Combine::Or, vec![]).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn filter_errors_where_m_does() {
+        for (c, want) in [
+            (
+                cond("Qty", Op::Greater, Value::Text("a".into())),
+                "can't be compared",
+            ),
+            (
+                cond("Qty", Op::Contains, Value::Text("1".into())),
+                "needs a text column",
+            ),
+            (
+                cond("Region", Op::Contains, Value::Null),
+                "needs a text column",
+            ),
+            (cond("Nope", Op::Equals, Value::Null), "`Nope` wasn't found"),
+        ] {
+            let e = kept(Combine::And, vec![c]).unwrap_err();
+            assert!(e.to_string().contains(want), "{e}");
+            assert!(e.to_string().starts_with("Filtered Rows: "), "{e}");
+        }
+    }
+
+    #[test]
+    fn filter_keeps_dictionary_encoding() {
+        let step = Step::FilteredRows {
+            combine: Combine::And,
+            conditions: vec![cond("Qty", Op::Equals, Value::Number(3.0))],
+        };
+        let (b, _) = run(step, &filterable()).unwrap();
+        assert_eq!(b.schema(), filterable().schema());
     }
 
     #[test]
