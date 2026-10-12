@@ -1,6 +1,6 @@
 # OpenDash BI
 
-![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M0%206%20of%208-orange)
+![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M0%207%20of%208-orange)
 ![DAX parity](https://img.shields.io/badge/DAX%20MVP%20functions-0%20of%2017-lightgrey)
 ![tests](https://img.shields.io/badge/tests-15%20passing-brightgreen)
 ![unsafe](https://img.shields.io/badge/unsafe-forbidden-success)

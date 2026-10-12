@@ -39,34 +39,41 @@ ROW(
     "BlankEqZero",   BLANK() = 0,
     "BlankEqEmpty",  BLANK() = "",
     "BlankStrictEq", BLANK() == 0,
-    "OneSlashZero",  1 / 0
+    "OneSlashZero",  1 / 0,
+    "DivAmountQtyE9", DIVIDE(SUM(Sales[Amount]), SUM(Sales[Qty])) * 1000000000
 )
 ```
 
 ## Observed
 
-_Not yet observed._ Power BI Desktop version: · Date: · Regional settings:
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-12 · Regional settings: English (United Kingdom)
 
-| Column        | Value |
-|---------------|-------|
-| SumAll        |       |
-| SumWest       |       |
-| CountAmount   |       |
-| CountAAmount  |       |
-| Rows          |       |
-| AvgAmount     |       |
-| MinAmount     |       |
-| MaxAmount     |       |
-| AvgWest       |       |
-| DivAmountQty  |       |
-| DivByZero     |       |
-| DivByZeroAlt  |       |
-| DivWestByQty  |       |
-| BlankPlusOne  |       |
-| BlankTimesTwo |       |
-| BlankEqZero   |       |
-| BlankEqEmpty  |       |
-| BlankStrictEq |       |
-| OneSlashZero  |       |
+| Column         | Value         |
+| -------------- | ------------- |
+| SumAll         | 14.5          |
+| SumWest        | (blank)       |
+| CountAmount    | 2             |
+| CountAAmount   | 2             |
+| Rows           | 4             |
+| AvgAmount      | 7.25          |
+| MinAmount      | 4             |
+| MaxAmount      | 10.5          |
+| AvgWest        | (blank)       |
+| DivAmountQty   | 2.42          |
+| DivByZero      | (blank)       |
+| DivByZeroAlt   | -1            |
+| DivWestByQty   | (blank)       |
+| BlankPlusOne   | 1             |
+| BlankTimesTwo  | (blank)       |
+| BlankEqZero    | True          |
+| BlankEqEmpty   | True          |
+| BlankStrictEq  | False         |
+| OneSlashZero   | (blank)       |
+| DivAmountQtyE9 | 2416666666.67 |
 
-Notes:
+Notes: No errors. The DAX query view grid shows numbers rounded to 2 decimal places: DivAmountQty
+shows 2.42, while ×1e9 shows 2416666666.67, so the stored value is full precision (14.5 / 6).
+
+OneSlashZero shows an empty cell, although public DAX docs say `/` by zero returns Infinity.
+Open question for a follow-up case: is the value BLANK, or is Infinity displayed as empty by the
+grid? Distinguish with `ISBLANK(1 / 0)` and `1 / 0 > 1000000`.

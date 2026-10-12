@@ -40,6 +40,7 @@ is ADR 0004; until it lands, observed cases live as markdown in `parity/observed
 ## Things to note while observing
 
 Write these down whenever you notice them; they are parity facts too:
+
 - whether the DAX query view rounds or formats numbers (vs full precision);
 - how booleans, dates and very small/large numbers display;
 - any warning or error text, verbatim.
