@@ -261,7 +261,7 @@ fn time(s: &str) -> Option<i64> {
 }
 
 /// Days since 1970-01-01 for a valid proleptic-Gregorian date (H. Hinnant's algorithm).
-fn days_from_civil(y: u32, m: u32, d: u32) -> Option<i32> {
+pub(crate) fn days_from_civil(y: u32, m: u32, d: u32) -> Option<i32> {
     let leap = (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400);
     let days_in_month = match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,

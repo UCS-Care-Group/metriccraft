@@ -2,7 +2,10 @@
 //!
 //! Layer L2 — see `docs/plan/0001-mvp.md` §1.
 
+mod cell;
 pub mod culture;
+pub mod m;
+mod merge;
 mod preview;
 mod query;
 pub mod source;

@@ -768,6 +768,7 @@ dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "opendash-m",
  "parquet",
  "quick-xml",
  "rust_xlsxwriter",
@@ -784,6 +785,7 @@ name = "opendash-engine"
 version = "0.0.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
  "opendash-data",
  "serde_json",
 ]

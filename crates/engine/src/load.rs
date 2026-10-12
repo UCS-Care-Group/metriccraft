@@ -116,13 +116,16 @@ pub(crate) fn refresh(app: &mut App, _params: &Value) -> Result {
         let cap = default_memory_cap();
         let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
         let mut report = LoadReport::default();
-        for query in &doc.queries {
+        for query in merged_first(&doc.queries) {
             // The new tables together must fit the cap; the old ones are held beside them.
             let limit = cap.saturating_sub(loaded(&fresh));
-            let (table, cell_errors) = query.run(limit).map_err(|error| Error::Refresh {
-                query: query.name.clone(),
-                error,
-            })?;
+            let (table, cell_errors) =
+                query
+                    .run_with(&doc.queries, limit)
+                    .map_err(|error| Error::Refresh {
+                        query: query.name.clone(),
+                        error,
+                    })?;
             report.tables.push(Loaded {
                 table: table.name().into(),
                 rows: table.rows(),
@@ -148,7 +151,36 @@ pub(crate) fn preview(doc: &Document, query: &str, step: Option<usize>) -> Resul
         .find(|q| q.name == query)
         .ok_or_else(|| Error::UnknownQuery(query.into()))?;
     let limit = default_memory_cap().saturating_sub(loaded(&doc.tables));
-    q.preview(step, limit).map_err(Error::Data)
+    q.preview_with(&doc.queries, step, limit)
+        .map_err(Error::Data)
+}
+
+/// `queries` with each one after the Queries it merges, so a failure names the Query whose own
+/// steps or Source failed. Queries in a cycle (or merging a missing one) come last, in order;
+/// running them reports the cycle.
+fn merged_first(queries: &[Query]) -> Vec<&Query> {
+    let mut order: Vec<&Query> = Vec::with_capacity(queries.len());
+    loop {
+        let ready: Vec<&Query> = queries
+            .iter()
+            .filter(|q| !order.iter().any(|o| o.name == q.name))
+            .filter(|q| {
+                queries.iter().all(|other| {
+                    !q.merges(&other.name) || order.iter().any(|o| o.name == other.name)
+                })
+            })
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+        order.extend(ready);
+    }
+    let rest: Vec<&Query> = queries
+        .iter()
+        .filter(|q| !order.iter().any(|o| o.name == q.name))
+        .collect();
+    order.extend(rest);
+    order
 }
 
 fn loaded(tables: &[Table]) -> usize {
@@ -167,10 +199,11 @@ fn delimiter(s: &str) -> Result<u8> {
     }
 }
 
-/// An encoding label (`utf-8`, `windows-1252`, `utf-16le`…).
+/// An encoding label M can name as a codepage: `utf-8`, `windows-1252`, `utf-16le`, `utf-16be`.
 fn encoding(s: &str) -> Result<&'static Encoding> {
     Encoding::for_label(s.as_bytes())
-        .ok_or_else(|| invalid(GET_DATA, format!("unknown `encoding` `{s}`")))
+        .filter(|e| opendash_data::m::codepage(e).is_some())
+        .ok_or_else(|| invalid(GET_DATA, format!("unsupported `encoding` `{s}`")))
 }
 
 fn invalid(command: &str, message: String) -> Error {
@@ -285,6 +318,7 @@ mod tests {
             json!({"kind": "dbf", "path": "x"}),
             json!({"kind": "xlsx", "path": "x.xlsx"}),
             json!({"kind": "csv", "path": "x", "delimiter": "ab"}),
+            json!({"kind": "csv", "path": "x", "encoding": "shift_jis"}),
         ] {
             let mut app = App::new();
             let r = app.run(GET_DATA, &params);
@@ -369,6 +403,36 @@ mod tests {
             dir.write("Sales.csv", "Region,Qty\nNorth,3\nSouth,4\n");
             dir.write("Stock.csv", "Item,Units\nPen,10\n");
         }
+    }
+
+    #[test]
+    fn refresh_and_preview_resolve_merges() {
+        let dir = Dir::new();
+        let sales = dir.write("Sales.csv", "Region,Qty\nNorth,3\nSouth,4\n");
+        let targets = dir.write("Targets.csv", "Region,Target\nNorth,10\n");
+        let mut app = App::new();
+        for path in [&sales, &targets] {
+            app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+                .unwrap();
+        }
+        let merge = json!({"query": "Sales", "keys": ["Region"], "with": "Targets",
+            "withKeys": ["Region"], "expand": ["Target"]});
+        app.run("home.mergeQueries", &merge).unwrap();
+        let p = app.preview("Sales", Some(2)).unwrap();
+        assert_eq!(p.batch.schema().field(2).name(), "Targets.Target");
+        dir.write("Targets.csv", "Region,Target\nNorth,10\nSouth,20\n");
+        app.run("home.refresh", &Value::Null).unwrap();
+        let t = &app.document().tables[0];
+        assert_eq!((t.rows(), t.batch().column(2).null_count()), (2, 0));
+        // Targets is refreshed before Sales, so its failure names it, not Sales.
+        std::fs::remove_file(&targets).unwrap();
+        let before = app.document().clone();
+        let e = app.run("home.refresh", &Value::Null).unwrap_err();
+        assert!(
+            matches!(&e, Error::Refresh { query, .. } if query == "Targets"),
+            "{e:?}"
+        );
+        assert_eq!(app.document(), &before);
     }
 
     #[test]

@@ -5,7 +5,10 @@
 //! The re-run reads the Query's Source again (see `load.rs`: Preview and Refresh live there).
 //! Open point: M1.7 prints each step as M.
 
-use opendash_data::step::{ColumnType, Step};
+use arrow_schema::DataType;
+use opendash_data::step::{
+    ColumnType, Combine, Condition, JoinKind, Merge, Op, Step, Value as FilterValue,
+};
 use opendash_data::{Table, default_memory_cap};
 use serde_json::Value;
 
@@ -95,28 +98,189 @@ fn add_step(
     reload(doc, q, id)
 }
 
-/// Re-runs Query `q` and replaces (or adds) its table. A step that fails is an
-/// [`Error::InvalidParams`]: the edit asked for something the data doesn't allow.
+pub(crate) fn filter_rows(doc: &mut Document, params: &Value) -> Result {
+    const ID: &str = "transform.filterRows";
+    let q = query(doc, params, ID)?;
+    let combine = match params.get("combine").map(Value::as_str) {
+        None | Some(Some("and")) => Combine::And,
+        Some(Some("or")) => Combine::Or,
+        _ => return Err(invalid(ID, "`combine` must be `and` or `or`".into())),
+    };
+    let list = params
+        .get("conditions")
+        .and_then(Value::as_array)
+        .filter(|l| !l.is_empty())
+        .ok_or_else(|| invalid(ID, "`conditions` must be a non-empty list".into()))?;
+    let conditions = list
+        .iter()
+        .map(|c| condition(doc, q, c))
+        .collect::<Result<Vec<_>>>()?;
+    add_step(doc, ID, params, |_| {
+        Ok(Step::FilteredRows {
+            combine,
+            conditions,
+        })
+    })
+}
+
+/// One `{column, op, value}` of `transform.filterRows`. Text values for a date or datetime
+/// column (as loaded for Query `q`) are read as dates in the Query's Culture.
+fn condition(doc: &Document, q: usize, c: &Value) -> Result<Condition> {
+    const ID: &str = "transform.filterRows";
+    let column = text(c, "column", ID)?;
+    let op = match text(c, "op", ID)?.as_str() {
+        "equals" => Op::Equals,
+        "notEquals" => Op::NotEquals,
+        "greater" => Op::Greater,
+        "greaterOrEqual" => Op::GreaterOrEqual,
+        "less" => Op::Less,
+        "lessOrEqual" => Op::LessOrEqual,
+        "contains" => Op::Contains,
+        "beginsWith" => Op::BeginsWith,
+        "endsWith" => Op::EndsWith,
+        other => return Err(invalid(ID, format!("unknown op `{other}`"))),
+    };
+    let query = doc.queries.get(q);
+    let ty = query
+        .and_then(|query| doc.tables.iter().find(|t| t.name() == query.name))
+        .and_then(|t| {
+            let schema = t.batch().schema();
+            let f = schema.field_with_name(&column).ok()?;
+            Some(f.data_type().clone())
+        });
+    let bad = |what: &str| invalid(ID, format!("`{column}`: {what}"));
+    let value = match c.get("value") {
+        None => return Err(bad("`value` is required (null for is null)")),
+        Some(Value::Null) => FilterValue::Null,
+        Some(Value::Bool(b)) => FilterValue::Logical(*b),
+        Some(Value::Number(n)) => FilterValue::Number(n.as_f64().ok_or_else(|| bad("bad number"))?),
+        Some(Value::String(s)) => match (ty, query) {
+            (Some(DataType::Date32 | DataType::Date64), Some(query)) => FilterValue::Date(
+                query
+                    .culture
+                    .parse_date(s)
+                    .ok_or_else(|| bad("not a date"))?,
+            ),
+            (Some(DataType::Timestamp(..)), Some(query)) => FilterValue::DateTime(
+                query
+                    .culture
+                    .parse_datetime(s)
+                    .ok_or_else(|| bad("not a date and time"))?,
+            ),
+            _ => FilterValue::Text(s.clone()),
+        },
+        Some(_) => return Err(bad("`value` must be a number, text, logical or null")),
+    };
+    Ok(Condition { column, op, value })
+}
+
+pub(crate) fn merge_queries(doc: &mut Document, params: &Value) -> Result {
+    const ID: &str = "home.mergeQueries";
+    query(doc, params, ID)?;
+    let other = text(params, "with", ID)?;
+    if !doc.queries.iter().any(|q| q.name == other) {
+        return Err(invalid(ID, format!("there is no query `{other}`")));
+    }
+    let kind = match params.get("kind").map(Value::as_str) {
+        None | Some(Some("leftOuter")) => JoinKind::LeftOuter,
+        Some(Some("inner")) => JoinKind::Inner,
+        Some(Some("fullOuter")) => JoinKind::FullOuter,
+        _ => {
+            return Err(invalid(
+                ID,
+                "`kind` must be leftOuter, inner or fullOuter".into(),
+            ));
+        }
+    };
+    let column = match params.get("column") {
+        None => other.clone(),
+        Some(_) => text(params, "column", ID)?,
+    };
+    let expand = match params.get("expand") {
+        Some(_) => list(params, "expand", ID)?,
+        // Power Query's expand dialog ticks every column of the other table.
+        None => doc
+            .tables
+            .iter()
+            .find(|t| t.name() == other)
+            .map(|t| {
+                let schema = t.batch().schema();
+                schema.fields().iter().map(|f| f.name().clone()).collect()
+            })
+            .ok_or_else(|| invalid(ID, format!("`{other}` isn't loaded; list `expand`")))?,
+    };
+    let prefix = match params.get("prefix") {
+        None => true,
+        Some(p) => p
+            .as_bool()
+            .ok_or_else(|| invalid(ID, "`prefix` must be true or false".into()))?,
+    };
+    let merge = Merge {
+        keys: list(params, "keys", ID)?,
+        query: other,
+        other_keys: list(params, "withKeys", ID)?,
+        kind,
+        expand: expand
+            .into_iter()
+            .map(|c| {
+                let name = if prefix {
+                    format!("{column}.{c}")
+                } else {
+                    c.clone()
+                };
+                (c, name)
+            })
+            .collect(),
+        column,
+    };
+    if merge.keys.len() != merge.other_keys.len() {
+        return Err(invalid(ID, "`keys` and `withKeys` must pair up".into()));
+    }
+    add_step(doc, ID, params, |_| Ok(Step::MergedQueries(merge)))
+}
+
+/// Re-runs Query `q`, and every Query that merges it (directly or not), replacing (or adding)
+/// their tables. A step that fails is an [`Error::InvalidParams`]: the edit asked for something
+/// the data doesn't allow.
 fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
-    let query = doc
+    let first = doc
         .queries
         .get(q)
         .ok_or_else(|| invalid(id, "no such query".into()))?;
-    let others: usize = doc
-        .tables
-        .iter()
-        .filter(|t| t.name() != query.name)
-        .map(Table::memory)
-        .sum();
-    let (table, _cell_errors) = query
-        .run(default_memory_cap().saturating_sub(others))
-        .map_err(|e| match e {
-            opendash_data::Error::Step { .. } => invalid(id, e.to_string()),
-            e => Error::Data(e),
-        })?;
-    match doc.tables.iter_mut().find(|t| t.name() == table.name()) {
-        Some(t) => *t = table,
-        None => doc.tables.push(table),
+    let mut affected = vec![first.name.clone()];
+    // Each pass adds at least one Query or stops, so this ends within `queries.len()` passes.
+    loop {
+        let more: Vec<String> = doc
+            .queries
+            .iter()
+            .filter(|q| !affected.contains(&q.name) && affected.iter().any(|a| q.merges(a)))
+            .map(|q| q.name.clone())
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        affected.extend(more);
+    }
+    for name in affected {
+        let Some(query) = doc.queries.iter().find(|q| q.name == name) else {
+            continue;
+        };
+        let others: usize = doc
+            .tables
+            .iter()
+            .filter(|t| t.name() != name)
+            .map(Table::memory)
+            .sum();
+        let (table, _cell_errors) = query
+            .run_with(&doc.queries, default_memory_cap().saturating_sub(others))
+            .map_err(|e| match e {
+                opendash_data::Error::Step { .. } => invalid(id, e.to_string()),
+                e => Error::Data(e),
+            })?;
+        match doc.tables.iter_mut().find(|t| t.name() == table.name()) {
+            Some(t) => *t = table,
+            None => doc.tables.push(table),
+        }
     }
     Ok(())
 }
@@ -140,14 +304,19 @@ fn text(params: &Value, key: &str, id: &str) -> Result<String> {
 
 /// `params.columns`: a non-empty list of column names.
 fn names(params: &Value, id: &str) -> Result<Vec<String>> {
+    list(params, "columns", id)
+}
+
+/// `params[key]`: a non-empty list of column names.
+fn list(params: &Value, key: &str, id: &str) -> Result<Vec<String>> {
     let bad = || {
         invalid(
             id,
-            "`columns` must be a non-empty list of column names".into(),
+            format!("`{key}` must be a non-empty list of column names"),
         )
     };
     let list = params
-        .get("columns")
+        .get(key)
         .and_then(Value::as_array)
         .filter(|l| !l.is_empty())
         .ok_or_else(bad)?;
@@ -367,5 +536,202 @@ mod tests {
             &json!({"query": "Sales", "columns": ["A"]}),
         );
         assert_eq!(r, Err(Error::Disabled("home.removeColumns".into())));
+    }
+
+    #[test]
+    fn filter_rows_runs_and_undoes() {
+        let mut app = headed();
+        runs_and_undoes(
+            &mut app,
+            "transform.filterRows",
+            json!({"query": "Sales", "conditions": [
+                {"column": "Region", "op": "equals", "value": null},
+                {"column": "Qty", "op": "beginsWith", "value": "3"},
+            ], "combine": "or"}),
+        );
+        // A CSV blank is text "" (as in Power Query) until Changed Type: "x" becomes null here.
+        app.run(
+            "transform.changeType",
+            &json!({"query": "Sales", "columns": ["Qty"], "type": "whole"}),
+        )
+        .unwrap();
+        app.run(
+            "transform.filterRows",
+            &json!({"query": "Sales", "conditions": [
+                {"column": "Qty", "op": "notEquals", "value": null}
+            ]}),
+        )
+        .unwrap();
+        assert_eq!(app.document().tables[0].rows(), 1);
+    }
+
+    #[test]
+    fn filter_reads_text_as_dates_for_date_columns() {
+        let mut app = headed();
+        app.run(
+            "transform.changeType",
+            &json!({"query": "Sales", "columns": ["Price"], "type": "date"}),
+        )
+        .unwrap();
+        let p = json!({"query": "Sales", "conditions": [
+            {"column": "Price", "op": "greater", "value": "2026-01-31"}
+        ]});
+        app.run("transform.filterRows", &p).unwrap();
+        let Some(Step::FilteredRows { conditions, .. }) = app.document().queries[0].steps.last()
+        else {
+            panic!("no filter step");
+        };
+        assert_eq!(conditions[0].value, FilterValue::Date(20_484));
+        let bad = json!({"query": "Sales", "conditions": [
+            {"column": "Price", "op": "greater", "value": "soon"}
+        ]});
+        assert!(matches!(
+            app.run("transform.filterRows", &bad),
+            Err(Error::InvalidParams { .. })
+        ));
+    }
+
+    /// `headed()` plus a Query `Targets` (Region, Target), headed and loaded.
+    fn two() -> App {
+        let file = File::Bytes {
+            name: "targets.csv".into(),
+            bytes: Bytes::from_static(b"Region,Target\nNorth,10\nNorth,20\nEast,5\n"),
+        };
+        let query = Query {
+            name: "Targets".into(),
+            source: Source::csv("Targets", file, csv::Options::default()).unwrap(),
+            steps: vec![],
+            culture: Culture::get("en-GB").unwrap(),
+        };
+        let mut doc = headed().document().clone();
+        doc.tables.push(query.run(usize::MAX).unwrap().0);
+        doc.queries.push(query);
+        let mut app = App::with_document(doc);
+        app.run(
+            "transform.useFirstRowAsHeaders",
+            &json!({"query": "Targets"}),
+        )
+        .unwrap();
+        app
+    }
+
+    fn merge_params() -> Value {
+        json!({"query": "Sales", "keys": ["Region"], "with": "Targets", "withKeys": ["Region"]})
+    }
+
+    #[test]
+    fn merge_queries_joins_reloads_dependents_and_undoes() {
+        let mut app = two();
+        let before = app.document().clone();
+        app.run("home.mergeQueries", &merge_params()).unwrap();
+        assert_eq!(
+            columns(&app),
+            ["Region", "Qty", "Price", "Targets.Region", "Targets.Target"]
+        );
+        assert_eq!(
+            app.document().tables[0].rows(),
+            3,
+            "North × 2 + unmatched null"
+        );
+        // Editing Targets re-runs Sales, which merges it.
+        app.run(
+            "transform.filterRows",
+            &json!({"query": "Targets", "conditions": [
+                {"column": "Target", "op": "equals", "value": "10"}
+            ]}),
+        )
+        .unwrap();
+        assert_eq!(app.document().tables[0].rows(), 2);
+        app.run("edit.undo", &Value::Null).unwrap();
+        app.run("edit.undo", &Value::Null).unwrap();
+        assert_eq!(app.document(), &before);
+
+        let mut p = merge_params();
+        p.as_object_mut().unwrap().extend(
+            json!({"kind": "inner", "expand": ["Target"], "prefix": false, "column": "T"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        app.run("home.mergeQueries", &p).unwrap();
+        assert_eq!(columns(&app), ["Region", "Qty", "Price", "Target"]);
+        assert_eq!(app.document().tables[0].rows(), 2);
+        let Some(Step::MergedQueries(m)) = app.document().queries[0].steps.last() else {
+            panic!("no merge step");
+        };
+        assert_eq!(
+            (m.kind, m.column.as_str(), &m.expand),
+            (
+                JoinKind::Inner,
+                "T",
+                &vec![("Target".into(), "Target".into())]
+            )
+        );
+    }
+
+    #[test]
+    fn bad_merges_are_invalid_and_change_nothing() {
+        let with = |more: Value| {
+            let mut p = merge_params();
+            p.as_object_mut()
+                .unwrap()
+                .extend(more.as_object().unwrap().clone());
+            p
+        };
+        let mut cyclic = two();
+        cyclic.run("home.mergeQueries", &merge_params()).unwrap();
+        for (mut app, params) in [
+            (two(), with(json!({"with": "Sales"}))),
+            (two(), with(json!({"with": "Nope"}))),
+            (two(), with(json!({"kind": "rightAnti"}))),
+            (two(), with(json!({"withKeys": ["Region", "Target"]}))),
+            (two(), with(json!({"keys": ["Nope"]}))),
+            (two(), with(json!({"expand": ["Nope"]}))),
+            (two(), with(json!({"expand": ["Region"], "prefix": false}))),
+            (two(), with(json!({"prefix": "yes"}))),
+            (two(), with(json!({"keys": []}))),
+            (
+                cyclic,
+                json!({"query": "Targets", "keys": ["Region"], "with": "Sales", "withKeys": ["Region"]}),
+            ),
+        ] {
+            let before = app.document().clone();
+            let r = app.run("home.mergeQueries", &params);
+            assert!(
+                matches!(r, Err(Error::InvalidParams { .. })),
+                "{params}: {r:?}"
+            );
+            assert_eq!(app.document(), &before, "{params}");
+        }
+    }
+
+    #[test]
+    fn bad_filters_are_invalid_and_change_nothing() {
+        for conditions in [
+            json!([]),
+            json!([{"column": "Qty", "op": "like", "value": 1}]),
+            json!([{"column": "Qty", "op": "equals"}]),
+            json!([{"column": "Qty", "op": "equals", "value": [1]}]),
+            json!([{"column": "Nope", "op": "equals", "value": 1}]),
+            json!([{"column": "Qty", "op": "greater", "value": 1}]),
+        ] {
+            let mut app = headed();
+            let before = app.document().clone();
+            let params = json!({"query": "Sales", "conditions": conditions});
+            let r = app.run("transform.filterRows", &params);
+            assert!(
+                matches!(r, Err(Error::InvalidParams { .. })),
+                "{params}: {r:?}"
+            );
+            assert_eq!(app.document(), &before);
+        }
+        let mut app = headed();
+        let r = app.run(
+            "transform.filterRows",
+            &json!({"query": "Sales", "combine": "xor", "conditions": [
+                {"column": "Qty", "op": "equals", "value": "3"}
+            ]}),
+        );
+        assert!(matches!(r, Err(Error::InvalidParams { .. })));
     }
 }

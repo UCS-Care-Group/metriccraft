@@ -1054,7 +1054,7 @@ fn text(d: &Data, is_1904: bool, decimal: char) -> Option<String> {
 }
 
 /// Days since 1970-01-01 → (year, month, day), proleptic Gregorian (H. Hinnant's algorithm).
-fn civil(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

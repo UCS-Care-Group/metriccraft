@@ -13,7 +13,7 @@ use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, UInt64Array};
 use arrow_cast::cast;
 use arrow_schema::{DataType, Field, Schema};
 
-use crate::culture::Culture;
+use crate::query::Ctx;
 use crate::source::PREVIEW_ROWS;
 use crate::step::{ColumnType, Step};
 use crate::{Error, Query, Result};
@@ -54,7 +54,20 @@ impl Query {
     /// The Preview at Applied Step `step` (0 = first, as Applied Steps lists them), or of the
     /// Source itself for `None`. Reads only the first [`PREVIEW_ROWS`] rows of the Source,
     /// holding at most `limit` bytes. A step that can't run is an error naming it.
+    /// A Merged Queries step fails here; use [`Query::preview_with`].
     pub fn preview(&self, step: Option<usize>, limit: usize) -> Result<Preview> {
+        self.preview_with(&[], step, limit)
+    }
+
+    /// [`Query::preview`], with `queries` (the Document's) supplying the other side of Merged
+    /// Queries steps. The other Query's full result is joined, so the previewed rows match
+    /// what loads.
+    pub fn preview_with<'a>(
+        &'a self,
+        queries: &'a [Query],
+        step: Option<usize>,
+        limit: usize,
+    ) -> Result<Preview> {
         let upto = match step {
             None => 0,
             Some(i) if i < self.steps.len() => i.saturating_add(1),
@@ -69,9 +82,12 @@ impl Query {
             self.source
                 .read_batch(&self.name, PREVIEW_ROWS, self.culture, limit)?;
         let mut errors = Errors::new();
+        let mut ctx = Ctx::new(queries, limit);
         for step in self.steps.get(..upto).unwrap_or_default() {
-            let (next, _) = step.apply(&batch, self.culture)?;
-            errors = carry(step, &batch, &next, errors, self.culture);
+            let (next, _) = ctx.apply(self, step, &batch)?;
+            errors = carry(step, &batch, &next, errors, &mut |b| {
+                ctx.apply(self, step, b).map(|r| r.0)
+            });
             batch = next;
         }
         let errors = batch
@@ -95,7 +111,7 @@ fn carry(
     before: &RecordBatch,
     after: &RecordBatch,
     mut errors: Errors,
-    culture: &Culture,
+    apply: &mut dyn FnMut(&RecordBatch) -> Result<RecordBatch>,
 ) -> Errors {
     match step {
         Step::ChangedType(types) => {
@@ -142,7 +158,7 @@ fn carry(
                 (renamed.map_or(name, |(_, new)| new.clone()), e)
             })
             .collect(),
-        _ => moved(step, before, errors, culture),
+        _ => moved(before, errors, apply),
     }
 }
 
@@ -184,7 +200,11 @@ fn type_name(ty: ColumnType) -> &'static str {
 
 /// Errors after a step that moves, drops or repeats rows and columns: the step runs again with
 /// a row-number column, which says where each row went; columns are matched by name.
-fn moved(step: &Step, before: &RecordBatch, errors: Errors, culture: &Culture) -> Errors {
+fn moved(
+    before: &RecordBatch,
+    errors: Errors,
+    apply: &mut dyn FnMut(&RecordBatch) -> Result<RecordBatch>,
+) -> Errors {
     if errors.is_empty() {
         return errors;
     }
@@ -203,7 +223,7 @@ fn moved(step: &Step, before: &RecordBatch, errors: Errors, culture: &Culture) -
     let Ok(tagged) = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns) else {
         return Errors::new();
     };
-    let Ok((out, _)) = step.apply(&tagged, culture) else {
+    let Ok(out) = apply(&tagged) else {
         return Errors::new();
     };
     let Some(rows) = out.column_by_name(ROW) else {
@@ -223,7 +243,9 @@ fn moved(step: &Step, before: &RecordBatch, errors: Errors, culture: &Culture) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::culture::Culture;
     use crate::source::{Bytes, File, Source, csv};
+    use crate::step::{JoinKind, Merge};
 
     fn query(text: String) -> Query {
         let file = File::Bytes {
@@ -303,5 +325,30 @@ mod tests {
         let p = q.preview(Some(1), usize::MAX).unwrap();
         assert_eq!(p.batch.schema().field(0).name(), "1");
         assert!(p.error(0, 0).is_some_and(|m| m.ends_with("Details: x")));
+    }
+
+    #[test]
+    fn previews_after_a_merge_resolve_the_other_query_and_keep_errors() {
+        let mut targets = query("Region,Target\nNorth,10\nr1,5\n".into());
+        targets.name = "Targets".into();
+        let mut sales = sales();
+        sales.steps.push(Step::MergedQueries(Merge {
+            keys: vec!["Region".into()],
+            query: "Targets".into(),
+            other_keys: vec!["Region".into()],
+            kind: JoinKind::LeftOuter,
+            column: "Targets".into(),
+            expand: vec![("Target".into(), "Targets.Target".into())],
+        }));
+        assert!(
+            sales.preview(Some(2), usize::MAX).is_err(),
+            "needs the queries"
+        );
+        let queries = [sales.clone(), targets];
+        let p = sales.preview_with(&queries, Some(2), usize::MAX).unwrap();
+        assert_eq!(p.batch.num_rows(), PREVIEW_ROWS - 1);
+        assert_eq!(p.batch.schema().field(3).name(), "Targets.Target");
+        assert!(p.error(250, 1).is_some_and(|m| m.ends_with("oops")));
+        assert_eq!(p.error_count(), 1);
     }
 }

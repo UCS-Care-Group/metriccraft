@@ -1,11 +1,13 @@
 //! Queries (CONTEXT.md): an ordered list of Applied Steps that turns a Source into a table.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Schema, SchemaRef};
 
 use crate::culture::Culture;
+use crate::merge;
 use crate::source::{SAMPLE_ROWS, Source};
 use crate::step::Step;
 use crate::{Error, Result, Table, TableBuilder};
@@ -43,11 +45,33 @@ impl Query {
 
     /// Reads the whole Source and runs every step: the table to load (named after the Query,
     /// encoded narrow, at most `limit` bytes) and its Cell error count (values a step couldn't
-    /// produce, and Excel error cells; all loaded as blank).
+    /// produce, and Excel error cells; all loaded as blank). A Merged Queries step fails here;
+    /// use [`Query::run_with`].
+    pub fn run(&self, limit: usize) -> Result<(Table, usize)> {
+        self.run_with(&[], limit)
+    }
+
+    /// [`Query::run`], with `queries` (the Document's; this one may be among them) supplying the
+    /// other side of Merged Queries steps. Each other Query runs at most once per call, from its
+    /// Source; a Query that merges itself, directly or through others, is an error.
     ///
     /// Streams (ADR 0005): the leading steps that work batch by batch run as each batch is read;
-    /// from the first step that needs the whole table on, steps run on the loaded result.
-    pub fn run(&self, limit: usize) -> Result<(Table, usize)> {
+    /// from the first step that needs the whole table on (a merge), steps run on the loaded
+    /// result.
+    pub fn run_with(&self, queries: &[Query], limit: usize) -> Result<(Table, usize)> {
+        Ctx::new(queries, limit).table(self)
+    }
+
+    /// Whether this Query has a Merged Queries step taking in the Query `name`.
+    pub fn merges(&self, name: &str) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s, Step::MergedQueries(m) if m.query == name))
+    }
+
+    /// Reads the Source and runs the leading streaming steps batch by batch: the loaded table,
+    /// its Cell errors, and the steps left to run on it.
+    fn stream(&self, limit: usize) -> Result<(Table, usize, &[Step])> {
         let culture = self.culture;
         let streamed = self.steps.iter().take_while(|s| streams(s)).count();
         let (head, tail) = self.steps.split_at(streamed);
@@ -84,19 +108,96 @@ impl Query {
                 message: "the source gave no data".into(),
             })?
             .finish()?;
+        Ok((table, errors.saturating_add(source_errors), tail))
+    }
+}
+
+/// How deep merges may nest (A merges B merges C …).
+const MAX_DEPTH: usize = 32;
+
+/// One run (or Preview) that may merge other Queries: resolves them, each once.
+pub(crate) struct Ctx<'a> {
+    queries: &'a [Query],
+    limit: usize,
+    /// The Queries being run, outermost first.
+    stack: Vec<&'a str>,
+    /// Results of other Queries already run in this call.
+    done: HashMap<&'a str, (RecordBatch, usize)>,
+}
+
+impl<'a> Ctx<'a> {
+    pub(crate) fn new(queries: &'a [Query], limit: usize) -> Self {
+        Self {
+            queries,
+            limit,
+            stack: Vec::new(),
+            done: HashMap::new(),
+        }
+    }
+
+    /// `q`'s loaded table and Cell errors.
+    fn table(&mut self, q: &'a Query) -> Result<(Table, usize)> {
+        let (table, mut errors, tail) = q.stream(self.limit)?;
         if tail.is_empty() {
-            return Ok((table, errors.saturating_add(source_errors)));
+            return Ok((table, errors));
         }
         let mut batch = table.batch().clone();
         drop(table);
         for step in tail {
-            let (next, n) = step.apply(&batch, culture)?;
+            let (next, n) = self.apply(q, step, &batch)?;
             batch = next;
             errors = errors.saturating_add(n);
         }
-        let mut b = TableBuilder::new(&self.name, batch.schema(), limit);
+        let mut b = TableBuilder::new(&q.name, batch.schema(), self.limit);
         b.push(&batch)?;
-        Ok((b.finish()?, errors.saturating_add(source_errors)))
+        Ok((b.finish()?, errors))
+    }
+
+    /// Runs one of `q`'s steps on `batch` (a merge on the whole table, never per batch).
+    pub(crate) fn apply(
+        &mut self,
+        q: &'a Query,
+        step: &Step,
+        batch: &RecordBatch,
+    ) -> Result<(RecordBatch, usize)> {
+        match step {
+            Step::MergedQueries(m) => {
+                let (other, n) = self.other(&q.name, &m.query)?;
+                Ok((merge::join(batch, &other, m, &q.name, self.limit)?, n))
+            }
+            step => step.apply(batch, q.culture),
+        }
+    }
+
+    /// The result of the Query `name`, which `into` merges.
+    fn other(&mut self, into: &'a str, name: &str) -> Result<(RecordBatch, usize)> {
+        let err = |message: String| Error::Step {
+            step: "Merged Queries",
+            message,
+        };
+        if name == into || self.stack.contains(&name) {
+            return Err(err(format!(
+                "`{into}` can't merge `{name}`: `{name}` depends on `{into}`"
+            )));
+        }
+        if let Some(done) = self.done.get(name) {
+            return Ok(done.clone());
+        }
+        let q = self
+            .queries
+            .iter()
+            .find(|q| q.name == name)
+            .ok_or_else(|| err(format!("there is no query `{name}`")))?;
+        if self.stack.len() >= MAX_DEPTH {
+            return Err(err(format!("merges nest more than {MAX_DEPTH} deep")));
+        }
+        self.stack.push(into);
+        let r = self.table(q);
+        self.stack.pop();
+        let (table, n) = r?;
+        let r = (table.batch().clone(), n);
+        self.done.insert(&q.name, r.clone());
+        Ok(r)
     }
 }
 
@@ -110,9 +211,9 @@ fn streams(step: &Step) -> bool {
             | Step::RenamedColumns(_)
             | Step::RemovedColumns(_)
             | Step::ReorderedColumns(_)
+            | Step::FilteredRows { .. }
     )
 }
-
 /// `batch` with the column names of `names` (Promoted Headers on a batch after the first).
 fn rename(batch: &RecordBatch, names: &SchemaRef) -> Result<RecordBatch> {
     let err = |message: String| Error::Step {
@@ -244,5 +345,70 @@ mod tests {
             .map(|f| f.name().clone())
             .collect();
         assert_eq!(names, ["Id", "Group"]);
+    }
+
+    use crate::step::{JoinKind, Merge};
+
+    /// `Sales` (headed) merging the Query `other` on Region.
+    fn merging(name: &str, other: &str) -> Query {
+        let mut q = query(vec![
+            Step::PromotedHeaders,
+            Step::MergedQueries(Merge {
+                keys: vec!["Region".into()],
+                query: other.into(),
+                other_keys: vec!["Region".into()],
+                kind: JoinKind::LeftOuter,
+                column: other.into(),
+                expand: vec![("Qty".into(), format!("{other}.Qty"))],
+            }),
+        ]);
+        q.name = name.into();
+        q
+    }
+
+    #[test]
+    fn merges_run_the_other_query() {
+        let mut other = query(vec![Step::PromotedHeaders]);
+        other.name = "Targets".into();
+        let sales = merging("Sales", "Targets");
+        let (t, _) = sales.run_with(&[sales.clone(), other], usize::MAX).unwrap();
+        let names: Vec<_> = t
+            .batch()
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
+        assert_eq!(names, ["Region", "Qty", "Targets.Qty"]);
+        assert_eq!(t.rows(), 2);
+        assert!(sales.merges("Targets") && !sales.merges("Sales"));
+        let e = sales.run(usize::MAX).unwrap_err();
+        assert!(e.to_string().contains("no query `Targets`"), "{e}");
+    }
+
+    #[test]
+    fn self_and_circular_merges_are_errors() {
+        let me = merging("Sales", "Sales");
+        let e = me
+            .run_with(std::slice::from_ref(&me), usize::MAX)
+            .unwrap_err();
+        assert!(e.to_string().contains("`Sales` depends on `Sales`"), "{e}");
+        let (a, b) = (merging("A", "B"), merging("B", "A"));
+        let e = a.run_with(&[a.clone(), b], usize::MAX).unwrap_err();
+        assert!(e.to_string().contains("`A` depends on `B`"), "{e}");
+    }
+
+    #[test]
+    fn merge_chains_are_bounded() {
+        // Q0 merges Q1 … merges Q40: deeper than MAX_DEPTH, an error, not a stack overflow.
+        let mut qs: Vec<Query> = (0..40)
+            .map(|i| merging(&format!("Q{i}"), &format!("Q{}", i + 1)))
+            .collect();
+        qs.push(query(vec![Step::PromotedHeaders]));
+        if let Some(last) = qs.last_mut() {
+            last.name = "Q40".into();
+        }
+        let e = qs[0].run_with(&qs, usize::MAX).unwrap_err();
+        assert!(e.to_string().contains("nest more than"), "{e}");
     }
 }

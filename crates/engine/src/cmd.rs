@@ -61,7 +61,7 @@ pub static COMMANDS: &[Command] = &[
                  extension, or the sheet/table)\n\
                  culture: text — reads numbers and dates, e.g. en-GB (default: en-US)\n\
                  delimiter: text — CSV: one character, \\t for tab (default: detected)\n\
-                 encoding: text — CSV: utf-8, windows-1252, utf-16le… (default: detected)\n\
+                 encoding: text — CSV: utf-8, windows-1252, utf-16le or utf-16be (default: detected)\n\
                  item: text — XLSX: the sheet or table to read (required)\n\
                  itemKind: text — XLSX: sheet or table (default: sheet)",
         enabled: |_| true,
@@ -129,6 +129,37 @@ pub static COMMANDS: &[Command] = &[
                  hold; the others stay put",
         enabled: has_queries,
         run: Run::Edit(query::reorder_columns),
+    },
+    Command {
+        id: "transform.filterRows",
+        label: "Filter Rows",
+        // Power Query's column-header filter menu; not on the ribbon.
+        ribbon: "",
+        shortcut: None,
+        params: "query: text — the Query\n\
+                 conditions: list of {column: text, op: text, value} — op is equals, notEquals, \
+                 greater, greaterOrEqual, less, lessOrEqual, contains, beginsWith or endsWith; \
+                 value is a number, text, logical or null (equals null = is null); text for a \
+                 date or datetime column is read as one\n\
+                 combine: text — and (default) or or",
+        enabled: has_queries,
+        run: Run::Edit(query::filter_rows),
+    },
+    Command {
+        id: "home.mergeQueries",
+        label: "Merge Queries",
+        ribbon: "Home > Combine",
+        shortcut: None,
+        params: "query: text — the Query to merge into\n\
+                 keys: list of text — its key columns\n\
+                 with: text — the other Query\n\
+                 withKeys: list of text — the other Query's key columns, paired with keys in order\n\
+                 kind: text — leftOuter (default), inner or fullOuter\n\
+                 column: text — the merged column's name (default: the other Query's name)\n\
+                 expand: list of text — the other Query's columns to add (default: all)\n\
+                 prefix: logical — name added columns `column.name` (default true)",
+        enabled: has_queries,
+        run: Run::Edit(query::merge_queries),
     },
     Command {
         id: "query.deleteStep",
