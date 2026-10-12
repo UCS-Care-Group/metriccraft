@@ -13,6 +13,9 @@ pub mod xlsx;
 
 /// Rows per batch read from a Source.
 pub const BATCH_ROWS: usize = 8192;
+/// Text bytes after which a CSV or XLSX batch ends early, so long text can't make one batch
+/// huge.
+pub const BATCH_BYTES: usize = 64 << 20;
 
 /// Streams batches into a Table, stopping at the first error or once `limit` bytes are used.
 pub fn load(

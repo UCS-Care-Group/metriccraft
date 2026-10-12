@@ -769,8 +769,10 @@ dependencies = [
  "csv",
  "encoding_rs",
  "parquet",
+ "quick-xml",
  "rust_xlsxwriter",
  "sysinfo",
+ "zip",
 ]
 
 [[package]]
