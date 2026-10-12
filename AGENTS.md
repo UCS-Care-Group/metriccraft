@@ -37,7 +37,7 @@ People trust OpenDash BI with their numbers; a crash loses their work. **This ou
 - **Layering** is enforced: core → expression languages (DAX, M) → model/query/file formats → visuals → engine → UI/MCP → apps. Nothing below the UI layer depends on egui/eframe/winit/rfd. **The UI crate is swappable.** Exact crate list is fixed in `docs/plan/`.
 - **The UI is thin**: panels read engine state and act through `app.run(id, params)`. Colours come from theme tokens. UI strings go through the string catalogue; every widget is keyboard-reachable and carries an AccessKit label.
 - **Rust only** (no handwritten JS/TS). **Never break wasm.**
-- **Quality gates** before every commit: fmt, clippy `-D warnings`, tests, assets, layers, wasm, benchmarks (`cargo xtask ci` once the workspace exists). One task id per commit (`M1.2: CSV connector`).
+- **Quality gates** before every commit: `cargo xtask ci` (fmt, layers, assets, clippy `-D warnings`, tests, wasm; benchmarks once M0.7 lands). A new crate needs a row in the xtask `LAYERS` table. One task id per commit (`M1.2: CSV connector`).
 - Parallel agents: separate `CARGO_TARGET_DIR` per agent; edit only the crates you own; delete your target dir when done.
 
 ## Running and looking at the app
