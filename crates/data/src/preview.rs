@@ -8,9 +8,11 @@
 //! row-number column to see where each row went. A step that drops that column drops the errors
 //! it can't place.
 //!
-//! **Through a merge**, the other Query's rows come from its loaded Table when that is loaded
-//! and not Stale, else from its own Preview (its first 1,000 Source rows, at its last step); a
-//! Preview never runs another Query in full. Power Query's editor works the same way in spirit:
+//! **Through a merge**, the other Query's rows come from its loaded Table when that is loaded,
+//! not Stale and still the Query's own result (no Model data-type override converted it: Power
+//! Query never sees the Model, and a load merges the Query's result, #33), else from its own
+//! Preview (its first 1,000 Source rows, at its last step); a Preview never runs another Query
+//! in full. The caller picks the Tables (`loaded`). Power Query's editor works the same way in spirit:
 //! it caches up to 1,000 preview rows per query and shows steps from that cache, flagging
 //! preview data that is out of date (Microsoft Learn, "Disable Power Query background
 //! refresh"). *Parity uncertainty* (to observe in the VM): whether Power Query's preview of a
@@ -71,8 +73,8 @@ impl Query {
     }
 
     /// [`Query::preview`], with `queries` (the Document's) supplying the other side of Merged
-    /// Queries steps: the other Query's Table in `loaded` (the loaded Tables that aren't Stale),
-    /// else that Query's own Preview at its last step. Never a full run of the other Query (see
+    /// Queries steps: the other Query's Table in `loaded` (loaded Tables that are their Query's
+    /// result: not Stale, no Model override), else that Query's own Preview at its last step. Never a full run of the other Query (see
     /// the module docs).
     pub fn preview_with<'a>(
         &'a self,

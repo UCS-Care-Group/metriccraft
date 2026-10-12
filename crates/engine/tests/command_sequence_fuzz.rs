@@ -401,14 +401,7 @@ mod fuzz {
     fn fresh_tables_match_their_queries(app: &App) -> Result<(), String> {
         let doc = app.document();
         for t in doc.tables.iter().filter(|t| !doc.stale.contains(t.name())) {
-            // A Preview merges the other Table as loaded (model type overrides applied), a load
-            // merges its Query's result: a later step that reads values (Promoted Headers) may
-            // then name columns differently. Known; only Queries without merges are compared.
-            let Some(q) = doc
-                .queries
-                .iter()
-                .find(|q| q.name == t.name() && !doc.queries.iter().any(|o| q.merges(&o.name)))
-            else {
+            let Some(q) = doc.queries.iter().find(|q| q.name == t.name()) else {
                 continue;
             };
             let Ok(p) = app.preview(&q.name, q.steps.len().checked_sub(1)) else {

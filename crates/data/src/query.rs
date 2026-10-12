@@ -224,8 +224,9 @@ impl<'a> Pass<'a> {
 pub(crate) struct Ctx<'a> {
     queries: &'a [Query],
     limit: usize,
-    /// For a Preview: the loaded Tables that aren't Stale. A merged-from Query uses its Table
-    /// here, else its own Preview; never a full run (see `crate::preview`).
+    /// For a Preview: the loaded Tables that are still their Query's result (not Stale, no
+    /// Model override). A merged-from Query uses its Table here, else its own Preview; never a
+    /// full run (see `crate::preview`).
     preview: Option<&'a [&'a Table]>,
     /// Previews of merged-from Queries already made.
     previews: HashMap<&'a str, (RecordBatch, usize)>,
@@ -254,8 +255,8 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// A Preview's: merged-from Queries use `loaded` (the Tables that aren't Stale) or their own
-    /// Preview.
+    /// A Preview's: merged-from Queries use `loaded` (Tables that are their Query's result) or
+    /// their own Preview.
     pub(crate) fn preview(queries: &'a [Query], loaded: &'a [&'a Table], limit: usize) -> Self {
         Self {
             preview: Some(loaded),

@@ -708,6 +708,46 @@ mod tests {
         json!({"query": "Sales", "keys": ["Region"], "with": "Targets", "withKeys": ["Region"]})
     }
 
+    /// #33 (fuzzer seed 2560's shape): a Preview after a merge joins the other Query's
+    /// Query-level result, never its Table with Model data-type overrides applied, so it agrees
+    /// with what loads.
+    #[test]
+    fn merge_preview_ignores_model_overrides_of_the_other_table() {
+        let mut app = two();
+        for (id, params) in [
+            (
+                "transform.changeType",
+                json!({"query": "Sales", "columns": ["Qty"], "type": "whole"}),
+            ),
+            ("home.closeApply", Value::Null),
+            (
+                "columnTools.dataType",
+                json!({"table": "Sales", "column": "Qty", "type": "decimal"}),
+            ),
+            (
+                "home.mergeQueries",
+                json!({"query": "Targets", "keys": ["Region"], "with": "Sales",
+                    "withKeys": ["Region"], "expand": ["Qty"]}),
+            ),
+            (
+                "transform.useFirstRowAsHeaders",
+                json!({"query": "Targets"}),
+            ),
+            ("home.refresh", Value::Null),
+        ] {
+            app.run(id, &params).unwrap();
+        }
+        let doc = app.document();
+        assert!(doc.stale.is_empty());
+        let loaded = doc.tables.iter().find(|t| t.name() == "Targets").unwrap();
+        let names = |s: &arrow_schema::Schema| -> Vec<String> {
+            s.fields().iter().map(|f| f.name().clone()).collect()
+        };
+        let preview = app.preview("Targets", Some(2)).unwrap();
+        assert_eq!(names(&loaded.batch().schema()), ["North", "10", "3"]);
+        assert_eq!(names(&preview.batch.schema()), ["North", "10", "3"]);
+    }
+
     #[test]
     fn merge_expands_the_other_querys_current_columns() {
         let mut app = two();

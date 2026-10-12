@@ -285,11 +285,18 @@ pub(crate) fn preview(
         .map_err(Error::Data)
 }
 
-/// The loaded Tables that aren't Stale: what a Preview through a merge may use.
+/// What a Preview through a merge may use: the loaded Tables that are their Query's result as
+/// loaded — not Stale, and no Model data-type override (#33: a Table with one holds converted
+/// values, and Power Query, before the Model, never sees them). Others merge their own Preview.
 pub(crate) fn fresh(doc: &Document) -> Vec<&Table> {
+    let overridden = |name: &str| {
+        doc.model
+            .table(name)
+            .is_some_and(|m| m.columns.iter().any(|c| c.overridden()))
+    };
     doc.tables
         .iter()
-        .filter(|t| !doc.stale.contains(t.name()))
+        .filter(|t| !doc.stale.contains(t.name()) && !overridden(t.name()))
         .collect()
 }
 
