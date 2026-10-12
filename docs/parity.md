@@ -1,7 +1,7 @@
 # Observing Power BI Desktop (parity workflow)
 
 How expected values for **Parity cases** (`CONTEXT.md`) are obtained. The storage format for cases
-is ADR 0004; until it lands, observed cases live as markdown in `parity/observed/`.
+is ADR 0004: one markdown file per case in `parity/observed/`.
 
 ## Clean-room rules
 
@@ -9,7 +9,7 @@ is ADR 0004; until it lands, observed cases live as markdown in `parity/observed
 - Never open, read, disassemble or copy anything from the Power BI install or from files it writes
   (`.pbix`, `.pbip`, caches, logs).
 - Never commit a file Power BI produced. Commit only **values you read off the screen**.
-- Datasets are synthetic and written by us (in the case file now; in code once ADR 0004 lands).
+- Datasets are synthetic and written by us (inline in the case file, or generated in code).
   Never use Microsoft samples (Contoso, AdventureWorks…).
 - Screenshots are allowed for your own reference, kept in `observations/` (gitignored) or inside
   the VM. Never committed.
@@ -30,17 +30,15 @@ is ADR 0004; until it lands, observed cases live as markdown in `parity/observed
    Close & Apply.
 3. **Check the data.** In Table view, confirm row count and that blanks show as empty cells.
 4. **Run the query.** DAX query view → paste the case's `EVALUATE` query → Run.
-5. **Record what you see**, column by column, exactly as displayed:
-   - an empty cell → `(blank)`;
-   - an error → `ERROR: <message>`;
-   - numbers: every digit shown, including trailing zeros and separators.
-6. **Paste the results into the case file** under *Observed*, with the version / date / regional
-   settings line.
+5. **Copy the whole result** (select all in the grid, copy). Don't read values off the grid: it
+   rounds numbers to 2 decimal places and shows infinity as an empty cell; the copy is exact.
+6. **Paste it verbatim** into the case's ```` ```tsv ```` block under *Observed* (keep trailing
+   tabs: they are blank cells), with the version / date / regional settings line above it.
+7. **Check it:** `cargo xtask parity` must not report the case as malformed.
 
 ## Things to note while observing
 
 Write these down whenever you notice them; they are parity facts too:
 
-- whether the DAX query view rounds or formats numbers (vs full precision);
 - how booleans, dates and very small/large numbers display;
-- any warning or error text, verbatim.
+- any warning or error text, verbatim (and how an error cell copies).

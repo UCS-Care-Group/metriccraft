@@ -1,14 +1,16 @@
 # Parity case 0001 — aggregates and BLANK
 
-Covers spec X-1/X-2: SUM, COUNT, COUNTA, COUNTROWS, AVERAGE, MIN, MAX, DIVIDE, CALCULATE, BLANK
-propagation and comparison. Workflow: `docs/parity.md`.
+Spec X-1/X-2: aggregates, DIVIDE, BLANK propagation and comparison. Workflow: `docs/parity.md`.
+
+Covers: SUM, COUNT, COUNTA, COUNTROWS, AVERAGE, MIN, MAX, CALCULATE, DIVIDE, BLANK, /
 
 ## Dataset
 
-Table name: **`Sales`**. Types: `Region` = Text, `Amount` = Decimal number, `Qty` = Whole number.
 Empty cells are blanks.
 
-```
+Table: Sales — Region: text, Amount: decimal, Qty: whole
+
+```tsv
 Region	Amount	Qty
 North	10.5	2
 North		3
@@ -39,8 +41,7 @@ ROW(
     "BlankEqZero",   BLANK() = 0,
     "BlankEqEmpty",  BLANK() = "",
     "BlankStrictEq", BLANK() == 0,
-    "OneSlashZero",  1 / 0,
-    "DivAmountQtyE9", DIVIDE(SUM(Sales[Amount]), SUM(Sales[Qty])) * 1000000000
+    "OneSlashZero",  1 / 0
 )
 ```
 
@@ -48,31 +49,11 @@ ROW(
 
 Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-12 · Regional settings: English (United Kingdom)
 
-| Column         | Value         |
-| -------------- | ------------- |
-| SumAll         | 14.5          |
-| SumWest        | (blank)       |
-| CountAmount    | 2             |
-| CountAAmount   | 2             |
-| Rows           | 4             |
-| AvgAmount      | 7.25          |
-| MinAmount      | 4             |
-| MaxAmount      | 10.5          |
-| AvgWest        | (blank)       |
-| DivAmountQty   | 2.42          |
-| DivByZero      | (blank)       |
-| DivByZeroAlt   | -1            |
-| DivWestByQty   | (blank)       |
-| BlankPlusOne   | 1             |
-| BlankTimesTwo  | (blank)       |
-| BlankEqZero    | True          |
-| BlankEqEmpty   | True          |
-| BlankStrictEq  | False         |
-| OneSlashZero   | (blank)       |
-| DivAmountQtyE9 | 2416666666.67 |
+```tsv
+[SumAll]	[SumWest]	[CountAmount]	[CountAAmount]	[Rows]	[AvgAmount]	[MinAmount]	[MaxAmount]	[AvgWest]	[DivAmountQty]	[DivByZero]	[DivByZeroAlt]	[DivWestByQty]	[BlankPlusOne]	[BlankTimesTwo]	[BlankEqZero]	[BlankEqEmpty]	[BlankStrictEq]	[OneSlashZero]
+14.5		2	2	4	7.25	4	10.5		2.4166666666666665		-1		1		true	true	false	Infinity
+```
 
-Notes: No errors. The DAX query view grid shows numbers rounded to 2 decimal places: DivAmountQty
-shows 2.42, while ×1e9 shows 2416666666.67, so the stored value is full precision (14.5 / 6).
-
-OneSlashZero shows an empty cell, although public DAX docs say `/` by zero returns Infinity.
-Resolved by case 0002: it is Infinity, displayed as an empty cell by the grid.
+Notes: No errors. The DAX query view grid shows numbers rounded to 2 decimal places (DivAmountQty
+shows 2.42) and shows infinity as an empty cell (OneSlashZero); copying the result gives full
+precision and `Infinity`. Case 0002 explores division by zero further.

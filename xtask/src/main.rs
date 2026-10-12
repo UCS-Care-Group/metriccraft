@@ -1,7 +1,7 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
 //! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
-//! `bench [--save]`.
+//! `bench [--save]`, `parity [--update]`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         "assets" => assets(),
         "wasm" => wasm(),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
+        "parity" => parity(std::env::args().any(|a| a == "--update")),
         _ => {
             Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]>".into())
         }
@@ -350,6 +351,33 @@ fn machine_info(id: &str) -> serde_json::Value {
         "threads": std::thread::available_parallelism().map(|n| n.get()).ok(),
         "memory": proc_field("/proc/meminfo", "MemTotal"),
     })
+}
+
+// ---- parity ----
+
+/// Scoreboard of parity Checks per covered tag (ADR 0004). `--update` rewrites
+/// `parity/passing.txt` after an intended change; the gate itself is the `opendash-model` test.
+fn parity(update: bool) -> Result {
+    let root = Path::new("parity");
+    let run = opendash_model::parity::run(root)?;
+    let tags = run.by_tag();
+    for (tag, (pass, total)) in &tags {
+        eprintln!("  {tag:<10} {pass:>3} / {total:<3} Checks");
+    }
+    let passing = run.checks.iter().filter(|c| c.pass).count();
+    let done = tags.values().filter(|(p, t)| p == t).count();
+    eprintln!(
+        "{passing} of {} Checks passing; {done} of {} tags complete",
+        run.checks.len(),
+        tags.len()
+    );
+    if update {
+        std::fs::write(root.join("passing.txt"), run.passing_list())
+            .map_err(|e| format!("writing parity/passing.txt: {e}"))?;
+        eprintln!("wrote parity/passing.txt");
+        return Ok(());
+    }
+    report(run.problems())
 }
 
 #[cfg(test)]
