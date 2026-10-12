@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 
 mod dataset;
+mod memcap;
 
 type Result<T = ()> = std::result::Result<T, String>;
 
@@ -50,7 +51,7 @@ fn main() -> ExitCode {
         "ci" => ci(),
         "fmt" => fmt(),
         "clippy" => clippy(),
-        "test" => test(),
+        "test" => test_with(&std::env::args().skip(2).collect::<Vec<_>>()),
         "layers" => layers(),
         "assets" => assets(),
         "wasm" => wasm(),
@@ -104,7 +105,30 @@ fn clippy() -> Result {
 }
 
 fn test() -> Result {
-    cargo(&["test", "--workspace"])
+    test_with(&[])
+}
+
+/// `cargo test --workspace` (or `cargo test <args>` when given), every test process under an
+/// address-space cap (`memcap`) so a runaway test fails instead of OOM-killing the host.
+/// Runner via `prlimit` (not a `ulimit` around cargo) so rustc/the linker stay uncapped.
+fn test_with(args: &[String]) -> Result {
+    let mut full = vec!["test"];
+    if args.is_empty() {
+        full.push("--workspace");
+    }
+    full.extend(args.iter().map(String::as_str));
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let mut cmd = Command::new(cargo);
+    cmd.args(&full);
+    if let Some((name, value)) = memcap::runner_env() {
+        cmd.env(name, value);
+    }
+    let status = cmd.status().map_err(|e| format!("running cargo: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("`cargo {}` failed", full.join(" ")))
+    }
 }
 
 fn wasm() -> Result {
