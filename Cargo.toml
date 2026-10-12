@@ -10,6 +10,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/benandez/opendash-bi"
 publish = false
 
+[workspace.dependencies]
+serde_json = "1"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
