@@ -18,11 +18,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        # ponytail: Linux on Martin's workstation (self-hosted) and macOS off while the repo is
+        # private and minutes are billed. Going public: switch Linux back to ubuntu-latest, re-add
+        # macos-latest, and remove the self-hosted runner (never expose one to public PRs).
+        include:
+          - os: linux
+            runner: [self-hosted, linux, workstation]
+          - os: windows
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Installs the channel, components and targets pinned in rust-toolchain.toml.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: matrix.os != 'linux' # self-hosted keeps its own target dir
       - run: cargo xtask ci
