@@ -204,6 +204,9 @@ pub(crate) struct Ctx<'a> {
     done: HashMap<&'a str, (Table, usize)>,
     /// Bytes held by `done`.
     held: usize,
+    /// Bytes held by runs in progress: the input of the step each is running (a merge's
+    /// streamed input stays alive beside its output and the other Query's run).
+    busy: usize,
 }
 
 impl<'a> Ctx<'a> {
@@ -216,6 +219,7 @@ impl<'a> Ctx<'a> {
             stack: Vec::new(),
             done: HashMap::new(),
             held: 0,
+            busy: 0,
         }
     }
 
@@ -232,9 +236,11 @@ impl<'a> Ctx<'a> {
         self.limit
     }
 
-    /// The limit less the results held.
+    /// The limit less the results held and the inputs in use.
     fn free(&self) -> usize {
-        self.limit.saturating_sub(self.held)
+        self.limit
+            .saturating_sub(self.held)
+            .saturating_sub(self.busy)
     }
 
     /// `q`'s loaded table and Cell errors: run once, then reused.
@@ -256,14 +262,22 @@ impl<'a> Ctx<'a> {
         }
         let mut batch = table.batch().clone();
         drop(table);
-        for step in tail {
-            let (next, n) = self.apply(q, step, &batch)?;
-            batch = next;
-            errors = errors.saturating_add(n);
-        }
-        let mut b = TableBuilder::new(&q.name, batch.schema(), self.free());
-        b.push(&batch)?;
-        Ok((b.finish()?, errors))
+        let outer = self.busy;
+        let r = (|| {
+            for step in tail {
+                // The step's input stays alive while it runs: its output gets what's left.
+                self.busy = outer.saturating_add(batch.get_array_memory_size());
+                let (next, n) = self.apply(q, step, &batch)?;
+                batch = next;
+                errors = errors.saturating_add(n);
+            }
+            self.busy = outer.saturating_add(batch.get_array_memory_size());
+            let mut b = TableBuilder::new(&q.name, batch.schema(), self.free());
+            b.push(&batch)?;
+            Ok((b.finish()?, errors))
+        })();
+        self.busy = outer;
+        r
     }
 
     /// Runs one of `q`'s steps on `batch` (a merge on the whole table, never per batch).
@@ -628,6 +642,38 @@ mod tests {
             pass.run(&queries[0]),
             Err(Error::MemoryCap { .. })
         ));
+    }
+
+    #[test]
+    fn a_merge_counts_its_input_against_the_limit() {
+        // The streamed input, the join output and the final table are alive together.
+        let mut csv = String::from("Region,Qty\n");
+        let mut other = String::from("Region,Qty\n");
+        for i in 0..20_000 {
+            csv.push_str(&format!("R{},{i}\n", i % 50));
+            other.push_str(&format!("R{i},{i}\n"));
+        }
+        let mut sales = merging("Sales", "Targets");
+        sales.source = source(&csv);
+        let mut targets = query(vec![Step::PromotedHeaders]);
+        targets.name = "Targets".into();
+        targets.source = source(&other);
+        let queries = [sales, targets];
+        let t = queries[1].run(usize::MAX).unwrap().0.memory();
+        let f = queries[0]
+            .run_with(&queries, usize::MAX)
+            .unwrap()
+            .0
+            .memory();
+        // The streamed input (Sales before the merge).
+        let mut plain = queries[0].clone();
+        plain.steps.truncate(1);
+        let s = plain.run(usize::MAX).unwrap().0.memory();
+        // Room for Targets and the final table (which shares the join output's buffers), but
+        // not for the streamed input beside them.
+        let r = queries[0].run_with(&queries, t + s + f - 1);
+        assert!(matches!(r, Err(Error::MemoryCap { .. })), "{r:?}");
+        assert!(queries[0].run_with(&queries, t + 2 * (s + f)).is_ok());
     }
 
     #[test]
