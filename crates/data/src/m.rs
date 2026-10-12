@@ -26,7 +26,10 @@ use opendash_m::{BinOp, Binding, Error, Expr, Let};
 use crate::culture::{Culture, days_from_civil};
 use crate::source::xlsx::civil;
 use crate::source::{Encoding, ExcelKind, File, Source};
-use crate::step::{ColumnType, Combine, Condition, JoinKind, Merge, Op, Step, Value};
+use crate::step::{
+    ColumnType, Combine, Condition, JoinKind, MAX_CONDITIONS, Merge, Op, Step, Value,
+    too_many_conditions,
+};
 
 /// The Windows codepages M's `Encoding=` takes, for the encodings a CSV Source can have.
 const CODEPAGES: [(u32, &Encoding); 4] = [
@@ -678,11 +681,19 @@ fn step_from(func: &str, args: &[Expr]) -> Result<(Step, Option<String>), String
         ("Table.ReorderColumns", [list]) => {
             Step::ReorderedColumns(text_list(list).ok_or_else(bad)?)
         }
-        ("Table.SelectRows", [Expr::Each(body)]) => filter_from(body).ok_or_else(|| {
-            "the filter must be comparisons of `[Column]` with a literal, or \
-             `Text.Contains`/`StartsWith`/`EndsWith`, joined by all `and` or all `or`"
-                .to_string()
-        })?,
+        ("Table.SelectRows", [Expr::Each(body)]) => match filter_from(body) {
+            Some(Step::FilteredRows { conditions, .. }) if conditions.len() > MAX_CONDITIONS => {
+                return Err(too_many_conditions(conditions.len()));
+            }
+            Some(step) => step,
+            None => {
+                return Err(
+                    "the filter must be comparisons of `[Column]` with a literal, or \
+                     `Text.Contains`/`StartsWith`/`EndsWith`, joined by all `and` or all `or`"
+                        .to_string(),
+                );
+            }
+        },
         ("Table.NestedJoin", args) => merge_from(args).ok_or_else(bad)?,
         // A known function with arguments outside the forms above.
         (
@@ -937,6 +948,40 @@ in
                 c("At", Op::NotEquals, Value::DateTime(1_700_000_000_123_456)),
                 c("Ok", Op::Equals, Value::Logical(false)),
             ],
+        }
+    }
+
+    #[test]
+    fn filters_round_trip_up_to_the_condition_cap() {
+        use crate::step::MAX_CONDITIONS;
+        let Step::FilteredRows {
+            conditions: kinds, ..
+        } = filter()
+        else {
+            panic!("filter() is a filter")
+        };
+        for combine in [Combine::And, Combine::Or] {
+            let step = |n: usize| Step::FilteredRows {
+                combine,
+                conditions: kinds.iter().cycle().take(n).cloned().collect(),
+            };
+            // Text ops print as calls (unbracketed); comparisons only, bracketed.
+            let compare = |n: usize| Step::FilteredRows {
+                combine,
+                conditions: (0..n)
+                    .map(|i| Condition {
+                        column: "A".into(),
+                        op: Op::Equals,
+                        value: Value::Number(i as f64),
+                    })
+                    .collect(),
+            };
+            for make in [&step as &dyn Fn(usize) -> Step, &compare] {
+                round_trip(&query(csv(), vec![make(MAX_CONDITIONS)]));
+                let m = print(&query(csv(), vec![make(MAX_CONDITIONS + 1)]));
+                let e = parse(&m).unwrap_err();
+                assert!(e.to_string().contains("conditions"), "{e}");
+            }
         }
     }
 

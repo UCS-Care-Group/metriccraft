@@ -63,6 +63,16 @@ pub enum Step {
     MergedQueries(Merge),
 }
 
+/// Most conditions in one Filtered Rows step. Its M is one `and`/`or` chain, and the M parser
+/// counts each operator as a nesting level (`opendash_m::MAX_DEPTH`), so a longer chain would
+/// print M that doesn't parse back. The command, the M reader and the step itself enforce it.
+pub const MAX_CONDITIONS: usize = 100;
+
+/// The error for a Filtered Rows step with `n` > [`MAX_CONDITIONS`] conditions.
+pub fn too_many_conditions(n: usize) -> String {
+    format!("{n} conditions: a filter may have at most {MAX_CONDITIONS} conditions")
+}
+
 /// How a Filtered Rows step joins its conditions (M `and` / `or`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Combine {
@@ -263,6 +273,9 @@ impl Step {
                 combine,
                 conditions,
             } => {
+                if conditions.len() > MAX_CONDITIONS {
+                    return Err(err(too_many_conditions(conditions.len())));
+                }
                 let mut tests = Vec::with_capacity(conditions.len());
                 for c in conditions {
                     let column = columns
@@ -538,6 +551,35 @@ mod tests {
 
     fn gb() -> &'static Culture {
         Culture::get("en-GB").unwrap()
+    }
+
+    #[test]
+    fn a_filter_past_the_condition_cap_is_an_error() {
+        let batch = RecordBatch::try_from_iter([(
+            "A",
+            Arc::new(arrow_array::Int64Array::from(vec![1])) as ArrayRef,
+        )])
+        .unwrap();
+        let step = |n: usize| Step::FilteredRows {
+            combine: Combine::Or,
+            conditions: (0..n)
+                .map(|i| Condition {
+                    column: "A".into(),
+                    op: Op::Equals,
+                    value: Value::Number(i as f64),
+                })
+                .collect(),
+        };
+        assert_eq!(
+            step(MAX_CONDITIONS)
+                .apply(&batch, gb())
+                .unwrap()
+                .0
+                .num_rows(),
+            1
+        );
+        let e = step(MAX_CONDITIONS + 1).apply(&batch, gb()).unwrap_err();
+        assert!(e.to_string().contains("conditions"), "{e}");
     }
 
     #[test]

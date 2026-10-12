@@ -5,7 +5,8 @@
 
 use arrow_schema::DataType;
 use opendash_data::step::{
-    ColumnType, Combine, Condition, JoinKind, Merge, Op, Step, Value as FilterValue,
+    ColumnType, Combine, Condition, JoinKind, MAX_CONDITIONS, Merge, Op, Step,
+    Value as FilterValue, too_many_conditions,
 };
 use opendash_data::{Table, default_memory_cap};
 use serde_json::Value;
@@ -109,6 +110,9 @@ pub(crate) fn filter_rows(doc: &mut Document, params: &Value) -> Result {
         .and_then(Value::as_array)
         .filter(|l| !l.is_empty())
         .ok_or_else(|| invalid(ID, "`conditions` must be a non-empty list".into()))?;
+    if list.len() > MAX_CONDITIONS {
+        return Err(invalid(ID, too_many_conditions(list.len())));
+    }
     let conditions = list
         .iter()
         .map(|c| condition(doc, q, c))
@@ -716,6 +720,29 @@ mod tests {
             );
             assert_eq!(app.document(), &before, "{params}");
         }
+    }
+
+    #[test]
+    fn filters_are_capped_so_their_m_parses() {
+        use opendash_data::step::MAX_CONDITIONS;
+        let conditions = |n: usize| -> Vec<Value> {
+            (0..n)
+                .map(|i| json!({"column": "Qty", "op": "equals", "value": i.to_string()}))
+                .collect()
+        };
+        let mut app = headed();
+        let before = app.document().clone();
+        let params = json!({"query": "Sales", "combine": "or",
+            "conditions": conditions(MAX_CONDITIONS + 1)});
+        let r = app.run("transform.filterRows", &params);
+        assert!(
+            matches!(&r, Err(Error::InvalidParams { message, .. }) if message.contains("conditions")),
+            "{r:?}"
+        );
+        assert_eq!(app.document(), &before);
+        let params = json!({"query": "Sales", "combine": "or",
+            "conditions": conditions(MAX_CONDITIONS)});
+        app.run("transform.filterRows", &params).unwrap();
     }
 
     #[test]
