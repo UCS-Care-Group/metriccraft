@@ -11,9 +11,15 @@
 //!   nulls.
 //! - Blank lines are skipped. Quoted fields may contain line breaks (`QuoteStyle.Csv`).
 //! - Without a BOM, valid UTF-8 in the first 64 KB means UTF-8, otherwise Windows-1252.
+//!
+//! Hostile input (spec N-1, N-4): a record (line, or quoted multi-line field) over
+//! [`MAX_RECORD`] bytes is an error naming its line, the type-detection sample is counted
+//! against the memory limit, and a batch ends early once it holds [`BATCH_BYTES`] of text.
 
+use std::cell::Cell;
 use std::collections::{HashSet, VecDeque};
 use std::io::{self, Read};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use ::csv::{ReaderBuilder, StringRecord};
@@ -22,7 +28,7 @@ use arrow_array::{ArrayRef, RecordBatch};
 use arrow_schema::{Field, Schema};
 use encoding_rs::{CoderResult, Decoder, Encoding, UTF_8, WINDOWS_1252};
 
-use super::{BATCH_ROWS, load};
+use super::{BATCH_BYTES, BATCH_ROWS, load};
 use crate::culture::Culture;
 use crate::step::{ColumnType, Step};
 use crate::{Error, Result, Table};
@@ -35,6 +41,10 @@ const MAX_COLUMNS: usize = 16_384;
 const CHUNK: usize = 64 * 1024;
 /// Candidate delimiters, in order of preference.
 const DELIMITERS: [u8; 4] = *b",;\t|";
+/// Longest record accepted, in decoded bytes: one huge line can't exhaust memory.
+pub const MAX_RECORD: u64 = 16 << 20;
+/// Read-ahead the csv crate may buffer past a record (its buffer is 8 KB).
+const FENCE_SLACK: u64 = 64 * 1024;
 
 /// How to read the file; `None` means detect.
 #[derive(Clone, Copy, Debug, Default)]
@@ -85,18 +95,44 @@ pub fn import(
     let delimiter = options
         .delimiter
         .unwrap_or_else(|| sniff(&encoding.decode(&prefix).0));
+    let fence = Rc::new(Cell::new(0));
     let mut csv = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
         .delimiter(delimiter)
-        .from_reader(Decode::new(reader, prefix, encoding.new_decoder()));
+        .from_reader(Fenced {
+            inner: Decode::new(reader, prefix, encoding.new_decoder()),
+            read: 0,
+            fence: Rc::clone(&fence),
+        });
+    // Reads one record, refusing one longer than MAX_RECORD (the csv crate buffers it whole).
+    let mut next = move |r: &mut StringRecord| {
+        let start = csv.position().clone();
+        fence.set(start.byte().saturating_add(MAX_RECORD + FENCE_SLACK));
+        csv.read_record(r).map_err(|e| match e.kind() {
+            ::csv::ErrorKind::Io(io) if io.kind() == io::ErrorKind::FileTooLarge => err(format!(
+                "line {}: a record is longer than {} MB",
+                start.line(),
+                MAX_RECORD >> 20
+            )),
+            _ => err(e.to_string()),
+        })
+    };
 
-    // Header row + SAMPLE_ROWS.
+    // Header row + SAMPLE_ROWS, held in memory: counted against the limit.
     let mut sample = VecDeque::with_capacity(SAMPLE_ROWS + 1);
+    let mut sampled = 0usize;
     while sample.len() <= SAMPLE_ROWS {
         let mut r = StringRecord::new();
-        if !csv.read_record(&mut r).map_err(|e| err(e.to_string()))? {
+        if !next(&mut r)? {
             break;
+        }
+        sampled = sampled.saturating_add(r.as_byte_record().as_slice().len());
+        if sampled > limit {
+            return Err(Error::MemoryCap {
+                table: name.into(),
+                limit,
+            });
         }
         sample.push_back(r);
     }
@@ -153,12 +189,12 @@ pub fn import(
             return None;
         }
         let mut text: Vec<StringBuilder> = (0..width).map(|_| StringBuilder::new()).collect();
-        let mut rows = 0;
-        while rows < BATCH_ROWS {
+        let (mut rows, mut bytes) = (0, 0usize);
+        while rows < BATCH_ROWS && bytes < BATCH_BYTES {
             if let Some(r) = sample.pop_front() {
                 record = r;
             } else {
-                match csv.read_record(&mut record) {
+                match next(&mut record) {
                     Ok(true) => {}
                     Ok(false) => {
                         done = true;
@@ -166,10 +202,11 @@ pub fn import(
                     }
                     Err(e) => {
                         done = true;
-                        return Some(Err(err(e.to_string())));
+                        return Some(Err(e));
                     }
                 }
             }
+            bytes = bytes.saturating_add(record.as_byte_record().as_slice().len());
             for (c, col) in text.iter_mut().enumerate() {
                 col.append_option(record.get(c));
             }
@@ -265,6 +302,26 @@ fn unique_names(row: &StringRecord) -> Vec<String> {
             name
         })
         .collect()
+}
+
+/// Hands the csv reader bytes up to a fence (set before each record) and fails past it.
+struct Fenced<R> {
+    inner: R,
+    read: u64,
+    fence: Rc<Cell<u64>>,
+}
+
+impl<R: Read> Read for Fenced<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let room = self.fence.get().saturating_sub(self.read);
+        if room == 0 {
+            return Err(io::ErrorKind::FileTooLarge.into());
+        }
+        let n = usize::try_from(room).unwrap_or(usize::MAX).min(buf.len());
+        let n = self.inner.read(buf.get_mut(..n).unwrap_or_default())?;
+        self.read += n as u64;
+        Ok(n)
+    }
 }
 
 /// Decodes any encoding to UTF-8 as it streams (BOM sniffed and removed by the decoder).
@@ -604,5 +661,49 @@ mod tests {
         bytes.extend_from_slice(b"\xFF\xFE\n");
         let (t, _) = run(&bytes, "en-US").unwrap();
         assert_eq!(t.rows(), CHUNK + 1);
+    }
+
+    #[test]
+    fn a_huge_record_is_an_error_naming_its_line() {
+        let opts = Options::default();
+        // An endless line: refused after MAX_RECORD bytes, not read to the end of memory.
+        let endless = b"a,b\n1,2\n".chain(io::repeat(b'x'));
+        let e = import("T", endless, opts, culture("en-US"), usize::MAX).unwrap_err();
+        assert!(e.to_string().contains("line 3: a record is longer"), "{e}");
+        // An endless quoted field past the sample.
+        let mut head = "n\n".repeat(SAMPLE_ROWS + 5);
+        head.push('"');
+        let endless = head.as_bytes().chain(io::repeat(b'y'));
+        let e = import("T", endless, opts, culture("en-US"), usize::MAX).unwrap_err();
+        assert!(e.to_string().contains("line 206"), "{e}");
+    }
+
+    #[test]
+    fn the_sample_counts_against_the_limit() {
+        let csv = format!("{}\n", "z".repeat(5000)).repeat(10);
+        let e = import(
+            "Wide",
+            csv.as_bytes(),
+            Options::default(),
+            culture("en-US"),
+            4096,
+        );
+        assert!(matches!(e, Err(Error::MemoryCap { .. })), "{e:?}");
+    }
+
+    #[test]
+    fn damaged_bytes_never_panic() {
+        let good = "Name;Qty;When;Flag\n\"a;\"\"b\"\"\";1;2026-03-04;true\nc;-2,5;04/03/2026;\n\
+                    \u{e9}t\u{e9};;;FALSE\n"
+            .repeat(3)
+            .into_bytes();
+        for i in 0..good.len() {
+            for flip in [0x01, 0x22, 0x80, 0xFF] {
+                let mut v = good.clone();
+                v[i] ^= flip;
+                let _ = run(&v, "en-US");
+            }
+            let _ = run(&good[..i], "de-DE");
+        }
     }
 }
