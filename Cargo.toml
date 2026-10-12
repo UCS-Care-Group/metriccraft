@@ -12,6 +12,10 @@ publish = false
 
 [workspace.dependencies]
 serde_json = "1"
+arrow-array = "60"
+arrow-buffer = "60"
+arrow-schema = "60"
+arrow-select = "60"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

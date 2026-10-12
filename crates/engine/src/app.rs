@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use opendash_data::Table;
 use serde_json::Value;
 
 use crate::{COMMANDS, Command, Error, Result, Run};
@@ -7,6 +8,8 @@ use crate::{COMMANDS, Command, Error, Result, Run};
 /// Everything that is saved and undoable. Filled in by later milestones (queries, model, report).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
+    /// Loaded data. Columns are shared, never copied, so cloning a Document for undo is cheap.
+    pub tables: Vec<Table>,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,
@@ -19,7 +22,7 @@ pub const UNDO_LIMIT: usize = 100;
 pub struct App {
     doc: Document,
     commands: &'static [Command],
-    // ponytail: whole-Document snapshots — cheap while bulk data is Arc-shared Arrow arrays.
+    // ponytail: whole-Document snapshots — cheap because table columns are shared (ADR 0005).
     // Switch to inverse operations if cloning a Document shows up in benchmarks.
     undo: VecDeque<Document>,
     redo: Vec<Document>,
@@ -230,6 +233,41 @@ mod tests {
             app.run("edit.undo", &Value::Null).unwrap();
         }
         assert_eq!(probe(&app), 5, "the oldest 5 steps were dropped");
+    }
+
+    #[test]
+    fn undo_snapshots_share_table_columns() {
+        use std::sync::Arc;
+
+        use arrow_array::{Array, Int64Array, RecordBatch};
+        use opendash_data::TableBuilder;
+
+        let rows: i64 = 10_000_000;
+        let col = Int64Array::from_iter_values((0..rows).map(|i| i % 100));
+        let batch = RecordBatch::try_from_iter([("Qty", Arc::new(col) as _)]).unwrap();
+        let mut b = TableBuilder::new("Sales", batch.schema(), usize::MAX);
+        b.push(&batch).unwrap();
+        drop(batch);
+        let table = b.finish().unwrap();
+        let buffer =
+            |doc: &Document| doc.tables[0].batch().column(0).to_data().buffers()[0].as_ptr();
+
+        let mut app = app();
+        app.doc.tables.push(table);
+        for _ in 0..UNDO_LIMIT {
+            app.run("test.add", &json!({"by": 1})).unwrap();
+        }
+        assert_eq!(app.undo.len(), UNDO_LIMIT);
+        let original = buffer(&app.doc);
+        assert!(
+            app.undo.iter().all(|d| buffer(d) == original),
+            "every snapshot points at the same column buffer: no extra column memory"
+        );
+        assert_eq!(app.doc.tables[0].rows(), 10_000_000);
+        assert!(
+            app.doc.tables[0].memory() < 11 << 20,
+            "stored as Int8: ~10 MB"
+        );
     }
 
     #[test]

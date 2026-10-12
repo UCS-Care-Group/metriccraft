@@ -12,7 +12,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+opendash-data = { path = "../data" }
 serde_json.workspace = true
+
+[dev-dependencies]
+arrow-array.workspace = true
 
 [[bench]]
 name = "engine"
