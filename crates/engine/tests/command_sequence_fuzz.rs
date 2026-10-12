@@ -8,7 +8,8 @@
 //! and after each sequence that
 //!
 //! - (c) undo-all gives back the original Document and redo-all the final one;
-//! - (e) save → open gives the same Document — TODO(#28), see the hook in [`run`].
+//! - (e) save → open gives the same definitions (see [`round_trip`]), for the final Document
+//!   and the original.
 //!
 //! Seeded and bounded: `ODASH_FUZZ_SCALE` (default 1) multiplies the number of sequences;
 //! `ODASH_FUZZ_SEED` replays one. Each sequence is at most [`STEPS`] commands (well under
@@ -25,6 +26,7 @@ mod fuzz {
     use opendash_data::source::{Bytes, File, Source, csv};
     use opendash_data::step::Step;
     use opendash_engine::{App, Document, UNDO_LIMIT};
+    use opendash_file::{Preserved, Project};
     use opendash_model::{ModelTable, same_name};
     use serde_json::{Value, json};
 
@@ -436,6 +438,96 @@ mod fuzz {
         Ok(())
     }
 
+    /// `doc`'s Queries as they are saved: an in-memory Source file is written as its name (the
+    /// path printed in M), so it opens as a path.
+    fn saved_queries(doc: &Document) -> Vec<Query> {
+        let mut queries = doc.queries.clone();
+        for q in &mut queries {
+            let (Source::Csv { file, .. } | Source::Parquet { file } | Source::Excel { file, .. }) =
+                &mut q.source;
+            if let File::Bytes { name, .. } = file {
+                *file = File::Path(name.as_str().into());
+            }
+        }
+        queries
+    }
+
+    /// Where two values' pretty debug output first differs (with a little context).
+    fn first_difference(a: &impl std::fmt::Debug, b: &impl std::fmt::Debug) -> String {
+        let (a, b) = (format!("{a:#?}"), format!("{b:#?}"));
+        let (a, b): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
+        let at = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+        let from = at.saturating_sub(6);
+        let show = |l: &[&str]| {
+            l.iter()
+                .skip(from)
+                .take(10)
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        format!(
+            "at line {at}:\n{}\n--- vs saved ---\n{}",
+            show(&a),
+            show(&b)
+        )
+    }
+
+    /// (e): `doc` encoded to an in-memory FileSet, decoded, gives back its definitions; again
+    /// through the app (a Package's bytes, opened). Compared exactly: the Project culture,
+    /// Queries (name, source, steps, culture; an in-memory source as its name, see
+    /// [`saved_queries`]), Enable load, and the whole Model (Tables, Columns and all their
+    /// properties, Relationships in order, autodetect). Not compared: data and Stale (no Data
+    /// cache until M2.6, so an opened Document's Tables are empty and its loaded Queries Stale);
+    /// only that the opened Tables are the Model's, empty. Saving what was opened gives the same
+    /// bytes.
+    fn round_trip(doc: &Document) -> Result<(), String> {
+        let project = Project {
+            culture: "en-US".into(),
+            queries: saved_queries(doc),
+            unloaded: doc.unloaded.clone(),
+            model: doc.model.clone(),
+        };
+        let files = opendash_file::encode(&project, None, &Preserved::default())
+            .map_err(|e| format!("encode: {e}"))?;
+        let (back, preserved) =
+            opendash_file::decode(&files, None).map_err(|e| format!("decode: {e}"))?;
+        if back != project {
+            return Err(format!("decoded {}", first_difference(&back, &project)));
+        }
+        let again = opendash_file::encode(&back, None, &preserved)
+            .map_err(|e| format!("encode again: {e}"))?;
+        if again != files {
+            return Err("saving what was opened changes the bytes".into());
+        }
+
+        let mut app = App::with_document(doc.clone());
+        let bytes = app.package_bytes().map_err(|e| format!("package: {e}"))?;
+        app.open_package_bytes(&bytes)
+            .map_err(|e| format!("open package: {e}"))?;
+        let opened = app.document();
+        if opened.queries != project.queries
+            || opened.unloaded != doc.unloaded
+            || opened.model != doc.model
+        {
+            return Err("the opened Package's definitions differ".into());
+        }
+        let names = |d: &Document| {
+            d.tables
+                .iter()
+                .map(|t| t.name().to_owned())
+                .collect::<Vec<_>>()
+        };
+        if names(opened) != names(doc) || opened.tables.iter().any(|t| t.rows() != 0) {
+            return Err(format!(
+                "opened tables {:?}, saved {:?}",
+                names(opened),
+                names(doc)
+            ));
+        }
+        check(opened).map_err(|e| format!("opened: {e}"))
+    }
+
     /// Per command id: (runs, successes).
     type Stats = BTreeMap<&'static str, (usize, usize)>;
 
@@ -444,6 +536,7 @@ mod fuzz {
         let mut rng = Rng(seed);
         let original = document();
         check(&original).unwrap();
+        round_trip(&original).unwrap();
         let mut app = App::with_document(original.clone());
         let mut log: Vec<String> = Vec::new();
         for _ in 0..STEPS {
@@ -476,8 +569,12 @@ mod fuzz {
             }
         }
         let last = app.document().clone();
-        // TODO(#28): file round-trip (e) — save `last` as a Project and as a Package, open each,
-        // and assert the opened Document equals `last` (and again after undo-all, `original`).
+        if let Err(e) = round_trip(&last) {
+            panic!(
+                "seed {seed}: save → open: {e}\nreplay: ODASH_FUZZ_SEED={seed}\n{}",
+                log.join("\n")
+            );
+        }
         let mut undone = 0usize;
         while app.can_undo() {
             app.run("edit.undo", &Value::Null).unwrap();

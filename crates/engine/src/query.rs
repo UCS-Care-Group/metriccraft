@@ -107,6 +107,13 @@ pub(crate) fn filter_rows(doc: &mut Document, params: &Value) -> Result {
     if list.len() > MAX_CONDITIONS {
         return Err(invalid(ID, too_many_conditions(list.len())));
     }
+    // One condition has nothing to combine, and its M (`each [A] = 1`) can't say how: keep it
+    // And, as reading the M back gives (found by the fuzzer's save → open check).
+    let combine = if list.len() == 1 {
+        Combine::And
+    } else {
+        combine
+    };
     // The columns' types after the Query's steps so far (its table may be Stale): one Preview
     // for all the conditions.
     let schema = doc.queries.get(q).and_then(|query| {
@@ -620,6 +627,30 @@ mod tests {
         .unwrap();
         apply(&mut app);
         assert_eq!(app.document().tables[0].rows(), 1);
+    }
+
+    #[test]
+    fn one_condition_filter_is_and_so_it_survives_save_and_open() {
+        let mut app = headed();
+        let p = json!({"query": "Sales", "conditions": [
+            {"column": "Region", "op": "equals", "value": "North"}
+        ], "combine": "or"});
+        app.run("transform.filterRows", &p).unwrap();
+        let q = &app.document().queries[0];
+        assert!(matches!(
+            q.steps.last(),
+            Some(Step::FilteredRows {
+                combine: Combine::And,
+                ..
+            })
+        ));
+        let m = opendash_data::m::print(&opendash_data::m::MQuery {
+            source: q.source.clone(),
+            steps: q.steps.clone(),
+            culture: None,
+        });
+        let back = opendash_data::m::parse(&m).unwrap();
+        assert_eq!(back.steps, q.steps);
     }
 
     #[test]
