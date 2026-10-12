@@ -268,6 +268,13 @@ pub(crate) fn merge_queries(doc: &mut Document, params: &Value) -> Result {
 /// marks its table Stale. The table itself is not reloaded until Close & Apply or Refresh.
 /// A Source that can't be read doesn't stop the edit (as in Power Query, editing works offline).
 fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
+    let name = check_steps(doc, q, id)?;
+    doc.stale.insert(name);
+    Ok(())
+}
+
+/// Checks Query `q`'s steps run on the Preview rows (see [`reload`]); returns its name.
+pub(crate) fn check_steps(doc: &Document, q: usize, id: &str) -> Result<String> {
     let query = doc
         .queries
         .get(q)
@@ -280,9 +287,7 @@ fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
             return Err(invalid(id, e.to_string()));
         }
     }
-    let name = query.name.clone();
-    doc.stale.insert(name);
-    Ok(())
+    Ok(query.name.clone())
 }
 
 /// The type `steps` give `column` at their end: its last Changed Type, following renames back.

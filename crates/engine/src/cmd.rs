@@ -4,6 +4,7 @@ use crate::load;
 use crate::model::{self, has_tables};
 use crate::query::{self, has_queries};
 use crate::relationship;
+use crate::rename;
 use crate::{App, Document, Result};
 
 /// What a command acts on.
@@ -193,6 +194,39 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_queries,
         run: Run::Edit(model::enable_load),
     },
+    // Power Query's Queries pane, right-click a query (spec D-4, C-1; `rename.rs`). A Query and
+    // its Table share their name: renaming or deleting one does both.
+    Command {
+        id: "query.rename",
+        label: "Rename",
+        ribbon: "",
+        shortcut: None,
+        params: "query: text — the Query (and its Table)\n\
+                 name: text — its new name, unique among Queries ignoring case; rewrites \
+                 Relationships and other Queries' merges (same as modeling.renameTable)",
+        enabled: has_queries,
+        run: Run::App(rename::rename_query),
+    },
+    Command {
+        id: "query.delete",
+        label: "Delete",
+        ribbon: "",
+        shortcut: None,
+        params: "query: text — the Query; its Table and Relationships go too (refused while \
+                 another Query merges it)",
+        enabled: has_queries,
+        run: Run::Edit(rename::delete_query),
+    },
+    Command {
+        id: "query.duplicate",
+        label: "Duplicate",
+        ribbon: "",
+        shortcut: None,
+        params: "query: text — the Query to copy, as `<query> (2)` (the next free number); \
+                 loaded at the next Close & Apply",
+        enabled: has_queries,
+        run: Run::Edit(rename::duplicate_query),
+    },
     // The model (spec D-1): Column tools and the Properties pane.
     Command {
         id: "columnTools.dataType",
@@ -265,6 +299,41 @@ pub static COMMANDS: &[Command] = &[
                  description: text — empty clears it",
         enabled: has_tables,
         run: Run::Edit(model::set_description),
+    },
+    // The Fields pane / Data view: right-click > Rename or Delete from model (spec D-4).
+    Command {
+        id: "modeling.renameTable",
+        label: "Rename",
+        ribbon: "",
+        shortcut: Some("F2"),
+        params: "table: text — the Table (and its Query)\n\
+                 name: text — its new name, unique among Queries ignoring case; rewrites \
+                 Relationships and other Queries' merges (same as query.rename)",
+        enabled: has_tables,
+        run: Run::App(rename::rename_table),
+    },
+    Command {
+        id: "modeling.renameColumn",
+        label: "Rename",
+        ribbon: "",
+        shortcut: Some("F2"),
+        params: "table: text — the Table\n\
+                 column: text — the Column\n\
+                 name: text — its new name, unique in the Table ignoring case; adds a Renamed \
+                 Columns step to the Query and rewrites sort by, Relationships and other \
+                 Queries' merges",
+        enabled: has_tables,
+        run: Run::App(rename::rename_column),
+    },
+    Command {
+        id: "modeling.deleteTable",
+        label: "Delete from model",
+        ribbon: "",
+        shortcut: None,
+        params: "table: text — the Table; its Query and Relationships go too (refused while \
+                 another Query merges it)",
+        enabled: has_tables,
+        run: Run::Edit(rename::delete_table),
     },
     // Relationships (spec D-2): Modeling > Manage relationships.
     Command {
