@@ -751,32 +751,21 @@ mod tests {
         assert!(parse(&big).is_err());
     }
 
-    /// xorshift: deterministic fuzzing without a dependency.
-    struct Rng(u64);
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-        fn below(&mut self, n: usize) -> usize {
-            (self.next() % n.max(1) as u64) as usize
-        }
-    }
-
+    /// 20,000 cases a run; soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).
     #[test]
     fn fuzzed_input_never_panics() {
         let seeds = [
             "let\n    Source = Csv.Document(File.Contents(\"a.csv\"),[Delimiter=\",\", Columns=3, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),\n    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true])\nin\n    #\"Promoted Headers\"",
             "Source{[Item=\"Sheet1\",Kind=\"Sheet\"]}[Data]",
             "each ([A] > 0.5e3 and not [B]) or -[C] <> null & \"#(cr,lf)\"",
+            "Table.SelectRows(#\"Merged Queries1\", each [Day] < #date(2024, 10, 4) or [At] <> #datetime(2023, 11, 14, 22, 13, 20.123456) or Text.StartsWith([R], \"N\"\"o#(#)(x)\"))",
+            "Table.TransformColumnTypes(Source,{{\"A\", type text}, {\"B\", Int64.Type}}, \"en-GB\")",
         ];
         let alphabet: Vec<char> = "#\"()[]{},=<>+-*/&.e0x9_ \n\r\tlet in each not type"
             .chars()
             .collect();
-        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-        for i in 0..20_000 {
+        let mut rng = crate::fuzz::Fuzz::new("m-parse", 0x9E37_79B9_7F4A_7C15);
+        for i in 0..rng.scaled(20_000) {
             let src: String = if i % 4 == 0 {
                 // Random bytes, lossily decoded.
                 let len = rng.below(64);
@@ -804,12 +793,15 @@ mod tests {
                 chars.into_iter().collect()
             };
             // Whatever parses must print to text that parses back to the same tree.
-            if let Ok(e) = parse(&src) {
-                let printed = print(&e);
-                let again =
-                    parse(&printed).unwrap_or_else(|err| panic!("{src:?} → {printed:?}: {err}"));
-                assert_eq!(print(&again), printed, "{src:?}");
-            }
+            rng.case(src.as_bytes(), || {
+                if let Ok(e) = parse(&src) {
+                    let printed = print(&e);
+                    let again = parse(&printed)
+                        .unwrap_or_else(|err| panic!("{src:?} → {printed:?}: {err}"));
+                    assert_eq!(print(&again), printed, "{src:?}");
+                }
+            });
         }
+        rng.finish();
     }
 }

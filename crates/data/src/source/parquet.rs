@@ -1271,15 +1271,12 @@ mod tests {
     /// file must be rejected (or read) before any panic, as on wasm. Sampled to stay quick in
     /// debug builds; a full sweep of 2.7M cases (every byte × 12 flips and 9 values, 20,000
     /// random multi-byte edits a file, every cut) ran clean in release while this was written.
+    /// Soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`): the flip and cut
+    /// sweeps get `scale` times denser (a full sweep from about 100) and the random edits
+    /// `scale` times more.
     #[test]
     fn damaged_files_never_panic() {
-        let mut x = 0x9E37_79B9_7F4A_7C15u64;
-        let mut next = move || {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            x
-        };
+        let mut fuzz = crate::fuzz::Fuzz::new("parquet", 0x9E37_79B9_7F4A_7C15);
         for good in varied_files() {
             let checked = |name: &str, b: Bytes| {
                 collect(name, BIG, |sink| {
@@ -1288,28 +1285,32 @@ mod tests {
             };
             assert_eq!(checked("ok", good.clone()).unwrap().0.rows(), 40);
             let len = good.len();
-            let damaged = |v: Vec<u8>| {
-                let _ = checked("Damaged", Bytes::from(v));
+            let damaged = |fuzz: &mut crate::fuzz::Fuzz, v: Vec<u8>| {
+                let b = Bytes::from(v);
+                fuzz.case(&b, || {
+                    let _ = checked("Damaged", b.clone());
+                });
             };
-            for i in (0..len).step_by((len / 300).max(1)) {
+            for i in (0..len).step_by((len / fuzz.scaled(300)).max(1)) {
                 for flip in [0x01, 0x80, 0x07] {
                     let mut v = good.to_vec();
                     v[i] ^= flip;
-                    damaged(v);
+                    damaged(&mut fuzz, v);
                 }
             }
-            for _ in 0..300 {
+            for _ in 0..fuzz.scaled(300) {
                 let mut v = good.to_vec();
-                for _ in 0..next() % 4 + 1 {
-                    let i = (next() % len as u64) as usize;
-                    v[i] = next() as u8;
+                for _ in 0..fuzz.next() % 4 + 1 {
+                    let i = fuzz.below(len);
+                    v[i] = fuzz.next() as u8;
                 }
-                damaged(v);
+                damaged(&mut fuzz, v);
             }
-            for cut in (0..len).step_by((len / 40).max(1)) {
-                damaged(good.slice(..cut).to_vec());
+            for cut in (0..len).step_by((len / fuzz.scaled(40)).max(1)) {
+                damaged(&mut fuzz, good.slice(..cut).to_vec());
             }
         }
+        fuzz.finish();
     }
 
     #[test]

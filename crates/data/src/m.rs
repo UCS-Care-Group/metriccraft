@@ -1138,4 +1138,157 @@ in
         .expect_err("culture");
         assert!(e.message.contains("xx-XX"), "{e}");
     }
+
+    /// M tokens, roughly: quoted texts and identifiers, words, whitespace runs, single symbols.
+    fn tokens(m: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut chars = m.chars().peekable();
+        while let Some(c) = chars.next() {
+            let mut t = String::from(c);
+            if c == '"' || (c == '#' && chars.peek() == Some(&'"')) {
+                if c == '#' {
+                    t.extend(chars.next());
+                }
+                while let Some(d) = chars.next() {
+                    t.push(d);
+                    if d == '"' && chars.peek() != Some(&'"') {
+                        break;
+                    }
+                    if d == '"' {
+                        t.extend(chars.next());
+                    }
+                }
+            } else if c.is_alphanumeric() || c == '_' || c == '.' {
+                while let Some(&d) = chars
+                    .peek()
+                    .filter(|d| d.is_alphanumeric() || **d == '_' || **d == '.')
+                {
+                    t.push(d);
+                    chars.next();
+                }
+            } else if c.is_whitespace() {
+                while let Some(&d) = chars.peek().filter(|d| d.is_whitespace()) {
+                    t.push(d);
+                    chars.next();
+                }
+            }
+            out.push(t);
+        }
+        out
+    }
+
+    /// The M printed for every step and Source kind, with tokens and characters deleted,
+    /// inserted, duplicated or swapped: parsing returns Ok or Err, never panics, and whatever
+    /// parses prints back to M that parses to the same Query. 2,000 cases a run; soak with
+    /// `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).
+    #[test]
+    fn mutated_m_never_panics() {
+        let mut fuzz = crate::fuzz::Fuzz::new("query-m", 0x5DEE_CE66_D1CE_4E5B);
+        let sources = [
+            csv(),
+            Source::Csv {
+                file: File::Path("a b\\\"c\".tsv".into()),
+                delimiter: b'\t',
+                columns: 12,
+                encoding: encoding_rs::UTF_16BE,
+            },
+            Source::Parquet {
+                file: File::Path("/data/sales.parquet".into()),
+            },
+            Source::Excel {
+                file: File::Path("Book.xlsx".into()),
+                item: "Sheet1".into(),
+                kind: ExcelKind::Sheet,
+            },
+            Source::Excel {
+                file: File::Path("Book.xlsx".into()),
+                item: "My \"Sales\"".into(),
+                kind: ExcelKind::Table,
+            },
+        ];
+        let steps = vec![
+            Step::PromotedHeaders,
+            Step::ChangedType(vec![
+                ("A".into(), ColumnType::Text),
+                ("B".into(), ColumnType::Decimal),
+                ("C".into(), ColumnType::Whole),
+                ("D".into(), ColumnType::Date),
+                ("E".into(), ColumnType::DateTime),
+                ("F".into(), ColumnType::Boolean),
+            ]),
+            Step::RenamedColumns(vec![("C0".into(), "Say \"hi\"\n#(x)".into())]),
+            Step::RemovedColumns(vec!["C1".into(), "C2".into()]),
+            Step::ReorderedColumns(vec!["C3".into(), "C0".into()]),
+            filter(),
+            Step::FilteredRows {
+                combine: Combine::And,
+                conditions: vec![],
+            },
+            merge(vec![("Manager".into(), "Regions.Manager".into())]),
+            merge(vec![]),
+        ];
+        let mut printed: Vec<String> = Vec::new();
+        for (i, source) in sources.iter().enumerate() {
+            printed.push(print(&query(source.clone(), steps.clone())));
+            for step in &steps {
+                printed.push(print(&MQuery {
+                    source: source.clone(),
+                    steps: vec![step.clone()],
+                    culture: Culture::get(["en-GB", "de-DE"][i % 2]).filter(|_| i < 2),
+                }));
+            }
+        }
+        let pool: Vec<String> = printed.iter().flat_map(|m| tokens(m)).collect();
+        let symbols: Vec<char> = "\"#()[]{},=<>-.& \n0e".chars().collect();
+        for _ in 0..fuzz.scaled(2_000) {
+            let m = &printed[fuzz.below(printed.len())];
+            let src: String = if fuzz.below(2) == 0 {
+                let mut t = tokens(m);
+                for _ in 0..fuzz.below(3) + 1 {
+                    if t.is_empty() {
+                        break;
+                    }
+                    let at = fuzz.below(t.len());
+                    match fuzz.below(4) {
+                        0 => drop(t.remove(at)),
+                        1 => t.insert(at, pool[fuzz.below(pool.len())].clone()),
+                        2 => {
+                            let other = fuzz.below(t.len());
+                            t.swap(at, other);
+                        }
+                        _ => {
+                            let copy = t[at].clone();
+                            t.insert(at, copy);
+                        }
+                    }
+                }
+                t.concat()
+            } else {
+                let mut c: Vec<char> = m.chars().collect();
+                for _ in 0..fuzz.below(3) + 1 {
+                    if c.is_empty() {
+                        break;
+                    }
+                    let at = fuzz.below(c.len());
+                    match fuzz.below(3) {
+                        0 => drop(c.remove(at)),
+                        1 => c.insert(at, symbols[fuzz.below(symbols.len())]),
+                        _ => {
+                            let other = fuzz.below(c.len());
+                            c.swap(at, other);
+                        }
+                    }
+                }
+                c.into_iter().collect()
+            };
+            fuzz.case(src.as_bytes(), || {
+                if let Ok(q) = parse(&src) {
+                    let again = print(&q);
+                    let back = parse(&again).unwrap_or_else(|e| panic!("{src}\n→\n{again}\n{e}"));
+                    assert_eq!(back, q, "{src}\n→\n{again}");
+                }
+            });
+        }
+        fuzz.finish();
+    }
 }

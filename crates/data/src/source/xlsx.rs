@@ -1508,21 +1508,29 @@ mod tests {
         ok
     }
 
+    /// Soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`): the flip sweeps get
+    /// `scale` times denser and the random edits and attribute values `scale` times more.
     #[test]
     fn damaged_parts_never_panic() {
+        let mut fuzz = crate::fuzz::Fuzz::new("xlsx", 0x9E37_79B9_7F4A_7C15);
         let good = sample();
         assert!(load_all(good.clone(), usize::MAX));
         let parts = unzip(&good);
         assert!(load_all(rezip(&parts), usize::MAX), "rezipped sample loads");
+        let damaged = |fuzz: &mut crate::fuzz::Fuzz, v: Vec<u8>| {
+            fuzz.case(&v, || {
+                load_all(v.clone(), usize::MAX);
+            });
+        };
         // Bit flips and cuts in every XML part (sampled to keep the debug run quick), then
         // flips in the zip container itself.
-        for (p, (name, data)) in parts.iter().enumerate() {
-            let step = (data.len() / 150).max(1);
+        for (p, (_, data)) in parts.iter().enumerate() {
+            let step = (data.len() / fuzz.scaled(150)).max(1);
             for i in (0..data.len()).step_by(step) {
                 for flip in [0x01, 0x20, 0x80] {
                     let mut parts = parts.clone();
                     parts[p].1[i] ^= flip;
-                    load_all(rezip(&parts), usize::MAX);
+                    damaged(&mut fuzz, rezip(&parts));
                 }
             }
             for cut in [
@@ -1533,15 +1541,90 @@ mod tests {
             ] {
                 let mut parts = parts.clone();
                 parts[p].1.truncate(cut);
-                load_all(rezip(&parts), usize::MAX);
+                damaged(&mut fuzz, rezip(&parts));
             }
-            let _ = name;
         }
-        for i in (0..good.len()).step_by(7) {
+        for i in (0..good.len()).step_by((7 / fuzz.scale).max(1)) {
             let mut v = good.clone();
             v[i] ^= 0x10;
-            load_all(v, usize::MAX);
+            damaged(&mut fuzz, v);
         }
+        // Random multi-byte edits and cuts in one part.
+        for _ in 0..fuzz.scaled(100) {
+            let mut parts = parts.clone();
+            let p = fuzz.below(parts.len());
+            let data = &mut parts[p].1;
+            for _ in 0..fuzz.below(4) + 1 {
+                let i = fuzz.below(data.len());
+                if let Some(b) = data.get_mut(i) {
+                    *b = fuzz.next() as u8;
+                }
+            }
+            if fuzz.below(4) == 0 {
+                data.truncate(fuzz.below(data.len() + 1));
+            }
+            damaged(&mut fuzz, rezip(&parts));
+        }
+        // Hostile attribute values: references, counts, styles, types.
+        let values = [
+            "",
+            "0",
+            "-1",
+            "A0",
+            "XFD1048576",
+            "XFE1",
+            "A1048577",
+            "4294967295",
+            "4294967296",
+            "18446744073709551616",
+            "99999999999999999999",
+            "AAAAAAAAAAAAAAAA1",
+            "A1:",
+            ":B2",
+            "B2:A1",
+            "A1:XFD1048576",
+            "$A$1",
+            "1e308",
+            "NaN",
+            "s",
+            "str",
+            "inlineStr",
+            "e",
+            "b",
+            "n",
+            "d",
+            "A1:B2:C3",
+            "\u{0}",
+            "\u{FFFF}",
+        ];
+        for _ in 0..fuzz.scaled(200) {
+            let mut parts = parts.clone();
+            let p = fuzz.below(parts.len());
+            let Ok(text) = std::str::from_utf8(&parts[p].1) else {
+                continue;
+            };
+            let attrs: Vec<usize> = text.match_indices("=\"").map(|(i, _)| i + 2).collect();
+            if attrs.is_empty() {
+                continue;
+            }
+            let mut text = text.to_string();
+            for _ in 0..fuzz.below(3) + 1 {
+                let at = attrs[fuzz.below(attrs.len())];
+                let Some(len) = text.get(at..).and_then(|t| t.find('"')) else {
+                    continue;
+                };
+                let value = match fuzz.below(3) {
+                    0 => (0..fuzz.below(24))
+                        .map(|_| char::from(b'0' + fuzz.below(10) as u8))
+                        .collect(),
+                    _ => values[fuzz.below(values.len())].to_string(),
+                };
+                text.replace_range(at..at + len, &value);
+            }
+            parts[p].1 = text.into_bytes();
+            damaged(&mut fuzz, rezip(&parts));
+        }
+        fuzz.finish();
     }
 
     #[test]

@@ -8,6 +8,8 @@
 //! `x[F]` and `[F]`, `each`, primitive types (`type text`), unary `not`/`-`, and the logical,
 //! comparison, arithmetic and `&` operators. Anything else is a parse error naming the line.
 
+#[cfg(test)]
+mod fuzz;
 mod parse;
 mod print;
 
