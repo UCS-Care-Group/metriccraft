@@ -107,9 +107,7 @@ impl Cells {
                 None,
             ))?)?),
             t if t.is_integer() => Self::Int(downcast(&to(DataType::Int64)?)?),
-            t if t.is_floating() || matches!(t, DataType::Decimal128(..)) => {
-                Self::Number(downcast(&to(DataType::Float64)?)?)
-            }
+            t if t.is_numeric() => Self::Number(downcast(&to(DataType::Float64)?)?),
             t if is_text(t) => Self::Text(downcast(&to(DataType::Utf8)?)?),
             _ => return None,
         })

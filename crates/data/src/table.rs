@@ -5,8 +5,8 @@ use std::sync::Arc;
 use arrow_array::builder::StringDictionaryBuilder;
 use arrow_array::types::{Int8Type, Int16Type, Int32Type};
 use arrow_array::{
-    Array, ArrayRef, DictionaryArray, Int8Array, Int16Array, Int32Array, Int64Array,
-    PrimitiveArray, RecordBatch, StringArray,
+    Array, ArrayRef, Decimal32Array, Decimal64Array, DictionaryArray, Int8Array, Int16Array,
+    Int32Array, Int64Array, PrimitiveArray, RecordBatch, StringArray,
 };
 use arrow_buffer::{NullBuffer, NullBufferBuilder};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
@@ -34,6 +34,52 @@ impl Table {
 
     pub fn rows(&self) -> usize {
         self.batch.num_rows()
+    }
+
+    /// This table with column `index` replaced by `column` (a plain Arrow array, as a step
+    /// gives: encoded narrow here), keeping its name; the other columns are shared. At most
+    /// `limit` bytes for the new column.
+    pub fn with_column(&self, index: usize, column: ArrayRef, limit: usize) -> Result<Table> {
+        let schema = self.batch.schema();
+        let field = schema
+            .fields()
+            .get(index)
+            .ok_or_else(|| self.error(format!("there is no column {index}")))?;
+        let plain = Arc::new(Schema::new(vec![Field::new(
+            field.name(),
+            column.data_type().clone(),
+            true,
+        )]));
+        let one = RecordBatch::try_new(Arc::clone(&plain), vec![column])
+            .map_err(|e| self.error(e.to_string()))?;
+        let mut b = TableBuilder::new(&self.name, plain, limit);
+        b.push(&one)?;
+        let encoded = b.finish()?;
+        let (Some(new_field), Some(new_column)) = (
+            encoded.batch.schema().fields().first().cloned(),
+            encoded.batch.columns().first().cloned(),
+        ) else {
+            return Err(self.error("the converted column is missing".into()));
+        };
+        let mut fields: Vec<_> = schema.fields().iter().cloned().collect();
+        let mut columns = self.batch.columns().to_vec();
+        if let (Some(f), Some(c)) = (fields.get_mut(index), columns.get_mut(index)) {
+            *f = new_field;
+            *c = new_column;
+        }
+        let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
+            .map_err(|e| self.error(e.to_string()))?;
+        Ok(Table {
+            name: Arc::clone(&self.name),
+            batch,
+        })
+    }
+
+    fn error(&self, message: String) -> Error {
+        Error::Arrow {
+            table: self.name.to_string(),
+            message,
+        }
     }
 
     /// Bytes held by the column buffers.
@@ -105,6 +151,11 @@ enum Col {
         values: Vec<i64>,
         nulls: NullBufferBuilder,
     },
+    /// Fixed decimal (`Decimal64(_, 4)`): the same, narrowed to `Decimal32` or kept.
+    Fixed {
+        values: Vec<i64>,
+        nulls: NullBufferBuilder,
+    },
     Other(Vec<ArrayRef>),
 }
 
@@ -118,7 +169,9 @@ impl Col {
                 bytes,
                 ..
             } => rows * 4 + bytes + distinct * 20,
-            Col::Int { values, .. } => values.capacity() * 8 + values.len() / 8,
+            Col::Int { values, .. } | Col::Fixed { values, .. } => {
+                values.capacity() * 8 + values.len() / 8
+            }
             Col::Other(chunks) => chunks.iter().map(|c| c.get_array_memory_size()).sum(),
         }
     }
@@ -138,6 +191,10 @@ impl TableBuilder {
                     bytes: 0,
                 },
                 DataType::Int64 => Col::Int {
+                    values: Vec::new(),
+                    nulls: NullBufferBuilder::new(0),
+                },
+                DataType::Decimal64(_, 4) => Col::Fixed {
                     values: Vec::new(),
                     nulls: NullBufferBuilder::new(0),
                 },
@@ -203,6 +260,16 @@ impl TableBuilder {
                         None => nulls.append_n_non_nulls(ints.len()),
                     }
                 }
+                Col::Fixed { values, nulls } => {
+                    let Some(fixed) = array.as_any().downcast_ref::<Decimal64Array>() else {
+                        continue;
+                    };
+                    values.extend_from_slice(fixed.values());
+                    match fixed.nulls() {
+                        Some(n) => nulls.append_buffer(n),
+                        None => nulls.append_n_non_nulls(fixed.len()),
+                    }
+                }
                 Col::Other(chunks) => chunks.push(Arc::clone(array)),
             }
         }
@@ -228,6 +295,7 @@ impl TableBuilder {
                     })?
                 }
                 Col::Int { values, mut nulls } => narrow_ints(values, nulls.finish()),
+                Col::Fixed { values, mut nulls } => narrow_fixed(values, nulls.finish()),
                 Col::Other(chunks) => {
                     let refs: Vec<&dyn Array> = chunks.iter().map(|c| c.as_ref()).collect();
                     if refs.is_empty() {
@@ -294,6 +362,23 @@ fn narrow_keys(dict: DictionaryArray<Int32Type>) -> std::result::Result<ArrayRef
         rekey(DictionaryArray::<Int16Type>::try_new(k, values).map(|d| Arc::new(d) as ArrayRef))
     } else {
         Ok(Arc::new(dict))
+    }
+}
+
+/// Stores fixed decimals (× 10⁴) as `Decimal32(9, 4)` when every value fits an `i32`, else
+/// `Decimal64(18, 4)`. Arrow accepts any value of the storage type: precision isn't validated.
+fn narrow_fixed(values: Vec<i64>, nulls: Option<NullBuffer>) -> ArrayRef {
+    let fits = values.iter().all(|v| i32::try_from(*v).is_ok());
+    if fits {
+        let narrow: Vec<i32> = values
+            .iter()
+            .map(|&v| i32::try_from(v).unwrap_or_default())
+            .collect();
+        Arc::new(
+            Decimal32Array::new(narrow.into(), nulls).with_data_type(DataType::Decimal32(9, 4)),
+        )
+    } else {
+        Arc::new(Decimal64Array::new(values.into(), nulls).with_data_type(crate::step::FIXED))
     }
 }
 
@@ -410,6 +495,45 @@ mod tests {
             qty.iter().collect::<Vec<_>>(),
             [Some(1), None, Some(300), Some(-2)]
         );
+    }
+
+    #[test]
+    fn fixed_decimals_narrow_to_decimal32_when_they_fit() {
+        for (v, want) in [
+            (2_147_483_647, DataType::Decimal32(9, 4)),
+            (2_147_483_648, crate::step::FIXED),
+        ] {
+            let column = crate::step::fixed_array(vec![Some(v), None, Some(-5)]);
+            let batch = RecordBatch::try_from_iter([("Price", column)]).unwrap();
+            let mut b = TableBuilder::new("T", batch.schema(), usize::MAX);
+            b.push(&batch).unwrap();
+            let t = b.finish().unwrap();
+            let c = t.batch().column(0);
+            assert_eq!(c.data_type(), &want);
+            assert!(c.is_null(1));
+            let wide = arrow_cast::cast(c, &crate::step::FIXED).unwrap();
+            let wide = wide
+                .as_any()
+                .downcast_ref::<arrow_array::Decimal64Array>()
+                .unwrap();
+            assert_eq!(wide.iter().collect::<Vec<_>>(), [Some(v), None, Some(-5)]);
+        }
+    }
+
+    #[test]
+    fn with_column_encodes_the_new_column_and_shares_the_rest() {
+        let mut b = TableBuilder::new("Sales", schema(), usize::MAX);
+        b.push(&batch(vec![Some("a")], vec![Some(1)], vec![2.5]))
+            .unwrap();
+        let t = b.finish().unwrap();
+        let ints: ArrayRef = Arc::new(Int64Array::from(vec![7]));
+        let t2 = t.with_column(2, ints, usize::MAX).unwrap();
+        assert_eq!(t2.name(), "Sales");
+        assert_eq!(t2.batch().column(2).data_type(), &DataType::Int8);
+        assert_eq!(t2.batch().schema().field(2).name(), "Amount");
+        assert_eq!(t.buffers()[0], t2.buffers()[0], "Region shared");
+        let ints: ArrayRef = Arc::new(Int64Array::from(vec![7]));
+        assert!(t.with_column(9, ints, usize::MAX).is_err());
     }
 
     #[test]

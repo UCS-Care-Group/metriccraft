@@ -26,15 +26,9 @@ pub(crate) fn use_first_row_as_headers(doc: &mut Document, params: &Value) -> Re
 pub(crate) fn change_type(doc: &mut Document, params: &Value) -> Result {
     const ID: &str = "transform.changeType";
     add_step(doc, ID, params, |p| {
-        let ty = match text(p, "type", ID)?.as_str() {
-            "text" => ColumnType::Text,
-            "decimal" => ColumnType::Decimal,
-            "whole" => ColumnType::Whole,
-            "date" => ColumnType::Date,
-            "datetime" => ColumnType::DateTime,
-            "boolean" => ColumnType::Boolean,
-            other => return Err(invalid(ID, format!("unknown type `{other}`"))),
-        };
+        let name = text(p, "type", ID)?;
+        let ty = ColumnType::from_name(&name)
+            .ok_or_else(|| invalid(ID, format!("unknown type `{name}`")))?;
         let columns = names(p, ID)?;
         Ok(Step::ChangedType(
             columns.into_iter().map(|c| (c, ty)).collect(),

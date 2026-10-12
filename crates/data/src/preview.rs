@@ -216,6 +216,8 @@ fn type_name(ty: ColumnType) -> &'static str {
     match ty {
         ColumnType::Text => "Text",
         ColumnType::Decimal | ColumnType::Whole => "Number",
+        // ponytail: Power Query's wording for a failed Currency.Type, unobserved; Number assumed.
+        ColumnType::FixedDecimal => "Number",
         ColumnType::Date => "Date",
         ColumnType::DateTime => "DateTime",
         ColumnType::Boolean => "Logical",

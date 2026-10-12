@@ -9,6 +9,13 @@
 //!   the Document.
 //! - **Close & Apply** loads every Stale Query, and every Query that merges one (transitively).
 //! - **Refresh** re-runs every Query from its Source in full and clears every Stale flag.
+//! - **Enable load** off (`Document::unloaded`): Close & Apply and Refresh don't load the
+//!   Query and remove its Table; a Query that merges it still runs it, within the load.
+//!   Toggling it marks the Query Stale, as editing does: the Table goes (or comes) at the next
+//!   Close & Apply, as in Power BI.
+//! - Every loaded Table's model is updated after the load (`opendash_model::ModelTable::load`):
+//!   column properties carried over by name, type overrides re-applied, sort by checked. A
+//!   failure there fails the whole load.
 //!
 //! Loading is all-or-nothing: the new tables are built beside the old ones (≈ 2× memory
 //! briefly, ADR 0005) and replace them only if every Query succeeds; otherwise nothing changes
@@ -29,6 +36,7 @@ use std::path::Path;
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
 use opendash_data::{Pass, Preview, Query, Table};
+use opendash_model::ModelTable;
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -112,6 +120,9 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         }
         let query = Query::connect(&name, source.clone(), culture, limit).map_err(Error::Data)?;
         let (table, cell_errors) = query.run(limit).map_err(Error::Data)?;
+        let limit = limit.saturating_sub(table.memory());
+        let (model, table) =
+            ModelTable::load(None, table, query.culture, limit).map_err(Error::Model)?;
         let report = LoadReport {
             tables: vec![Loaded {
                 table: name.clone(),
@@ -122,6 +133,7 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         };
         doc.queries.push(query);
         doc.tables.push(table);
+        doc.model.put(model);
         Ok(report)
     })
 }
@@ -164,25 +176,48 @@ pub(crate) fn close_apply(app: &mut App, _params: &Value) -> Result {
     })
 }
 
-/// Re-runs the Queries `pick` selects, from their Sources, and replaces their tables;
-/// all-or-nothing (the caller runs on a copy of the Document). Clears their Stale flags.
+/// Re-runs the Queries `pick` selects, from their Sources, and replaces their tables and
+/// models; all-or-nothing (the caller runs on a copy of the Document). Clears their Stale
+/// flags. A picked Query with Enable load off loses its Table instead.
 fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Result<LoadReport> {
     // The new tables (and the merged-from Queries run for them) must fit `limit` together: the
     // cap less everything held, the old tables included. One pass, so each Source is read once.
     let mut pass = Pass::new(&doc.queries, limit);
     let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
     let mut report = LoadReport::default();
+    let mut models = Vec::with_capacity(doc.queries.len());
+    let mut used = 0usize;
+    let mut dropped = Vec::new();
     for query in merged_first(&doc.queries).into_iter().filter(|q| pick(q)) {
+        if doc.unloaded.contains(&query.name) {
+            dropped.push(query.name.clone());
+            continue;
+        }
         let (table, cell_errors) = pass.run(query).map_err(|error| Error::Refresh {
             query: query.name.clone(),
             error,
         })?;
+        // Type overrides convert columns beside the pass's results.
+        used = used.saturating_add(table.memory());
+        let previous = doc.model.table(&query.name);
+        let (model, table) =
+            ModelTable::load(previous, table, query.culture, limit.saturating_sub(used))
+                .map_err(Error::Model)?;
+        models.push(model);
         report.tables.push(Loaded {
             table: table.name().into(),
             rows: table.rows(),
             cell_errors,
         });
         fresh.push(table);
+    }
+    for name in dropped {
+        doc.stale.remove(&name);
+        doc.tables.retain(|t| t.name() != name);
+        doc.model.remove(&name);
+    }
+    for model in models {
+        doc.model.put(model);
     }
     for table in fresh {
         doc.stale.remove(table.name());

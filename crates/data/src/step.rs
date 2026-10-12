@@ -16,6 +16,20 @@
 //!   (M's default `Comparer.Ordinal` orders by UTF-16 unit, which differs only beyond U+FFFF).
 //!   Whole numbers order against decimals as f64.
 //! - Merged Queries: see `merge.rs`.
+//! - Fixed decimal (`Currency.Type`): text parses exactly and rounds to 4 places half to even
+//!   (see `culture.rs`); a decimal converts via its shortest round-trip digits, then the same
+//!   rounding; a whole number exactly. Out of range (±922,337,203,685,477.5807) is a Cell
+//!   error. Fixed decimal to text, whole or logical goes through the decimal (`1.5`, not
+//!   `1.5000`).
+//! - Parquet DECIMAL columns load as decimal (`type number`), not fixed decimal: we believe
+//!   Power Query's `Parquet.Document` types them `type number`; unchecked in the VM.
+//!
+//! **Fixed decimal storage.** Arrow `Decimal64(18, 4)`: the exact value × 10⁴ in an `i64`
+//! (Power BI's Currency range is the whole `i64`, so 19-digit values exceed the nominal
+//! precision 18; we never validate precision). Self-describing, unlike a bare `Int64` × 10⁴, so
+//! Previews, filters, merges and casts read it right; a loaded table narrows it to
+//! `Decimal32(9, 4)` when every value fits an `i32` (`TableBuilder`). M3 DAX reads either as
+//! scaled integers.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -388,9 +402,10 @@ fn unique_names(headers: impl Iterator<Item = Option<String>>) -> Vec<String> {
         .collect()
 }
 
-/// The Changed Type kernel for any column: text parses with the Culture, other types cast.
-/// Values that don't convert become null and count as Cell errors.
-fn change_type(
+/// The Changed Type kernel for any column (also the Model's data-type change): text parses with
+/// the Culture, other types cast. Values that don't convert become null and count as Cell
+/// errors. An error only if Arrow can't cast the column at all.
+pub fn change_type(
     column: &ArrayRef,
     ty: ColumnType,
     culture: &Culture,
@@ -404,6 +419,12 @@ fn change_type(
             .ok_or("a text column didn't cast to Utf8")?;
         return Ok(ty.convert(text, culture));
     }
+    // Fixed decimal to anything but itself goes through the decimal it holds.
+    let decimal = matches!(from, DataType::Decimal32(..) | DataType::Decimal64(..));
+    if decimal && ty != ColumnType::FixedDecimal {
+        let f = cast(column, &DataType::Float64).map_err(|e| e.to_string())?;
+        return change_type(&f, ty, culture);
+    }
     let number = from.is_numeric() || *from == DataType::Boolean;
     let temporal = matches!(
         from,
@@ -412,6 +433,8 @@ fn change_type(
     let supported = match ty {
         ColumnType::Text => true,
         ColumnType::Decimal | ColumnType::Whole | ColumnType::Boolean => number,
+        ColumnType::FixedDecimal if number => return Ok(to_fixed(column)),
+        ColumnType::FixedDecimal => false,
         ColumnType::Date | ColumnType::DateTime => temporal,
     };
     if !supported {
@@ -438,12 +461,74 @@ fn change_type(
     Ok((out, errors))
 }
 
+/// A number column as fixed decimal (exact × 10⁴), counting values out of range as Cell errors.
+fn to_fixed(column: &ArrayRef) -> (ArrayRef, usize) {
+    let values: Vec<Option<i64>> = match column.data_type() {
+        DataType::Decimal32(_, 4) | DataType::Decimal64(_, 4) => {
+            match cast(column, &FIXED).ok().and_then(|c| {
+                c.as_any()
+                    .downcast_ref::<arrow_array::Decimal64Array>()
+                    .map(|a| a.iter().collect())
+            }) {
+                Some(v) => v,
+                None => vec![None; column.len()],
+            }
+        }
+        t if t.is_integer() || *t == DataType::Boolean => {
+            let ints = cast(column, &DataType::Int64).ok();
+            let ints = ints
+                .as_ref()
+                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
+            match ints {
+                Some(a) => a.iter().map(|v| v?.checked_mul(10_000)).collect(),
+                None => vec![None; column.len()],
+            }
+        }
+        _ => {
+            let floats = cast(column, &DataType::Float64).ok();
+            let floats = floats
+                .as_ref()
+                .and_then(|c| c.as_any().downcast_ref::<Float64Array>());
+            match floats {
+                Some(a) => a.iter().map(|v| fixed_from_f64(v?)).collect(),
+                None => vec![None; column.len()],
+            }
+        }
+    };
+    let errors = values
+        .iter()
+        .zip(0..)
+        .filter(|(v, i)| v.is_none() && column.is_valid(*i))
+        .count();
+    (fixed_array(values), errors)
+}
+
+/// A decimal as fixed decimal: its shortest round-trip digits, rounded to 4 places half to even.
+pub fn fixed_from_f64(f: f64) -> Option<i64> {
+    if !f.is_finite() {
+        return None;
+    }
+    crate::culture::fixed(&format!("{f:e}"))
+}
+
+/// The Arrow type of a fixed decimal column in Applied Steps (see the module doc).
+pub const FIXED: DataType = DataType::Decimal64(18, 4);
+
+/// Fixed decimal values (× 10⁴) as a [`FIXED`] array.
+pub fn fixed_array(values: Vec<Option<i64>>) -> ArrayRef {
+    // `Decimal64Array` accepts any `Decimal64` type: this can't fail.
+    Arc::new(arrow_array::Decimal64Array::from(values).with_data_type(FIXED))
+}
+
 /// A column type a Changed Type step can set (Power Query's `type text`, `type number`,
-/// `Int64.Type`, `type date`, `type datetime`, `type logical`).
+/// `Currency.Type`, `Int64.Type`, `type date`, `type datetime`, `type logical`), and a Model
+/// Column's data type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColumnType {
     Text,
     Decimal,
+    /// Fixed decimal number: exactly 4 decimal places (see the module doc for storage).
+    FixedDecimal,
     Whole,
     Date,
     DateTime,
@@ -451,11 +536,63 @@ pub enum ColumnType {
 }
 
 impl ColumnType {
+    /// Every type, in Power BI's Data type menu order.
+    pub const ALL: [Self; 7] = [
+        Self::Decimal,
+        Self::FixedDecimal,
+        Self::Whole,
+        Self::DateTime,
+        Self::Date,
+        Self::Text,
+        Self::Boolean,
+    ];
+
+    /// The name commands and `.odm` files use: `text`, `decimal`, `fixedDecimal`, `whole`,
+    /// `date`, `datetime`, `boolean`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Decimal => "decimal",
+            Self::FixedDecimal => "fixedDecimal",
+            Self::Whole => "whole",
+            Self::Date => "date",
+            Self::DateTime => "datetime",
+            Self::Boolean => "boolean",
+        }
+    }
+
+    /// The type with this [`ColumnType::name`].
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.name() == name)
+    }
+
+    /// The type of a column of Arrow type `t`, as stored in a loaded table (narrow integers,
+    /// dictionary text); an all-null column is text.
+    pub fn of_data_type(t: &DataType) -> Option<Self> {
+        Some(match t {
+            DataType::Decimal32(..) | DataType::Decimal64(..) => Self::FixedDecimal,
+            t if t.is_integer() => Self::Whole,
+            t if t.is_numeric() => Self::Decimal,
+            DataType::Boolean => Self::Boolean,
+            DataType::Date32 | DataType::Date64 => Self::Date,
+            DataType::Timestamp(..) => Self::DateTime,
+            DataType::Null => Self::Text,
+            t if is_text(t) => Self::Text,
+            _ => return None,
+        })
+    }
+
+    /// Whether values of this type are numbers (Power BI sums them by default).
+    pub fn is_numeric(self) -> bool {
+        matches!(self, Self::Decimal | Self::FixedDecimal | Self::Whole)
+    }
+
     /// The plain Arrow type a Source batch carries for this column.
     pub fn data_type(self) -> DataType {
         match self {
             Self::Text => DataType::Utf8,
             Self::Decimal => DataType::Float64,
+            Self::FixedDecimal => FIXED,
             Self::Whole => DataType::Int64,
             Self::Date => DataType::Date32,
             Self::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
@@ -475,6 +612,7 @@ impl ColumnType {
             Self::Decimal => Arc::new(Float64Array::from(parse(text, e, |s| {
                 culture.parse_decimal(s)
             }))),
+            Self::FixedDecimal => fixed_array(parse(text, e, |s| culture.parse_fixed(s))),
             Self::Whole => Arc::new(Int64Array::from(parse(text, e, |s| culture.parse_whole(s)))),
             Self::Date => Arc::new(Date32Array::from(parse(text, e, |s| culture.parse_date(s)))),
             Self::DateTime => Arc::new(TimestampMicrosecondArray::from(parse(text, e, |s| {
@@ -601,6 +739,77 @@ mod tests {
                 "{values:?}"
             );
         }
+    }
+
+    fn fixed_values(a: &ArrayRef) -> Vec<Option<i64>> {
+        assert_eq!(a.data_type(), &FIXED);
+        let d = a
+            .as_any()
+            .downcast_ref::<arrow_array::Decimal64Array>()
+            .unwrap();
+        d.iter().collect()
+    }
+
+    #[test]
+    fn fixed_decimal_is_exact() {
+        let text = StringArray::from(vec![Some("0.1"), Some("0.2"), Some("1.23455"), Some("x")]);
+        let (array, errors) = ColumnType::FixedDecimal.convert(&text, gb());
+        assert_eq!(errors, 1);
+        let v = fixed_values(&array);
+        assert_eq!(v, [Some(1_000), Some(2_000), Some(12_346), None]);
+        // 0.1 + 0.2 is exactly 0.3 in fixed decimal (not in f64).
+        let sum = v[0].unwrap() + v[1].unwrap();
+        assert_eq!(sum, 3_000);
+        assert_ne!(0.1 + 0.2, 0.3);
+        // Shown as a number: 0.3, through the decimal it holds.
+        let back = ColumnType::Text.data_type();
+        let (t, _) = change_type(&fixed_array(vec![Some(sum)]), ColumnType::Text, gb()).unwrap();
+        assert_eq!(t.data_type(), &back);
+        let t = t.as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(t.value(0), "0.3");
+    }
+
+    #[test]
+    fn fixed_decimal_converts_from_numbers_and_overflows_to_cell_errors() {
+        let floats: ArrayRef = Arc::new(Float64Array::from(vec![
+            Some(0.1),
+            Some(2.00005),
+            None,
+            Some(1e300),
+            Some(f64::NAN),
+        ]));
+        let (a, errors) = change_type(&floats, ColumnType::FixedDecimal, gb()).unwrap();
+        assert_eq!(
+            fixed_values(&a),
+            [Some(1_000), Some(20_000), None, None, None]
+        );
+        assert_eq!(errors, 2);
+        let ints: ArrayRef = Arc::new(Int64Array::from(vec![Some(3), Some(i64::MAX)]));
+        let (a, errors) = change_type(&ints, ColumnType::FixedDecimal, gb()).unwrap();
+        assert_eq!((fixed_values(&a), errors), (vec![Some(30_000), None], 1));
+        // Back to whole: half to even, through the decimal.
+        let (w, _) = change_type(
+            &fixed_array(vec![Some(25_000), Some(35_000)]),
+            ColumnType::Whole,
+            gb(),
+        )
+        .unwrap();
+        let w = w.as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(w.values(), &[2, 4]);
+        // Never detected (Power Query doesn't detect Currency).
+        assert_eq!(
+            ColumnType::detect(["1.25", "3.5"], gb()),
+            ColumnType::Decimal
+        );
+    }
+
+    #[test]
+    fn column_type_names_round_trip() {
+        for t in ColumnType::ALL {
+            assert_eq!(ColumnType::from_name(t.name()), Some(t));
+            assert_eq!(ColumnType::of_data_type(&t.data_type()), Some(t));
+        }
+        assert_eq!(ColumnType::from_name("currency"), None);
     }
 
     #[test]

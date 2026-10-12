@@ -5,6 +5,9 @@
 //! - thousands separators must group by three (`1,234`); .NET-style parsing may accept `1,2,3`;
 //! - two-digit years map to 1950–2049 (the .NET Gregorian default `TwoDigitYearMax` = 2049);
 //! - a whole-number conversion of `2.5` rounds half to even (`Int64.From`'s default).
+//! - fixed decimal text is rounded to 4 places half to even (`Currency.From`'s documented
+//!   default) on the exact decimal digits; Power Query may round the double `Number.FromText`
+//!   gives (`"0.00005"` is exactly half here, a hair above half as a double).
 
 /// The order of day, month and year in a numeric date.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +89,12 @@ impl Culture {
         // i64::MAX as f64 rounds up to 2^63, so the upper bound is exclusive.
         let bound = 2f64.powi(63);
         (-bound..bound).contains(&v).then_some(v as i64)
+    }
+
+    /// A fixed decimal number (`Currency.Type`): the value × 10⁴, rounded half to even
+    /// (`Currency.From`'s default rounding). `None` outside ±922,337,203,685,477.5807.
+    pub fn parse_fixed(&self, s: &str) -> Option<i64> {
+        fixed(&self.number(s)?.0)
     }
 
     /// `true` when `s` is written as a whole number (no fraction, no exponent) that fits i64.
@@ -209,6 +218,57 @@ impl Culture {
     }
 }
 
+/// A number in Rust's syntax (`-12.5`, `1.5e3`) as a fixed decimal: × 10⁴, rounded half to
+/// even on its exact digits; `None` if it overflows `i64`.
+pub(crate) fn fixed(n: &str) -> Option<i64> {
+    let (neg, n) = match n.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, n.strip_prefix('+').unwrap_or(n)),
+    };
+    let (mantissa, exp) = match n.split_once(['e', 'E']) {
+        Some((m, e)) => (m, e.parse::<i64>().ok()?),
+        None => (n, 0),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits: Vec<u8> = int
+        .bytes()
+        .chain(frac.bytes())
+        .map(|b| b.wrapping_sub(b'0'))
+        .collect();
+    if digits.iter().any(|d| *d > 9) {
+        return None;
+    }
+    // Digits before the point of value × 10⁴.
+    let keep = i64::try_from(int.len())
+        .ok()?
+        .checked_add(exp)?
+        .checked_add(4)?;
+    let mut acc: i128 = 0;
+    let mut i: i64 = 0;
+    while i < keep {
+        let d = usize::try_from(i).ok().and_then(|i| digits.get(i)).copied();
+        if d.is_none() && acc == 0 {
+            break; // only zeros left to append to zero
+        }
+        acc = acc
+            .checked_mul(10)?
+            .checked_add(i128::from(d.unwrap_or(0)))?;
+        if acc > i128::from(u64::MAX) {
+            return None;
+        }
+        i = i.saturating_add(1);
+    }
+    // Round half to even on the dropped digits.
+    let dropped = usize::try_from(keep.max(0)).ok()?;
+    if keep >= 0 {
+        let first = digits.get(dropped).copied().unwrap_or(0);
+        let rest = digits.get(dropped.saturating_add(1)..).unwrap_or_default();
+        let up = first > 5 || (first == 5 && (rest.iter().any(|d| *d != 0) || acc % 2 == 1));
+        acc = acc.checked_add(i128::from(up))?;
+    }
+    i64::try_from(if neg { -acc } else { acc }).ok()
+}
+
 /// Up to `max` leading ASCII digits: value, count and the rest.
 fn digits(s: &str, max: usize) -> Option<(u32, usize, &str)> {
     let len = s.bytes().take_while(u8::is_ascii_digit).count();
@@ -287,6 +347,33 @@ mod tests {
 
     fn c(name: &str) -> &'static Culture {
         Culture::get(name).unwrap()
+    }
+
+    #[test]
+    fn fixed_decimals_round_half_to_even_and_overflow_to_none() {
+        let us = c("en-US");
+        for (text, want) in [
+            ("1.23455", Some(12_346)),
+            ("1.23445", Some(12_344)),
+            ("1.234451", Some(12_345)),
+            ("0.00005", Some(0)),
+            ("0.00015", Some(2)),
+            ("-2.5", Some(-25_000)),
+            ("1,234.5", Some(12_345_000)),
+            ("1.5e3", Some(15_000_000)),
+            ("15e-5", Some(2)),
+            ("1e-300", Some(0)),
+            ("0e999999", Some(0)),
+            ("922,337,203,685,477.5807", Some(i64::MAX)),
+            ("-922337203685477.5808", Some(i64::MIN)),
+            ("922337203685477.5808", None),
+            ("922337203685477.58075", None),
+            ("1e300", None),
+            ("abc", None),
+        ] {
+            assert_eq!(us.parse_fixed(text), want, "{text}");
+        }
+        assert_eq!(c("de-DE").parse_fixed("1.234,56789"), Some(12_345_679));
     }
 
     #[test]

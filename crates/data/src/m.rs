@@ -73,6 +73,7 @@ fn type_m(ty: ColumnType) -> Expr {
         ColumnType::Text => Expr::Type("text".into()),
         ColumnType::Decimal => Expr::Type("number".into()),
         ColumnType::Whole => Expr::ident("Int64.Type"),
+        ColumnType::FixedDecimal => Expr::ident("Currency.Type"),
         ColumnType::Date => Expr::Type("date".into()),
         ColumnType::DateTime => Expr::Type("datetime".into()),
         ColumnType::Boolean => Expr::Type("logical".into()),
@@ -84,6 +85,7 @@ fn type_from(e: &Expr) -> Option<ColumnType> {
         Expr::Type(t) if t == "text" => ColumnType::Text,
         Expr::Type(t) if t == "number" => ColumnType::Decimal,
         Expr::Ident(t) if t == "Int64.Type" => ColumnType::Whole,
+        Expr::Ident(t) if t == "Currency.Type" => ColumnType::FixedDecimal,
         Expr::Type(t) if t == "date" => ColumnType::Date,
         Expr::Type(t) if t == "datetime" => ColumnType::DateTime,
         Expr::Type(t) if t == "logical" => ColumnType::Boolean,
@@ -658,7 +660,7 @@ fn step_from(func: &str, args: &[Expr]) -> Result<(Step, Option<String>), String
                 })
                 .ok_or_else(|| {
                     "column types must be `{\"Column\", type text}` pairs of text, number, \
-                     Int64.Type, date, datetime or logical"
+                     Int64.Type, Currency.Type, date, datetime or logical"
                         .to_string()
                 })?;
             let culture = match rest {
@@ -878,15 +880,21 @@ in
     }
 
     #[test]
+    fn fixed_decimal_is_currency_type() {
+        let q = query(
+            csv(),
+            vec![Step::ChangedType(vec![(
+                "Price".into(),
+                ColumnType::FixedDecimal,
+            )])],
+        );
+        let m = round_trip(&q);
+        assert!(m.contains(r#"{{"Price", Currency.Type}}"#), "{m}");
+    }
+
+    #[test]
     fn every_step_round_trips() {
-        let all_types = [
-            ColumnType::Text,
-            ColumnType::Decimal,
-            ColumnType::Whole,
-            ColumnType::Date,
-            ColumnType::DateTime,
-            ColumnType::Boolean,
-        ];
+        let all_types = ColumnType::ALL;
         let steps = vec![
             Step::PromotedHeaders,
             Step::ChangedType(
@@ -929,7 +937,7 @@ in
             m.contains(r#"Table.ReorderColumns(#"Removed Columns",{"C3", "C0"})"#),
             "{m}"
         );
-        assert!(m.contains(r#"{"C5", type logical}"#), "{m}");
+        assert!(m.contains(r#"{"C6", type logical}"#), "{m}");
     }
 
     fn filter() -> Step {
@@ -1173,7 +1181,7 @@ in
             csv(),
             vec![Step::ChangedType(vec![("A".into(), ColumnType::Text)])],
         ));
-        let e = parse(&typed.replace("type text", "Currency.Type")).expect_err("currency");
+        let e = parse(&typed.replace("type text", "Percentage.Type")).expect_err("percentage");
         assert_eq!(e.line, 3);
         let e = parse(
             &typed

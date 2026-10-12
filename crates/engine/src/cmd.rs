@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::load;
+use crate::model::{self, has_tables};
 use crate::query::{self, has_queries};
 use crate::{App, Document, Result};
 
@@ -103,7 +104,7 @@ pub static COMMANDS: &[Command] = &[
         shortcut: None,
         params: "query: text — the Query\n\
                  columns: list of text — the columns to change\n\
-                 type: text — text, decimal, whole, date, datetime or boolean",
+                 type: text — text, decimal, fixedDecimal, whole, date, datetime or boolean",
         enabled: has_queries,
         run: Run::Edit(query::change_type),
     },
@@ -179,5 +180,89 @@ pub static COMMANDS: &[Command] = &[
                  step: integer — the step's position in Applied Steps, 0 = first",
         enabled: has_queries,
         run: Run::Edit(query::delete_step),
+    },
+    Command {
+        id: "query.enableLoad",
+        label: "Enable load",
+        // Power Query's Queries pane, right-click a query.
+        ribbon: "",
+        shortcut: None,
+        params: "query: text — the Query\n\
+                 enabled: logical — load it into the model (default: the opposite of now)",
+        enabled: has_queries,
+        run: Run::Edit(model::enable_load),
+    },
+    // The model (spec D-1): Column tools and the Properties pane.
+    Command {
+        id: "columnTools.dataType",
+        label: "Data type",
+        ribbon: "Column tools > Formatting",
+        shortcut: None,
+        params: "table: text — the Table\n\
+                 column: text — the Column\n\
+                 type: text — decimal, fixedDecimal, whole, datetime, date, text or boolean; \
+                 converts the loaded data (a value that doesn't convert fails the change), the \
+                 Query is untouched",
+        enabled: has_tables,
+        run: Run::Edit(model::set_data_type),
+    },
+    Command {
+        id: "columnTools.format",
+        label: "Format",
+        ribbon: "Column tools > Formatting",
+        shortcut: None,
+        params: "table: text — the Table\n\
+                 column: text — the Column\n\
+                 formatString: text — a format string, e.g. #,0.00 (empty: the default)",
+        enabled: has_tables,
+        run: Run::Edit(model::set_format),
+    },
+    Command {
+        id: "columnTools.summarization",
+        label: "Summarization",
+        ribbon: "Column tools > Properties",
+        shortcut: None,
+        params: "table: text — the Table\n\
+                 column: text — the Column\n\
+                 summarizeBy: text — none, sum, average, min, max, count or distinctCount \
+                 (sum and average need a number column)",
+        enabled: has_tables,
+        run: Run::Edit(model::set_summarize_by),
+    },
+    Command {
+        id: "columnTools.sortByColumn",
+        label: "Sort by column",
+        ribbon: "Column tools > Sort",
+        shortcut: None,
+        params: "table: text — the Table\n\
+                 column: text — the Column to sort\n\
+                 by: text or null — another column of the Table with one value per value of \
+                 this one; null sorts by the column itself",
+        enabled: has_tables,
+        run: Run::Edit(model::set_sort_by),
+    },
+    Command {
+        id: "model.setHidden",
+        label: "Is hidden",
+        // The Properties pane, or right-click > Hide in report view.
+        ribbon: "",
+        shortcut: None,
+        params: "table: text — the Table\n\
+                 column: text — one of its Columns (default: the Table itself)\n\
+                 hidden: logical — default true",
+        enabled: has_tables,
+        run: Run::Edit(model::set_hidden),
+    },
+    Command {
+        id: "model.setDescription",
+        label: "Description",
+        // The Properties pane.
+        ribbon: "",
+        shortcut: None,
+        params: "table: text — the Table\n\
+                 column: text — one of its Columns (default: the Table itself)\n\
+                 description: text — empty clears it",
+        enabled: has_tables,
+        run: Run::Edit(model::set_description),
     },
 ];

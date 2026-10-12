@@ -787,6 +787,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "opendash-data",
+ "opendash-model",
  "serde_json",
 ]
 

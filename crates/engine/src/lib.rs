@@ -6,6 +6,7 @@
 mod app;
 mod cmd;
 mod load;
+mod model;
 mod query;
 
 pub use app::{App, Document, UNDO_LIMIT};
@@ -30,6 +31,9 @@ pub enum Error {
     },
     /// No Query has this name.
     UnknownQuery(String),
+    /// A model change, or a load's model update (a type override that no longer converts, a
+    /// sort by column that no longer holds), failed; nothing was changed.
+    Model(opendash_model::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -48,6 +52,7 @@ impl std::fmt::Display for Error {
                 )
             }
             Self::UnknownQuery(name) => write!(f, "there is no query `{name}`"),
+            Self::Model(e) => e.fmt(f),
         }
     }
 }

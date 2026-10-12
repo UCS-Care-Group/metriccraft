@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use opendash_data::{Preview, Query, Table, default_memory_cap};
+use opendash_model::Model;
 use serde_json::Value;
 
 use crate::{COMMANDS, Command, Error, LoadReport, Result, Run};
@@ -15,6 +16,10 @@ pub struct Document {
     /// Queries edited since their table loaded (Stale, CONTEXT.md): the table is still the
     /// previous result until Close & Apply or Refresh.
     pub stale: BTreeSet<String>,
+    /// Queries with *Enable load* off: no Table, but they can still be merged from.
+    pub unloaded: BTreeSet<String>,
+    /// The model properties of the loaded Tables (one per Table, same name).
+    pub model: Model,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,
