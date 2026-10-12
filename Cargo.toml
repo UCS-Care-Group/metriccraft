@@ -19,6 +19,8 @@ arrow-cast = { version = "60", default-features = false }
 arrow-schema = "60"
 arrow-select = "60"
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "flate2-rust_backend", "lz4", "brotli", "zstd"] }
+csv = "1.4"
+encoding_rs = "0.8"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

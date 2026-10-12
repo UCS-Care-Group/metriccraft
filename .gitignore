@@ -16,3 +16,4 @@ context/transcripts/*
 .env
 .env.*
 !.env.example
+.claude/worktrees/

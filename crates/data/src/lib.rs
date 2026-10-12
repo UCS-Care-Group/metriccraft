@@ -2,7 +2,9 @@
 //!
 //! Layer L2 — see `docs/plan/0001-mvp.md` §1.
 
+pub mod culture;
 pub mod source;
+pub mod step;
 mod table;
 
 pub use table::{Table, TableBuilder, default_memory_cap};
