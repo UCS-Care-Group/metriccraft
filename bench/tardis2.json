@@ -1,0 +1,13 @@
+{
+  "machine": {
+    "arch": "x86_64",
+    "cpu": "AMD Ryzen 5 5600X 6-Core Processor",
+    "id": "tardis2",
+    "memory": "32768132 kB",
+    "os": "linux",
+    "threads": 12
+  },
+  "results": {
+    "engine/dispatch_unknown": 11.0
+  }
+}

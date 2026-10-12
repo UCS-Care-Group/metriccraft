@@ -1,6 +1,7 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
-//! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`.
+//! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
+//! `bench [--save]`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -50,7 +51,10 @@ fn main() -> ExitCode {
         "layers" => layers(),
         "assets" => assets(),
         "wasm" => wasm(),
-        _ => Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm>".into()),
+        "bench" => bench(std::env::args().any(|a| a == "--save")),
+        _ => {
+            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]>".into())
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -69,6 +73,7 @@ fn ci() -> Result {
         ("clippy", clippy),
         ("test", test),
         ("wasm", wasm),
+        ("bench", || bench(false)),
     ] {
         eprintln!("== {name}");
         step().map_err(|e| format!("{name}: {e}"))?;
@@ -258,6 +263,95 @@ fn check_assets<'a>(
     errors
 }
 
+// ---- bench ----
+
+/// A result more than this factor slower than the machine's baseline fails.
+const BENCH_TOLERANCE: f64 = 1.25;
+
+/// Runs every `harness = false` bench, compares with `bench/<machine>.json` and, with `--save`,
+/// records the results as that machine's new baseline. Machines without a baseline only report.
+fn bench(save: bool) -> Result {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = output(&cargo, &["bench", "--workspace", "--benches", "--quiet"])?;
+    let results = parse_bench(&out);
+    if results.is_empty() {
+        return Err("no BENCH lines in `cargo bench` output".into());
+    }
+    let machine = machine_id();
+    let path = format!("bench/{machine}.json");
+    let baseline = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let base = |name: &str| baseline.as_ref().and_then(|b| b["results"][name].as_f64());
+    let mut errors = Vec::new();
+    for (name, ns) in &results {
+        match base(name) {
+            Some(was) => {
+                let ratio = ns / was;
+                eprintln!("  {name}: {ns:.1} ns (baseline {was:.1}, x{ratio:.2})");
+                if ratio > BENCH_TOLERANCE && !save {
+                    errors.push(format!(
+                        "{name}: x{ratio:.2} slower than the {machine} baseline"
+                    ));
+                }
+            }
+            None => eprintln!("  {name}: {ns:.1} ns (no {machine} baseline)"),
+        }
+    }
+    if save {
+        let json = serde_json::json!({
+            "machine": machine_info(&machine),
+            "results": results
+                .iter()
+                .map(|(n, ns)| (n.clone(), serde_json::json!(ns)))
+                .collect::<serde_json::Map<_, _>>(),
+        });
+        let text = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all("bench").map_err(|e| format!("creating bench/: {e}"))?;
+        std::fs::write(&path, text + "\n").map_err(|e| format!("writing {path}: {e}"))?;
+        eprintln!("  saved {path}");
+    }
+    report(errors)
+}
+
+fn parse_bench(out: &str) -> Vec<(String, f64)> {
+    out.lines()
+        .filter_map(|l| l.strip_prefix("BENCH "))
+        .filter_map(|l| l.rsplit_once(' '))
+        .filter_map(|(name, ns)| Some((name.to_owned(), ns.parse::<f64>().ok()?)))
+        .collect()
+}
+
+/// `OPENDASH_BENCH_MACHINE`, else the hostname.
+fn machine_id() -> String {
+    std::env::var("OPENDASH_BENCH_MACHINE")
+        .ok()
+        .or_else(|| std::fs::read_to_string("/proc/sys/kernel/hostname").ok())
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn machine_info(id: &str) -> serde_json::Value {
+    let proc_field = |file: &str, key: &str| {
+        std::fs::read_to_string(file).ok().and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split_once(':'))
+                .map(|(_, v)| v.trim().to_owned())
+        })
+    };
+    serde_json::json!({
+        "id": id,
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "cpu": proc_field("/proc/cpuinfo", "model name"),
+        "threads": std::thread::available_parallelism().map(|n| n.get()).ok(),
+        "memory": proc_field("/proc/meminfo", "MemTotal"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +405,15 @@ mod tests {
     fn assets_reject_rows_for_missing_files() {
         let errs = check_assets(std::iter::empty(), ATTR, |_| false);
         assert_eq!(errs.len(), 1, "{errs:?}");
+    }
+
+    #[test]
+    fn bench_lines_parse() {
+        let out = "running 0 tests\nBENCH engine/x 12.5\nBENCH bad\nBENCH a b 3\n";
+        let got = parse_bench(out);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].0, "engine/x");
+        assert_eq!(got[1].0, "a b");
     }
 
     #[test]
