@@ -2,10 +2,11 @@
 //! [`PREVIEW_ROWS`] Source rows, with its Cell errors per cell — an error mask plus messages per
 //! column (ADR 0005). Derived and cheap: nothing is stored.
 //!
-//! A Cell error is a value a Changed Type step couldn't produce (null in the data). Later steps
-//! carry it: renames and Promoted Headers follow the column, and any other step (remove,
-//! reorder, filter, merge…) is run once more with a hidden row-number column to see where each
-//! row went. A step that drops that column drops the errors it can't place.
+//! A Cell error is a value a Changed Type step couldn't produce, or an Excel error cell in the
+//! Source (both null in the data). Later steps carry it: renames and Promoted Headers follow the
+//! column, and any other step (remove, reorder, filter, merge…) is run once more with a hidden
+//! row-number column to see where each row went. A step that drops that column drops the errors
+//! it can't place.
 //!
 //! **Through a merge**, the other Query's rows come from its loaded Table when that is loaded
 //! and not Stale, else from its own Preview (its first 1,000 Source rows, at its last step); a
@@ -95,10 +96,17 @@ impl Query {
 
     /// The Preview after the first `upto` steps, merges resolved by `ctx`.
     pub(crate) fn preview_in<'a>(&'a self, ctx: &mut Ctx<'a>, upto: usize) -> Result<Preview> {
-        let (mut batch, _) =
+        let (mut batch, source_errors) =
             self.source
                 .read_batch(&self.name, PREVIEW_ROWS, self.culture, ctx.limit())?;
-        let mut errors = Errors::new();
+        // The Source's own Cell errors (Excel error cells).
+        let mut errors: Errors = batch
+            .schema()
+            .fields()
+            .iter()
+            .zip(source_errors)
+            .filter_map(|(f, e)| Some((f.name().clone(), e?)))
+            .collect();
         for step in self.steps.get(..upto).unwrap_or_default() {
             let (next, _) = ctx.apply(self, step, &batch)?;
             errors = carry(step, &batch, &next, errors, &mut |b| {
@@ -368,6 +376,73 @@ mod tests {
         assert_eq!(p.batch.schema().field(3).name(), "Targets.Target");
         assert!(p.error(250, 1).is_some_and(|m| m.ends_with("oops")));
         assert_eq!(p.error_count(), 1);
+    }
+
+    /// `Region, Qty` with Qty 7, `#DIV/0!`, `#N/A`, as a sheet `Data` and an Excel table `T`.
+    fn workbook(kind: crate::source::ExcelKind) -> Query {
+        use rust_xlsxwriter::{Formula, Table as XTable, TableColumn, Workbook};
+        let mut book = Workbook::new();
+        let ws = book.add_worksheet().set_name("Data").unwrap();
+        ws.write_string(0, 0, "Region").unwrap();
+        ws.write_string(0, 1, "Qty").unwrap();
+        for (r, region) in ["North", "South", "East"].iter().enumerate() {
+            ws.write_string(r as u32 + 1, 0, *region).unwrap();
+        }
+        ws.write_number(1, 1, 7).unwrap();
+        ws.write_formula(2, 1, Formula::new("=1/0").set_result("#DIV/0!"))
+            .unwrap();
+        ws.write_formula(3, 1, Formula::new("=NA()").set_result("#N/A"))
+            .unwrap();
+        let columns = [
+            TableColumn::new().set_header("Region"),
+            TableColumn::new().set_header("Qty"),
+        ];
+        let table = XTable::new().set_name("T").set_columns(&columns);
+        ws.add_table(0, 0, 3, 1, &table).unwrap();
+        let item = match kind {
+            crate::source::ExcelKind::Sheet => "Data",
+            crate::source::ExcelKind::Table => "T",
+        };
+        let source = Source::Excel {
+            file: File::Bytes {
+                name: "book.xlsx".into(),
+                bytes: Bytes::from(book.save_to_buffer().unwrap()),
+            },
+            item: item.into(),
+            kind,
+        };
+        Query::connect("Book", source, Culture::get("en-US").unwrap(), usize::MAX).unwrap()
+    }
+
+    #[test]
+    fn excel_error_cells_are_cell_errors_in_the_preview_and_blank_on_load() {
+        const DIV0: &str = "DataFormat.Error: Invalid cell value '#DIV/0!'.";
+        const NA: &str = "DataFormat.Error: Invalid cell value '#N/A'.";
+        // A sheet reads raw (headers are row 0 until Promoted Headers).
+        let q = workbook(crate::source::ExcelKind::Sheet);
+        assert_eq!(q.steps.len(), 2, "{:?}", q.steps);
+        let raw = q.preview(None, usize::MAX).unwrap();
+        assert_eq!((raw.error(2, 1), raw.error(3, 1)), (Some(DIV0), Some(NA)));
+        assert_eq!(raw.error_count(), 2);
+        let typed = q.preview(Some(1), usize::MAX).unwrap();
+        assert_eq!(typed.batch.schema().field(1).name(), "Qty");
+        assert_eq!(
+            (typed.error(1, 1), typed.error(2, 1)),
+            (Some(DIV0), Some(NA))
+        );
+        assert_eq!((typed.error(0, 1), typed.error_count()), (None, 2));
+        assert!(typed.batch.column(1).is_null(1));
+        // Loading blanks and counts them, as before.
+        let (t, errors) = q.run(usize::MAX).unwrap();
+        assert_eq!(
+            (t.rows(), errors, t.batch().column(1).null_count()),
+            (3, 2, 2)
+        );
+        // An Excel table: its header row is the names already.
+        let q = workbook(crate::source::ExcelKind::Table);
+        let p = q.preview(None, usize::MAX).unwrap();
+        assert_eq!((p.error(1, 1), p.error(2, 1)), (Some(DIV0), Some(NA)));
+        assert_eq!(q.run(usize::MAX).unwrap().1, 2);
     }
 
     /// The rows asked of each Source read since the last call, by file.

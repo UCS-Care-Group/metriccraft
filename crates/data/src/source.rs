@@ -157,6 +157,19 @@ impl Source {
         limit: usize,
         sink: &mut Sink<'_>,
     ) -> Result<usize> {
+        self.read_listing(name, rows, culture, limit, sink, None)
+    }
+
+    /// [`Source::read`], with `errors` (if given) getting each Excel error cell read.
+    fn read_listing(
+        &self,
+        name: &str,
+        rows: usize,
+        culture: &Culture,
+        limit: usize,
+        sink: &mut Sink<'_>,
+        errors: Option<&mut Vec<xlsx::CellError>>,
+    ) -> Result<usize> {
         #[cfg(test)]
         READS.with(|r| r.borrow_mut().push((self.file().path(), rows)));
         match self {
@@ -190,25 +203,29 @@ impl Source {
                     Input::Memory(b) => Seekable::Memory(Cursor::new(b)),
                 };
                 let mut wb = xlsx::Workbook::open(input, limit)?;
+                let decimal = culture.decimal;
                 match kind {
-                    ExcelKind::Sheet => wb.read_sheet(item, rows, culture.decimal, limit, sink),
-                    ExcelKind::Table => wb.read_table(item, rows, culture.decimal, limit, sink),
+                    ExcelKind::Sheet => wb.read_sheet(item, rows, decimal, limit, sink, errors),
+                    ExcelKind::Table => wb.read_table(item, rows, decimal, limit, sink, errors),
                 }
             }
         }
     }
 
-    /// The first `rows` rows as one batch (Preview, detection), and the file's own Cell errors.
+    /// The first `rows` rows as one batch (Preview, detection), and the file's own Cell errors
+    /// (Excel error cells, read as blank): per column, each row's message, null where the cell
+    /// is fine; `None` for a column without any.
     pub fn read_batch(
         &self,
         name: &str,
         rows: usize,
         culture: &Culture,
         limit: usize,
-    ) -> Result<(RecordBatch, usize)> {
+    ) -> Result<(RecordBatch, Vec<Option<StringArray>>)> {
         let mut batches = Vec::new();
         let mut used = 0usize;
-        let errors = self.read(name, rows, culture, limit, &mut |b| {
+        let mut found = Vec::new();
+        let sink = &mut |b: RecordBatch| {
             used = used.saturating_add(b.get_array_memory_size());
             if used > limit {
                 return Err(Error::MemoryCap {
@@ -218,7 +235,8 @@ impl Source {
             }
             batches.push(b);
             Ok(())
-        })?;
+        };
+        self.read_listing(name, rows, culture, limit, sink, Some(&mut found))?;
         let schema = batches
             .first()
             .map(RecordBatch::schema)
@@ -231,6 +249,20 @@ impl Source {
                 table: name.into(),
                 message: e.to_string(),
             })?;
+        let rows = batch.num_rows();
+        let mut columns: Vec<Option<Vec<Option<&str>>>> = vec![None; batch.num_columns()];
+        for e in found.iter().filter(|e| e.row < rows) {
+            if let Some(column) = columns.get_mut(e.column) {
+                let messages = column.get_or_insert_with(|| vec![None; rows]);
+                if let Some(m) = messages.get_mut(e.row) {
+                    *m = Some(&e.message);
+                }
+            }
+        }
+        let errors = columns
+            .into_iter()
+            .map(|c| c.map(StringArray::from))
+            .collect();
         Ok((batch, errors))
     }
 
@@ -438,7 +470,8 @@ mod tests {
         let (raw, errors) = s
             .read_batch("T", usize::MAX, culture(), usize::MAX)
             .unwrap();
-        assert_eq!((raw.num_rows(), errors), (3, 0));
+        assert_eq!(raw.num_rows(), 3);
+        assert!(errors.iter().all(Option::is_none));
         assert_eq!(raw.schema().field(0).name(), "Column1");
         assert_eq!(raw.column(0).as_string::<i32>().value(0), "Region");
         assert_eq!(
