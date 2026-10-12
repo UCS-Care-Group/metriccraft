@@ -1,0 +1,2 @@
+# LF everywhere, including Windows checkouts (ADR 0003 determinism; stable rustfmt/CI).
+* text=auto eol=lf
