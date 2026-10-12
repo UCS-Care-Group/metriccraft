@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues for this repo live as GitHub issues on `benandez/dashcraft`. Use the `gh` CLI for
+Issues for this repo live as GitHub issues on `benandez/opendash-bi`. Use the `gh` CLI for
 all operations — the GitHub MCP server is not reliably connected.
 
 ## Conventions
@@ -15,7 +15,8 @@ all operations — the GitHub MCP server is not reliably connected.
 
 ## Wayfinding operations
 
-The wayfinder map for this repo is **issue #1** (`wayfinder:map`).
+The wayfinder map for this repo is **issue #1** (`wayfinder:map`) — not created yet; adjust the
+number below if it lands elsewhere.
 
 - **Tickets** are GitHub **sub-issues** of the map, each with one `wayfinder:<type>`
   label: `research` (AFK), `grilling` (HITL), `prototype` (HITL), `task`.
@@ -26,20 +27,20 @@ The wayfinder map for this repo is **issue #1** (`wayfinder:map`).
 
 Add a sub-issue (needs the database id, and `-F` for an integer field):
 
-    gh api --method POST repos/benandez/dashcraft/issues/1/sub_issues \
-      -F sub_issue_id=$(gh api repos/benandez/dashcraft/issues/<n> --jq .id)
+    gh api --method POST repos/benandez/opendash-bi/issues/1/sub_issues \
+      -F sub_issue_id=$(gh api repos/benandez/opendash-bi/issues/<n> --jq .id)
 
 Add a blocking edge (`<n>` is blocked by `<b>`):
 
-    gh api --method POST repos/benandez/dashcraft/issues/<n>/dependencies/blocked_by \
-      -F issue_id=$(gh api repos/benandez/dashcraft/issues/<b> --jq .id)
+    gh api --method POST repos/benandez/opendash-bi/issues/<n>/dependencies/blocked_by \
+      -F issue_id=$(gh api repos/benandez/opendash-bi/issues/<b> --jq .id)
 
 Find the frontier — open, unassigned, no open blockers:
 
     for n in $(gh issue list --state open --json number,labels                --jq '.[]|select([.labels[].name]|index("wayfinder:map")|not)|.number'); do
-      blk=$(gh api repos/benandez/dashcraft/issues/$n/dependencies/blocked_by \
+      blk=$(gh api repos/benandez/opendash-bi/issues/$n/dependencies/blocked_by \
             --jq '[.[]|select(.state=="open")]|length')
-      as=$(gh api repos/benandez/dashcraft/issues/$n --jq '.assignees|length')
+      as=$(gh api repos/benandez/opendash-bi/issues/$n --jq '.assignees|length')
       [ "$blk" = "0" ] && [ "$as" = "0" ] && echo "#$n"
     done
 
@@ -47,5 +48,4 @@ Find the frontier — open, unassigned, no open blockers:
 one-line pointer to the map's *Decisions so far* section
 (`gh issue edit 1 --body-file <edited>`).
 
-Note: these are Bash-tool snippets. Anything handed to Martin to paste must be one-line
-PowerShell — see the root `CLAUDE.md`.
+Note: commands handed to Martin to paste are Bash — see the root `CLAUDE.md`.
