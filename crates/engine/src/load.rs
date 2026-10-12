@@ -639,6 +639,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn undo_and_redo_clear_the_load_report() {
+        let dir = Dir::new();
+        let mut app = two_queries(&dir);
+        assert!(app.last_load().is_some());
+        app.run("edit.undo", &Value::Null).unwrap();
+        assert_eq!(app.last_load(), None, "the undone load isn't reported");
+        app.run("edit.redo", &Value::Null).unwrap();
+        assert_eq!(app.last_load(), None);
+    }
+
     /// The first column's value buffer: which load's data the document holds.
     fn data(app: &App) -> usize {
         app.document().tables[0].buffers()[0].0

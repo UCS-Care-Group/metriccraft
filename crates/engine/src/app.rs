@@ -165,7 +165,8 @@ impl App {
         Ok(())
     }
 
-    /// What the last Get Data or Refresh loaded: rows and Cell error counts per table.
+    /// What the last Get Data or Refresh loaded: rows and Cell error counts per table. Cleared
+    /// by undo and redo (the report describes a load that is no longer the current state).
     pub fn last_load(&self) -> Option<&LoadReport> {
         self.last_load.as_ref()
     }
@@ -190,6 +191,7 @@ impl App {
             .pop_back()
             .ok_or_else(|| Error::Disabled("edit.undo".into()))?;
         self.redo.push(std::mem::replace(&mut self.doc, prev));
+        self.last_load = None;
         Ok(())
     }
 
@@ -200,6 +202,7 @@ impl App {
             .ok_or_else(|| Error::Disabled("edit.redo".into()))?;
         let prev = std::mem::replace(&mut self.doc, next);
         self.push_undo(prev);
+        self.last_load = None;
         Ok(())
     }
 
