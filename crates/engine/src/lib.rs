@@ -5,10 +5,12 @@
 
 mod app;
 mod cmd;
+mod load;
 mod query;
 
 pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};
+pub use load::{LoadReport, Loaded};
 
 /// Errors from running commands.
 #[derive(Clone, Debug, PartialEq)]
@@ -21,6 +23,13 @@ pub enum Error {
     InvalidParams { command: String, message: String },
     /// The data layer failed (e.g. a Query's result would exceed the memory cap).
     Data(opendash_data::Error),
+    /// Refresh stopped at this Query; nothing was changed.
+    Refresh {
+        query: String,
+        error: opendash_data::Error,
+    },
+    /// No Query has this name.
+    UnknownQuery(String),
 }
 
 impl std::fmt::Display for Error {
@@ -32,6 +41,13 @@ impl std::fmt::Display for Error {
                 write!(f, "command `{command}`: {message}")
             }
             Self::Data(e) => e.fmt(f),
+            Self::Refresh { query, error } => {
+                write!(
+                    f,
+                    "refresh failed at query `{query}` (no data was changed): {error}"
+                )
+            }
+            Self::UnknownQuery(name) => write!(f, "there is no query `{name}`"),
         }
     }
 }

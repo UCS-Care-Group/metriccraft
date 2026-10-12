@@ -2,9 +2,8 @@
 //! the Query, replacing its loaded table. All are [`Run::Edit`](crate::Run::Edit), so undo
 //! restores the steps and the table together, and a step that can't run changes nothing.
 //!
-//! Open points: the result here is the full run over the Query's source; M1.8 splits it into
-//! Preview (first 1,000 rows, at a selected step, Cell errors shown per cell) and Refresh (what
-//! loads, reporting the Cell error count, which is dropped here). M1.7 prints each step as M.
+//! The re-run reads the Query's Source again (see `load.rs`: Preview and Refresh live there).
+//! Open point: M1.7 prints each step as M.
 
 use opendash_data::step::{ColumnType, Step};
 use opendash_data::{Table, default_memory_cap};
@@ -166,36 +165,29 @@ fn invalid(command: &str, message: String) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use arrow_array::{ArrayRef, RecordBatch, StringArray};
+    use opendash_data::Query;
     use opendash_data::culture::Culture;
-    use opendash_data::{Query, TableBuilder};
+    use opendash_data::source::{Bytes, File, Source, csv};
     use serde_json::json;
 
     use super::*;
     use crate::COMMANDS;
 
-    /// A Query `Sales` over a raw text source with a header row, loaded with no steps yet.
+    /// A Query `Sales` over a raw CSV source (in memory) with a header row, loaded with no steps
+    /// yet.
     fn doc() -> Document {
-        let col = |v: Vec<Option<&str>>| Arc::new(StringArray::from(v)) as ArrayRef;
-        let batch = RecordBatch::try_from_iter([
-            ("Column1", col(vec![Some("Region"), Some("North"), None])),
-            ("Column2", col(vec![Some("Qty"), Some("3"), Some("x")])),
-            ("Column3", col(vec![Some("Price"), Some("1.5"), Some("2")])),
-        ])
-        .unwrap();
-        let mut b = TableBuilder::new("Sales", batch.schema(), usize::MAX);
-        b.push(&batch).unwrap();
-        let source = b.finish().unwrap();
+        let file = File::Bytes {
+            name: "sales.csv".into(),
+            bytes: Bytes::from_static(b"Region,Qty,Price\nNorth,3,1.5\n,x,2\n"),
+        };
         let query = Query {
             name: "Sales".into(),
-            source: source.clone(),
+            source: Source::csv("Sales", file, csv::Options::default()).unwrap(),
             steps: vec![],
             culture: Culture::get("en-GB").unwrap(),
         };
         Document {
-            tables: vec![source],
+            tables: vec![query.run(usize::MAX).unwrap().0],
             queries: vec![query],
             ..Document::default()
         }

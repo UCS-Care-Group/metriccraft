@@ -1,4 +1,4 @@
-//! Parquet Source (spec S-1): streamed one row group at a time, [`BATCH_ROWS`] rows per batch.
+//! Parquet Source (spec S-1): streamed one row group at a time, [`super::BATCH_ROWS`] rows per batch.
 //! Codecs: uncompressed, snappy, gzip, lz4, brotli, zstd (all builds, web included).
 //!
 //! Column types are normalised to the plain Source set:
@@ -49,7 +49,7 @@ use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 pub use bytes::Bytes;
 
-use super::{BATCH_ROWS, load};
+use super::{Sink, batch_rows, collect, emit};
 use crate::{Error, Result, Table};
 
 mod thrift;
@@ -63,17 +63,31 @@ const BATCH_CAP: u64 = 1 << 30;
 /// Reads a Parquet file (a `std::fs::File`, or [`Bytes`] already in memory) into a Table named
 /// `name`, using at most `limit` bytes.
 pub fn read<R: ChunkReader + 'static>(name: &str, reader: R, limit: usize) -> Result<Table> {
+    collect(name, limit, |sink| {
+        read_rows(name, reader, usize::MAX, limit, sink)
+    })
+    .map(|(t, ())| t)
+}
+
+/// Streams at most `rows` rows into `sink`; decoding stops there.
+pub fn read_rows<R: ChunkReader + 'static>(
+    name: &str,
+    reader: R,
+    rows: usize,
+    limit: usize,
+    sink: &mut Sink<'_>,
+) -> Result {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // Last-resort net only: the checks are meant to stop every corrupt input first (wasm
         // has no unwinding, and the fuzz tests call `read_checked` directly).
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            read_checked(name, reader, limit)
+            read_checked(name, reader, rows, limit, sink)
         }))
         .unwrap_or_else(|_| Err(corrupt(name, "the Parquet decoder failed")))
     }
     #[cfg(target_arch = "wasm32")]
-    read_checked(name, reader, limit)
+    read_checked(name, reader, rows, limit, sink)
 }
 
 fn corrupt(name: &str, message: &str) -> Error {
@@ -83,7 +97,13 @@ fn corrupt(name: &str, message: &str) -> Error {
     }
 }
 
-fn read_checked<R: ChunkReader + 'static>(name: &str, reader: R, limit: usize) -> Result<Table> {
+fn read_checked<R: ChunkReader + 'static>(
+    name: &str,
+    reader: R,
+    rows_wanted: usize,
+    limit: usize,
+    sink: &mut Sink<'_>,
+) -> Result {
     let err = |message: String| Error::Source {
         source: name.into(),
         message,
@@ -150,8 +170,9 @@ fn read_checked<R: ChunkReader + 'static>(name: &str, reader: R, limit: usize) -
         budget: Arc::clone(&budget),
         rows,
     };
+    let batch = batch_rows(rows_wanted);
     let mut reader =
-        ParquetRecordBatchReader::try_new_with_row_groups(&levels, &groups, BATCH_ROWS, None)
+        ParquetRecordBatchReader::try_new_with_row_groups(&levels, &groups, batch, None)
             .map_err(|e| err(e.to_string()))?;
     let schema = Arc::new(Schema::new(fields));
     let batches =
@@ -180,7 +201,7 @@ fn read_checked<R: ChunkReader + 'static>(name: &str, reader: R, limit: usize) -
                 RecordBatch::try_new(schema.clone(), c).map_err(|e| err(e.to_string()))
             }))
         });
-    load(name, schema.clone(), batches, limit)
+    emit(schema.clone(), batches, rows_wanted, sink)
 }
 
 /// Walks the footer's Thrift before the parquet crate parses it.
@@ -944,6 +965,7 @@ fn normalise(col: &ArrayRef, to: &DataType) -> std::result::Result<ArrayRef, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::BATCH_ROWS;
     use ::parquet::arrow::ArrowWriter;
     use ::parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
     use ::parquet::file::properties::WriterProperties;
@@ -1259,10 +1281,15 @@ mod tests {
             x
         };
         for good in varied_files() {
-            assert_eq!(read_checked("ok", good.clone(), BIG).unwrap().rows(), 40);
+            let checked = |name: &str, b: Bytes| {
+                collect(name, BIG, |sink| {
+                    read_checked(name, b, usize::MAX, BIG, sink)
+                })
+            };
+            assert_eq!(checked("ok", good.clone()).unwrap().0.rows(), 40);
             let len = good.len();
             let damaged = |v: Vec<u8>| {
-                let _ = read_checked("Damaged", Bytes::from(v), BIG);
+                let _ = checked("Damaged", Bytes::from(v));
             };
             for i in (0..len).step_by((len / 300).max(1)) {
                 for flip in [0x01, 0x80, 0x07] {

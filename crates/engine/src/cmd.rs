@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::load;
 use crate::query::{self, has_queries};
 use crate::{App, Document, Result};
 
@@ -47,6 +48,33 @@ pub static COMMANDS: &[Command] = &[
         params: "",
         enabled: App::can_redo,
         run: Run::App(|app, _| app.redo()),
+    },
+    // Get Data and Refresh (spec S-1, S-2); both undoable, both report what they loaded.
+    Command {
+        id: "home.getData",
+        label: "Get Data",
+        ribbon: "Home > Data",
+        shortcut: None,
+        params: "kind: text — csv, parquet or xlsx\n\
+                 path: text — the file\n\
+                 name: text — the Query and table name (default: the file name without its \
+                 extension, or the sheet/table)\n\
+                 culture: text — reads numbers and dates, e.g. en-GB (default: en-US)\n\
+                 delimiter: text — CSV: one character, \\t for tab (default: detected)\n\
+                 encoding: text — CSV: utf-8, windows-1252, utf-16le… (default: detected)\n\
+                 item: text — XLSX: the sheet or table to read (required)\n\
+                 itemKind: text — XLSX: sheet or table (default: sheet)",
+        enabled: |_| true,
+        run: Run::App(load::get_data),
+    },
+    Command {
+        id: "home.refresh",
+        label: "Refresh",
+        ribbon: "Home > Queries",
+        shortcut: None,
+        params: "",
+        enabled: has_queries,
+        run: Run::App(load::refresh),
     },
     // Applied Steps (spec Q-1), with the Power Query Editor's ribbon names. Each appends a step to
     // `query` and re-runs it, replacing the Query's loaded table.

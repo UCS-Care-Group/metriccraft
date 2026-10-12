@@ -1,4 +1,6 @@
 //! XLSX Source: list a workbook's sheets and Excel tables (the navigator), import either one.
+//! A Query reads a sheet raw ([`Workbook::read_sheet`]: first row kept as data, *Promoted
+//! Headers* is its step); [`Workbook::load_sheet`] promotes it at import.
 //!
 //! Column types come from the cells: whole numbers → `Int64`, other numbers → `Float64`,
 //! booleans → `Boolean`, dates → `Date32` (all date-only) else `Timestamp(µs)`, text → `Utf8`.
@@ -32,7 +34,7 @@ use quick_xml::events::{BytesStart, Event};
 use zip::ZipArchive;
 use zip::result::ZipError;
 
-use super::{BATCH_BYTES, BATCH_ROWS, load};
+use super::{BATCH_BYTES, BATCH_ROWS, Sink, collect, emit};
 use crate::{Error, Result, Table};
 
 /// Excel's sheet limits; anything past them is a malformed workbook.
@@ -135,21 +137,60 @@ impl<R: Read + Seek> Workbook<R> {
     /// Streams the sheet XML twice (types, then values), so peak memory is the Table plus one
     /// batch — the sheet is never held whole.
     pub fn load_sheet(&mut self, name: &str, limit: usize) -> Result<Import> {
+        let (table, cell_errors) = collect(name, limit, |sink| {
+            self.sheet(name, true, usize::MAX, '.', limit, sink)
+        })?;
+        Ok(Import { table, cell_errors })
+    }
+
+    /// Reads a worksheet raw, as Power Query's `Excel.Workbook` gives it: `Column1..N` over the
+    /// used columns, the first used row kept as data; at most `rows` rows (both passes stop
+    /// there) into `sink`. Numbers in a text column are written with the `decimal` separator so
+    /// the Culture reads them back. Returns the error cells, read as blank.
+    pub fn read_sheet(
+        &mut self,
+        name: &str,
+        rows: usize,
+        decimal: char,
+        limit: usize,
+        sink: &mut Sink<'_>,
+    ) -> Result<usize> {
+        self.sheet(name, false, rows, decimal, limit, sink)
+    }
+
+    /// A sheet with (`header`) or without its first used row as the column names.
+    fn sheet(
+        &mut self,
+        name: &str,
+        header: bool,
+        max: usize,
+        decimal: char,
+        limit: usize,
+        sink: &mut Sink<'_>,
+    ) -> Result<usize> {
         let is_1904 = self.xlsx.has_1904_epoch();
-        let scan = scan(self.sheet_cells(name)?, true, is_1904)?;
+        let scan = scan(self.sheet_cells(name)?, header, is_1904, max)?;
         let (Some((top, bottom)), Some((left, right))) = (scan.rows, scan.cols) else {
             // An empty sheet is one blank column with no rows (Arrow needs a column).
             let (headers, kinds) = (vec![String::new()], vec![Kind::Empty]);
             let cells = std::iter::empty();
-            return import(name, headers, kinds, 0, 0, 0, cells, 0, is_1904, limit);
+            let at = Place {
+                top: 0,
+                left: 0,
+                rows: 0,
+            };
+            return import(
+                name, headers, kinds, at, cells, 0, is_1904, decimal, limit, sink,
+            );
         };
         let width = to_usize(right.saturating_sub(left)).saturating_add(1);
-        let rows = to_usize(bottom.saturating_sub(top));
-        if width > MAX_COLS || rows >= MAX_ROWS {
+        let rows = to_usize(bottom.saturating_sub(top)).saturating_add(usize::from(!header));
+        if width > MAX_COLS || rows > MAX_ROWS {
             return Err(source(format!(
                 "sheet `{name}` is larger than Excel allows"
             )));
         }
+        // Blank names become `Column1..N`.
         let headers = (left..=right)
             .map(|c| scan.headers.get(&c).cloned().unwrap_or_default())
             .collect();
@@ -157,23 +198,45 @@ impl<R: Read + Seek> Workbook<R> {
             .map(|c| scan.kinds.get(&c).copied().unwrap_or(Kind::Empty))
             .collect();
         let cells = self.sheet_cells(name)?;
+        let at = Place {
+            top: top.saturating_add(u32::from(header)),
+            left,
+            rows: rows.min(max),
+        };
         import(
             name,
             headers,
             kinds,
-            top.saturating_add(1),
-            left,
-            rows,
+            at,
             cells,
             scan.errors,
             is_1904,
+            decimal,
             limit,
+            sink,
         )
     }
 
     /// Imports an Excel table: its header row names the columns. Its cells stream from its
     /// sheet like [`Workbook::load_sheet`]'s.
     pub fn load_table(&mut self, name: &str, limit: usize) -> Result<Import> {
+        let (table, cell_errors) = collect(name, limit, |sink| {
+            self.read_table(name, usize::MAX, '.', limit, sink)
+        })?;
+        Ok(Import { table, cell_errors })
+    }
+
+    /// Reads an Excel table as Power Query gives it (its header row names the columns): at most
+    /// `rows` rows into `sink`, `decimal` as in [`Workbook::read_sheet`]. Returns the error
+    /// cells, read as blank.
+    pub fn read_table(
+        &mut self,
+        name: &str,
+        rows: usize,
+        decimal: char,
+        limit: usize,
+        sink: &mut Sink<'_>,
+    ) -> Result<usize> {
         let is_1904 = self.xlsx.has_1904_epoch();
         let table = self
             .tables
@@ -185,15 +248,16 @@ impl<R: Read + Seek> Workbook<R> {
                     .find(|t| t.name.eq_ignore_ascii_case(name))
             })
             .ok_or_else(|| source(format!("no table `{name}`")))?;
-        let area = table
+        let mut area = table
             .area
             .clone()
             .map_err(|m| source(format!("table `{name}`: {m}")))?;
+        area.rows = area.rows.min(rows);
         let sheet = table.sheet.clone();
         let headers = (0..to_usize(area.width))
             .map(|i| table.columns.get(i).cloned().unwrap_or_default())
             .collect();
-        let scan = scan(self.area_cells(&sheet, area)?, false, is_1904)?;
+        let scan = scan(self.area_cells(&sheet, area)?, false, is_1904, usize::MAX)?;
         let kinds = (0..area.width)
             .map(|i| {
                 let c = area.left.saturating_add(i);
@@ -201,17 +265,22 @@ impl<R: Read + Seek> Workbook<R> {
             })
             .collect();
         let cells = self.area_cells(&sheet, area)?;
+        let at = Place {
+            top: area.top,
+            left: area.left,
+            rows: area.rows,
+        };
         import(
             name,
             headers,
             kinds,
-            area.top,
-            area.left,
-            area.rows,
+            at,
             cells,
             scan.errors,
             is_1904,
+            decimal,
             limit,
+            sink,
         )
     }
 
@@ -231,15 +300,20 @@ impl<R: Read + Seek> Workbook<R> {
         ))
     }
 
-    /// The cells of `sheet` inside `area`.
+    /// The cells of `sheet` inside `area`; reading stops after its last row.
     fn area_cells(&mut self, sheet: &str, area: Area) -> Result<Cells<'_>> {
         let rows = u64::from(area.top)..u64::from(area.top) + area.rows as u64;
         let cols = u64::from(area.left)..u64::from(area.left) + u64::from(area.width);
+        let end = rows.end;
         let cells = self.sheet_cells(sheet)?;
-        Ok(Box::new(cells.filter(move |cell| match cell {
-            Ok((r, c, _)) => rows.contains(&u64::from(*r)) && cols.contains(&u64::from(*c)),
-            Err(_) => true,
-        })))
+        Ok(Box::new(
+            cells
+                .take_while(move |cell| cell.as_ref().map_or(true, |(r, ..)| u64::from(*r) < end))
+                .filter(move |cell| match cell {
+                    Ok((r, c, _)) => rows.contains(&u64::from(*r)) && cols.contains(&u64::from(*c)),
+                    Err(_) => true,
+                }),
+        ))
     }
 }
 
@@ -577,19 +651,28 @@ fn cell(s: &str) -> Option<(u32, u32)> {
     ok.then(|| (row - 1, col - 1))
 }
 
+/// Where the data cells are: the sheet row and column of the first one, and the row count.
+struct Place {
+    top: u32,
+    left: u32,
+    rows: usize,
+}
+
+/// Streams the cells at `at` as batches into `sink`; returns `cell_errors`.
 #[allow(clippy::too_many_arguments)]
 fn import<'a>(
     name: &str,
     headers: Vec<String>,
     kinds: Vec<Kind>,
-    top: u32,
-    left: u32,
-    rows: usize,
+    at: Place,
     cells: impl Iterator<Item = Result<(u32, u32, Data)>> + 'a,
     cell_errors: usize,
     is_1904: bool,
+    decimal: char,
     limit: usize,
-) -> Result<Import> {
+    sink: &mut Sink<'_>,
+) -> Result<usize> {
+    let Place { top, left, rows } = at;
     let fields: Vec<Field> = unique_names(headers)
         .into_iter()
         .zip(&kinds)
@@ -606,13 +689,12 @@ fn import<'a>(
         rows,
         done: 0,
         is_1904,
+        decimal,
         name,
         limit,
     };
-    Ok(Import {
-        table: load(name, schema, batches, limit)?,
-        cell_errors,
-    })
+    emit(schema, batches, usize::MAX, sink)?;
+    Ok(cell_errors)
 }
 
 /// What a column holds, widened as cells are seen.
@@ -680,10 +762,20 @@ struct Scan {
 }
 
 /// First pass: bounds, headers (the first used row, if `header`), column kinds, error count.
-fn scan(cells: Cells<'_>, header: bool, is_1904: bool) -> Result<Scan> {
+/// Stops after `max` rows below the headers.
+fn scan(cells: Cells<'_>, header: bool, is_1904: bool, max: usize) -> Result<Scan> {
     let mut s = Scan::default();
+    let max = u64::try_from(max).unwrap_or(u64::MAX);
     for cell in cells {
         let (r, c, d) = cell?;
+        if let Some((top, _)) = s.rows {
+            let end = u64::from(top)
+                .saturating_add(u64::from(header))
+                .saturating_add(max);
+            if u64::from(r) >= end {
+                break;
+            }
+        }
         if d == Data::Empty {
             continue;
         }
@@ -706,7 +798,8 @@ fn scan(cells: Cells<'_>, header: bool, is_1904: bool) -> Result<Scan> {
         };
         s.cols = Some(s.cols.map_or((c, c), |(l, h)| (l.min(c), h.max(c))));
         if header_row {
-            s.headers.insert(c, text(&d, is_1904).unwrap_or_default());
+            s.headers
+                .insert(c, text(&d, is_1904, '.').unwrap_or_default());
             continue;
         }
         match Kind::of(&d, is_1904) {
@@ -733,6 +826,8 @@ struct Batches<'n, I> {
     rows: usize,
     done: usize,
     is_1904: bool,
+    /// The decimal separator numbers in text columns are written with.
+    decimal: char,
     name: &'n str,
     limit: usize,
 }
@@ -778,7 +873,7 @@ impl<I: Iterator<Item = Result<(u32, u32, Data)>>> Iterator for Batches<'_, I> {
                 .checked_sub(self.left)
                 .and_then(|c| cols.get_mut(to_usize(c)));
             if let Some(col) = col {
-                bytes = bytes.saturating_add(col.put(row, &d, self.is_1904));
+                bytes = bytes.saturating_add(col.put(row, &d, self.is_1904, self.decimal));
                 last = row;
             }
             // One row alone can't outgrow the memory limit (a shared string repeated).
@@ -847,14 +942,14 @@ impl Col {
 
     /// Writes `d` at `row` (blank-filling the gap), returning about how many bytes that took;
     /// a second cell for the same row is ignored.
-    fn put(&mut self, row: usize, d: &Data, is_1904: bool) -> usize {
+    fn put(&mut self, row: usize, d: &Data, is_1904: bool, decimal: char) -> usize {
         self.pad(row);
         if self.len() != row {
             return 0;
         }
         match self {
             Col::Text(b) => {
-                let t = text(d, is_1904);
+                let t = text(d, is_1904, decimal);
                 let n = t.as_ref().map_or(0, String::len);
                 b.append_option(t);
                 return n + 8;
@@ -931,15 +1026,16 @@ fn micros(d: &Data, is_1904: bool) -> Option<i64> {
     Some((days + epoch) * DAY_US + ms * 1000)
 }
 
-/// A cell as text for a `Utf8` column; `None` for blanks and errors.
-fn text(d: &Data, is_1904: bool) -> Option<String> {
+/// A cell as text for a `Utf8` column; `None` for blanks and errors. Fractions use `decimal`.
+fn text(d: &Data, is_1904: bool, decimal: char) -> Option<String> {
+    let number = |f: f64| f.to_string().replace('.', decimal.encode_utf8(&mut [0; 4]));
     match d {
         Data::Empty | Data::Error(_) => None,
         Data::String(s) | Data::DateTimeIso(s) | Data::DurationIso(s) => Some(s.clone()),
         Data::Int(i) => Some(i.to_string()),
-        Data::Float(f) => Some(f.to_string()),
+        Data::Float(f) => Some(number(*f)),
         Data::Bool(b) => Some(b.to_string()),
-        Data::DateTime(t) if t.is_duration() => Some(t.as_f64().to_string()),
+        Data::DateTime(t) if t.is_duration() => Some(number(t.as_f64())),
         Data::DateTime(_) => micros(d, is_1904).map(|us| {
             let (y, m, day) = civil(us.div_euclid(DAY_US));
             let s = us.rem_euclid(DAY_US) / 1_000_000;
@@ -1589,5 +1685,56 @@ mod tests {
             resolve("xl/worksheets", "/xl/tables/t.xml"),
             "xl/tables/t.xml"
         );
+    }
+
+    /// Reads `item` raw (at most `rows` rows) into one table.
+    fn raw(
+        wb: &mut Workbook<Cursor<Vec<u8>>>,
+        item: &str,
+        table: bool,
+        rows: usize,
+    ) -> (Table, usize) {
+        collect(item, usize::MAX, |sink| match table {
+            false => wb.read_sheet(item, rows, ',', usize::MAX, sink),
+            true => wb.read_table(item, rows, ',', usize::MAX, sink),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn raw_sheets_keep_the_first_row_and_number_the_columns() {
+        let mut book = sheet(&[&["Region", "Qty"], &["North"]]);
+        let ws = book.worksheet_from_name("Data").unwrap();
+        ws.write_number(1, 1, 1.5).unwrap();
+        ws.write_formula(2, 1, Formula::new("=1/0").set_result("#DIV/0!"))
+            .unwrap();
+        let (t, errors) = raw(&mut open(&mut book), "Data", false, usize::MAX);
+        assert_eq!(names(&t), ["Column1", "Column2"]);
+        assert_eq!(errors, 1);
+        assert_eq!(
+            strings(&t, 1),
+            [Some("Qty".into()), Some("1,5".into()), None],
+            "numbers in a text column use the given decimal separator"
+        );
+    }
+
+    #[test]
+    fn raw_reads_stop_after_the_rows_asked_for() {
+        let mut book = sheet(&[&["N"]]);
+        let ws = book.worksheet_from_name("Data").unwrap();
+        for i in 1..=BATCH_ROWS as u32 * 2 {
+            ws.write_number(i, 0, i).unwrap();
+        }
+        let table = rust_xlsxwriter::Table::new()
+            .set_name("All")
+            .set_columns(&[rust_xlsxwriter::TableColumn::new().set_header("N")]);
+        ws.add_table(0, 0, BATCH_ROWS as u32 * 2, 0, &table)
+            .unwrap();
+        let mut wb = open(&mut book);
+        let (t, _) = raw(&mut wb, "Data", false, 1000);
+        assert_eq!(t.rows(), 1000);
+        assert_eq!(strings(&t, 0)[999], Some("999".into()));
+        let (t, _) = raw(&mut wb, "All", true, 5);
+        assert_eq!((t.rows(), ints(&t, 0)[4]), (5, Some(5)));
     }
 }

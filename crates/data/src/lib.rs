@@ -3,11 +3,13 @@
 //! Layer L2 — see `docs/plan/0001-mvp.md` §1.
 
 pub mod culture;
+mod preview;
 mod query;
 pub mod source;
 pub mod step;
 mod table;
 
+pub use preview::Preview;
 pub use query::Query;
 pub use table::{Table, TableBuilder, default_memory_cap};
 

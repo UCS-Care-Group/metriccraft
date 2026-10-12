@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
-use opendash_data::{Query, Table};
+use opendash_data::{Preview, Query, Table};
 use serde_json::Value;
 
-use crate::{COMMANDS, Command, Error, Result, Run};
+use crate::{COMMANDS, Command, Error, LoadReport, Result, Run};
 
 /// Everything that is saved and undoable. Filled in by later milestones (model, report).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -28,6 +28,8 @@ pub struct App {
     // Switch to inverse operations if cloning a Document shows up in benchmarks.
     undo: VecDeque<Document>,
     redo: Vec<Document>,
+    /// What the last Get Data or Refresh loaded (not part of the Document: not undone).
+    last_load: Option<LoadReport>,
 }
 
 impl Default for App {
@@ -48,6 +50,7 @@ impl App {
             commands,
             undo: VecDeque::new(),
             redo: Vec::new(),
+            last_load: None,
         }
     }
 
@@ -90,6 +93,32 @@ impl App {
             }
             Run::App(act) => act(self, params),
         }
+    }
+
+    /// Runs a loading edit (Get Data, Refresh) like a [`Run::Edit`]: on a copy that replaces the
+    /// document only on success, recorded for undo. Keeps its report.
+    pub(crate) fn edit_loading(
+        &mut self,
+        edit: impl FnOnce(&mut Document) -> Result<LoadReport>,
+    ) -> Result {
+        let mut next = self.doc.clone();
+        let report = edit(&mut next)?;
+        let prev = std::mem::replace(&mut self.doc, next);
+        self.push_undo(prev);
+        self.redo.clear();
+        self.last_load = Some(report);
+        Ok(())
+    }
+
+    /// What the last Get Data or Refresh loaded: rows and Cell error counts per table.
+    pub fn last_load(&self) -> Option<&LoadReport> {
+        self.last_load.as_ref()
+    }
+
+    /// The Preview of `query` at Applied Step `step` (0 = first), or of its Source for `None`:
+    /// the first 1,000 Source rows, with Cell errors per cell. Derived, not stored.
+    pub fn preview(&self, query: &str, step: Option<usize>) -> Result<Preview> {
+        crate::load::preview(&self.doc, query, step)
     }
 
     pub fn can_undo(&self) -> bool {

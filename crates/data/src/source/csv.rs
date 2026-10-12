@@ -1,11 +1,8 @@
-//! CSV Source (spec S-1): reads like Power Query's `Csv.Document` (columns `Column1..N`, all
-//! text), then applies the automatic *Promoted Headers* and *Changed Type* steps (ADR 0005),
-//! streaming in [`BATCH_ROWS`] batches so the whole file is never held.
+//! CSV Source (spec S-1): reads like Power Query's `Csv.Document`: columns `Column1..N`, all
+//! text, streaming in batches so the whole file is never held. The automatic *Promoted Headers*
+//! and *Changed Type* steps are the Query's ([`super::Source::detect`]).
 //!
 //! Parity uncertainties, to settle with M1.10 cases in the VM:
-//! - Header detection: promoted when every cell of the first row is non-empty text and at least
-//!   one column below it detects as non-text. An all-text file keeps `Column1..N`. Duplicate
-//!   headers get `_1`, `_2` suffixes.
 //! - The column count is the widest row in the first 201 rows (Power Query writes it into
 //!   `Csv.Document` as `Columns=N`); later wider rows lose the extra fields, shorter rows get
 //!   nulls.
@@ -13,11 +10,10 @@
 //! - Without a BOM, valid UTF-8 in the first 64 KB means UTF-8, otherwise Windows-1252.
 //!
 //! Hostile input (spec N-1, N-4): a record (line, or quoted multi-line field) over
-//! [`MAX_RECORD`] bytes is an error naming its line, the type-detection sample is counted
-//! against the memory limit, and a batch ends early once it holds [`BATCH_BYTES`] of text.
+//! [`MAX_RECORD`] bytes is an error naming its line, and a batch ends early once it holds
+//! [`BATCH_BYTES`] of text.
 
 use std::cell::Cell;
-use std::collections::{HashSet, VecDeque};
 use std::io::{self, Read};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -25,16 +21,12 @@ use std::sync::Arc;
 use ::csv::{ReaderBuilder, StringRecord};
 use arrow_array::builder::StringBuilder;
 use arrow_array::{ArrayRef, RecordBatch};
-use arrow_schema::{Field, Schema};
+use arrow_schema::{DataType, Field, Schema};
 use encoding_rs::{CoderResult, Decoder, Encoding, UTF_8, WINDOWS_1252};
 
-use super::{BATCH_BYTES, BATCH_ROWS, load};
-use crate::culture::Culture;
-use crate::step::{ColumnType, Step};
-use crate::{Error, Result, Table};
+use super::{BATCH_BYTES, SAMPLE_ROWS, Sink, batch_rows, emit};
+use crate::{Error, Result};
 
-/// Rows used for type detection.
-const SAMPLE_ROWS: usize = 200;
 /// Power Query's column limit.
 const MAX_COLUMNS: usize = 16_384;
 /// Bytes read at a time; the first chunk also decides encoding and delimiter.
@@ -53,50 +45,162 @@ pub struct Options {
     pub encoding: Option<&'static Encoding>,
 }
 
-/// What an import found and did.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Import {
+/// How a CSV file is read: what connecting found ([`sniff`]), kept in [`super::Source::Csv`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Format {
     pub delimiter: u8,
     pub encoding: &'static Encoding,
-    /// The automatic steps: *Promoted Headers* (when detected), then *Changed Type*.
-    pub steps: Vec<Step>,
-    /// Cell errors per column: values Changed Type couldn't convert, loaded as blank.
-    pub cell_errors: Vec<usize>,
+    pub columns: usize,
 }
 
-impl Import {
-    pub fn cell_error_count(&self) -> usize {
-        self.cell_errors.iter().sum()
+/// Finds a file's delimiter and encoding (unless given) and its column count: the widest of the
+/// first [`SAMPLE_ROWS`] + 1 records.
+pub fn sniff(name: &str, reader: impl Read, options: Options) -> Result<Format> {
+    let (delimiter, encoding, mut records) = open(name, reader, options)?;
+    let mut r = StringRecord::new();
+    let mut columns = 0;
+    for _ in 0..=SAMPLE_ROWS {
+        if !records.next(&mut r)? {
+            break;
+        }
+        columns = columns.max(r.len());
     }
+    let format = Format {
+        delimiter,
+        encoding,
+        columns,
+    };
+    check(name, &format)?;
+    Ok(format)
 }
 
-/// Imports a CSV file as table `name`, using at most `limit` bytes of memory.
-pub fn import(
-    name: &str,
-    mut reader: impl Read,
-    options: Options,
-    culture: &Culture,
-    limit: usize,
-) -> Result<(Table, Import)> {
+fn check(name: &str, format: &Format) -> Result {
     let err = |message: String| Error::Source {
         source: name.into(),
         message,
     };
+    match format.columns {
+        0 => Err(err("the file has no data".into())),
+        n if n > MAX_COLUMNS => Err(err(format!("{n} columns; the limit is {MAX_COLUMNS}"))),
+        _ => Ok(()),
+    }
+}
+
+/// Reads at most `rows` records as `Column1..N` text batches into `sink`, then stops reading.
+pub fn read(
+    name: &str,
+    reader: impl Read,
+    format: &Format,
+    rows: usize,
+    sink: &mut Sink<'_>,
+) -> Result {
+    check(name, format)?;
+    let options = Options {
+        delimiter: Some(format.delimiter),
+        encoding: Some(format.encoding),
+    };
+    let (_, _, mut records) = open(name, reader, options)?;
+    let width = format.columns;
+    let schema = Arc::new(Schema::new(
+        (1..=width)
+            .map(|i| Field::new(format!("Column{i}"), DataType::Utf8, true))
+            .collect::<Vec<_>>(),
+    ));
+    let per_batch = batch_rows(rows);
+    let mut record = StringRecord::new();
+    let mut done = false;
+    let batches = std::iter::from_fn(|| {
+        if done {
+            return None;
+        }
+        let mut text: Vec<StringBuilder> = (0..width).map(|_| StringBuilder::new()).collect();
+        let (mut n, mut bytes) = (0, 0usize);
+        while n < per_batch && bytes < BATCH_BYTES {
+            match records.next(&mut record) {
+                Ok(true) => {}
+                Ok(false) => {
+                    done = true;
+                    break;
+                }
+                Err(e) => {
+                    done = true;
+                    return Some(Err(e));
+                }
+            }
+            bytes = bytes.saturating_add(record.as_byte_record().as_slice().len());
+            for (c, col) in text.iter_mut().enumerate() {
+                col.append_option(record.get(c));
+            }
+            n += 1;
+        }
+        if n == 0 {
+            return None;
+        }
+        let columns: Vec<ArrayRef> = text
+            .iter_mut()
+            .map(|c| Arc::new(c.finish()) as ArrayRef)
+            .collect();
+        Some(
+            RecordBatch::try_new(Arc::clone(&schema), columns).map_err(|e| Error::Source {
+                source: name.into(),
+                message: e.to_string(),
+            }),
+        )
+    });
+    emit(Arc::clone(&schema), batches, rows, sink)
+}
+
+/// A file's records, decoded to UTF-8, refusing one longer than [`MAX_RECORD`].
+struct Records<'n, R> {
+    csv: ::csv::Reader<Fenced<Decode<R>>>,
+    fence: Rc<Cell<u64>>,
+    name: &'n str,
+}
+
+impl<R: Read> Records<'_, R> {
+    fn next(&mut self, r: &mut StringRecord) -> Result<bool> {
+        // The csv crate buffers a record whole; the fence stops it past MAX_RECORD.
+        let start = self.csv.position().clone();
+        self.fence
+            .set(start.byte().saturating_add(MAX_RECORD + FENCE_SLACK));
+        self.csv.read_record(r).map_err(|e| Error::Source {
+            source: self.name.into(),
+            message: match e.kind() {
+                ::csv::ErrorKind::Io(io) if io.kind() == io::ErrorKind::FileTooLarge => format!(
+                    "line {}: a record is longer than {} MB",
+                    start.line(),
+                    MAX_RECORD >> 20
+                ),
+                _ => e.to_string(),
+            },
+        })
+    }
+}
+
+/// Opens a file: the encoding (a BOM wins over `options`) and delimiter, detected unless given.
+fn open<R: Read>(
+    name: &str,
+    mut reader: R,
+    options: Options,
+) -> Result<(u8, &'static Encoding, Records<'_, R>)> {
     let mut prefix = Vec::with_capacity(CHUNK);
     reader
         .by_ref()
         .take(CHUNK as u64)
         .read_to_end(&mut prefix)
-        .map_err(|e| err(e.to_string()))?;
+        .map_err(|e| Error::Source {
+            source: name.into(),
+            message: e.to_string(),
+        })?;
     let encoding = match Encoding::for_bom(&prefix) {
         Some((bom, _)) => bom,
         None => options.encoding.unwrap_or_else(|| guess(&prefix)),
     };
     let delimiter = options
         .delimiter
-        .unwrap_or_else(|| sniff(&encoding.decode(&prefix).0));
+        .unwrap_or_else(|| sniff_delimiter(&encoding.decode(&prefix).0));
     let fence = Rc::new(Cell::new(0));
-    let mut csv = ReaderBuilder::new()
+    let csv = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
         .delimiter(delimiter)
@@ -105,138 +209,7 @@ pub fn import(
             read: 0,
             fence: Rc::clone(&fence),
         });
-    // Reads one record, refusing one longer than MAX_RECORD (the csv crate buffers it whole).
-    let mut next = move |r: &mut StringRecord| {
-        let start = csv.position().clone();
-        fence.set(start.byte().saturating_add(MAX_RECORD + FENCE_SLACK));
-        csv.read_record(r).map_err(|e| match e.kind() {
-            ::csv::ErrorKind::Io(io) if io.kind() == io::ErrorKind::FileTooLarge => err(format!(
-                "line {}: a record is longer than {} MB",
-                start.line(),
-                MAX_RECORD >> 20
-            )),
-            _ => err(e.to_string()),
-        })
-    };
-
-    // Header row + SAMPLE_ROWS, held in memory: counted against the limit.
-    let mut sample = VecDeque::with_capacity(SAMPLE_ROWS + 1);
-    let mut sampled = 0usize;
-    while sample.len() <= SAMPLE_ROWS {
-        let mut r = StringRecord::new();
-        if !next(&mut r)? {
-            break;
-        }
-        sampled = sampled.saturating_add(r.as_byte_record().as_slice().len());
-        if sampled > limit {
-            return Err(Error::MemoryCap {
-                table: name.into(),
-                limit,
-            });
-        }
-        sample.push_back(r);
-    }
-    let width = sample.iter().map(StringRecord::len).max().unwrap_or(0);
-    if width == 0 {
-        return Err(err("the file has no data".into()));
-    }
-    if width > MAX_COLUMNS {
-        return Err(err(format!("{width} columns; the limit is {MAX_COLUMNS}")));
-    }
-    let detect = |skip: usize, c: usize| {
-        let values = sample.iter().skip(skip).take(SAMPLE_ROWS);
-        ColumnType::detect(values.map(|r| r.get(c).unwrap_or("")), culture)
-    };
-    let below: Vec<ColumnType> = (0..width).map(|c| detect(1, c)).collect();
-    let header = sample.front().filter(|first| {
-        sample.len() > 1
-            && (0..width).all(|c| {
-                first
-                    .get(c)
-                    .is_some_and(|v| ColumnType::of(v, culture) == Some(ColumnType::Text))
-            })
-            && below.iter().any(|t| *t != ColumnType::Text)
-    });
-    let mut steps = Vec::with_capacity(2);
-    let (names, types) = match header {
-        Some(first) => {
-            let names = unique_names(first);
-            steps.push(Step::PromotedHeaders);
-            sample.pop_front();
-            (names, below)
-        }
-        None => (
-            (1..=width).map(|i| format!("Column{i}")).collect(),
-            (0..width).map(|c| detect(0, c)).collect(),
-        ),
-    };
-    steps.push(Step::ChangedType(
-        names.iter().cloned().zip(types.iter().copied()).collect(),
-    ));
-    let schema = Arc::new(Schema::new(
-        names
-            .iter()
-            .zip(&types)
-            .map(|(n, t)| Field::new(n, t.data_type(), true))
-            .collect::<Vec<_>>(),
-    ));
-
-    let mut cell_errors = vec![0; width];
-    let mut record = StringRecord::new();
-    let mut done = false;
-    let batches = std::iter::from_fn(|| {
-        if done {
-            return None;
-        }
-        let mut text: Vec<StringBuilder> = (0..width).map(|_| StringBuilder::new()).collect();
-        let (mut rows, mut bytes) = (0, 0usize);
-        while rows < BATCH_ROWS && bytes < BATCH_BYTES {
-            if let Some(r) = sample.pop_front() {
-                record = r;
-            } else {
-                match next(&mut record) {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        done = true;
-                        break;
-                    }
-                    Err(e) => {
-                        done = true;
-                        return Some(Err(e));
-                    }
-                }
-            }
-            bytes = bytes.saturating_add(record.as_byte_record().as_slice().len());
-            for (c, col) in text.iter_mut().enumerate() {
-                col.append_option(record.get(c));
-            }
-            rows += 1;
-        }
-        if rows == 0 {
-            return None;
-        }
-        let columns: Vec<ArrayRef> = text
-            .iter_mut()
-            .zip(&types)
-            .zip(cell_errors.iter_mut())
-            .map(|((col, ty), errors)| {
-                let (array, n) = ty.convert(&col.finish(), culture);
-                *errors += n;
-                array
-            })
-            .collect();
-        Some(RecordBatch::try_new(Arc::clone(&schema), columns).map_err(|e| err(e.to_string())))
-    });
-    let table = load(name, Arc::clone(&schema), batches, limit)?;
-    Ok((
-        table,
-        Import {
-            delimiter,
-            encoding,
-            steps,
-            cell_errors,
-        },
-    ))
+    Ok((delimiter, encoding, Records { csv, fence, name }))
 }
 
 /// Without a BOM: UTF-8 if the bytes are valid UTF-8 (a sequence cut at the end is fine),
@@ -251,7 +224,7 @@ fn guess(prefix: &[u8]) -> &'static Encoding {
 
 /// The candidate delimiter that splits the first lines most consistently (quotes respected);
 /// ties go to the earlier candidate, and `,` when none appears.
-fn sniff(text: &str) -> u8 {
+fn sniff_delimiter(text: &str) -> u8 {
     let mut lines: Vec<[usize; 4]> = Vec::new();
     let (mut counts, mut quoted) = ([0; 4], false);
     for b in text.bytes() {
@@ -285,23 +258,6 @@ fn sniff(text: &str) -> u8 {
         .filter(|&i| score(i).0)
         .and_then(|i| DELIMITERS.get(i).copied())
         .unwrap_or(b',')
-}
-
-/// Header cells as column names, made unique with `_1`, `_2`… suffixes.
-fn unique_names(row: &StringRecord) -> Vec<String> {
-    let mut seen = HashSet::with_capacity(row.len());
-    row.iter()
-        .map(|base| {
-            let mut name = base.to_string();
-            let mut n = 0;
-            while seen.contains(&name) {
-                n += 1;
-                name = format!("{base}_{n}");
-            }
-            seen.insert(name.clone());
-            name
-        })
-        .collect()
 }
 
 /// Hands the csv reader bytes up to a fence (set before each record) and fails past it.
@@ -390,16 +346,61 @@ mod tests {
     use arrow_array::cast::AsArray;
     use arrow_array::types::{Float64Type, Int8Type, Int16Type};
     use arrow_array::{Array, StringArray};
-    use arrow_schema::DataType;
 
     use super::*;
+    use crate::culture::Culture;
+    use crate::source::{BATCH_ROWS, Bytes, File, Source};
+    use crate::step::{ColumnType, Step};
+    use crate::{Query, Table};
 
     fn culture(name: &str) -> &'static Culture {
         Culture::get(name).unwrap()
     }
 
-    fn run(bytes: &[u8], name: &str) -> Result<(Table, Import)> {
-        import("T", bytes, Options::default(), culture(name), usize::MAX)
+    /// What connecting found and loading reported.
+    struct Import {
+        delimiter: u8,
+        encoding: &'static Encoding,
+        steps: Vec<Step>,
+        cell_errors: usize,
+    }
+
+    /// Connects to `bytes` as Query `name` (automatic steps included) and loads it.
+    fn connect(
+        name: &str,
+        bytes: &[u8],
+        options: Options,
+        culture: &'static Culture,
+        limit: usize,
+    ) -> crate::Result<(Table, Import)> {
+        let file = File::Bytes {
+            name: "t.csv".into(),
+            bytes: Bytes::copy_from_slice(bytes),
+        };
+        let source = Source::csv(name, file, options)?;
+        let Source::Csv {
+            delimiter,
+            encoding,
+            ..
+        } = source
+        else {
+            panic!("{source:?}")
+        };
+        let q = Query::connect(name, source, culture, limit)?;
+        let (table, cell_errors) = q.run(limit)?;
+        Ok((
+            table,
+            Import {
+                delimiter,
+                encoding,
+                steps: q.steps,
+                cell_errors,
+            },
+        ))
+    }
+
+    fn run(bytes: &[u8], name: &str) -> crate::Result<(Table, Import)> {
+        connect("T", bytes, Options::default(), culture(name), usize::MAX)
     }
 
     /// Column `c` as text, whatever its storage (dictionary or plain).
@@ -442,7 +443,7 @@ mod tests {
             delimiter: Some(b'|'),
             ..Options::default()
         };
-        let (t, _) = import("T", &b"a,b|c\n"[..], opts, culture("en-US"), usize::MAX).unwrap();
+        let (t, _) = connect("T", b"a,b|c\n", opts, culture("en-US"), usize::MAX).unwrap();
         assert_eq!(text(&t, 0), some(&["a,b"]));
     }
 
@@ -491,7 +492,7 @@ mod tests {
         assert_eq!(names(&t), ["Column1", "Column2", "Column3"]);
         assert_eq!(t.rows(), 4);
         assert_eq!(text(&t, 1)[1], None, "missing field is null");
-        assert_eq!(i.cell_error_count(), 0);
+        assert_eq!(i.cell_errors, 0);
         // A wider row after the sample loses its extra fields.
         let mut csv = "a,b\n".repeat(300);
         csv.push_str("1,2,3,4\n");
@@ -564,7 +565,7 @@ mod tests {
         csv.push_str("x\n");
         let (t, i) = run(csv.as_bytes(), "en-US").unwrap();
         assert_eq!(t.batch().column(0).data_type(), &DataType::Int8);
-        assert_eq!(i.cell_errors, [1]);
+        assert_eq!(i.cell_errors, 1);
     }
 
     #[test]
@@ -602,8 +603,7 @@ mod tests {
         csv.push_str("oops,1.5,a\n,abc,b\n7,??,c\n");
         let (t, i) = run(csv.as_bytes(), "en-US").unwrap();
         assert_eq!(t.rows(), 253);
-        assert_eq!(i.cell_errors, [1, 2, 0]);
-        assert_eq!(i.cell_error_count(), 3);
+        assert_eq!(i.cell_errors, 3);
         let qty = t.batch().column(0);
         assert_eq!(qty.null_count(), 2, "one error + one empty");
         let qty = qty.as_primitive::<Int8Type>();
@@ -619,7 +619,7 @@ mod tests {
         }
         let (t, i) = run(csv.as_bytes(), "en-US").unwrap();
         assert_eq!(t.rows(), n);
-        assert_eq!(i.cell_error_count(), 0);
+        assert_eq!(i.cell_errors, 0);
         let ids = t.batch().column(0).as_primitive::<Int16Type>();
         assert_eq!(ids.value(n - 1), i16::try_from(n - 1).unwrap());
         // The decoder hands over small reads too.
@@ -630,17 +630,61 @@ mod tests {
         assert_eq!(d.read(&mut one).unwrap(), 0);
     }
 
+    /// Counts the bytes handed out.
+    struct Counting<'a> {
+        inner: &'a [u8],
+        read: std::rc::Rc<Cell<usize>>,
+    }
+
+    impl Read for Counting<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = self.inner.read(buf)?;
+            self.read.set(self.read.get() + n);
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn reading_fewer_rows_stops_the_reader_early() {
+        let row = format!("{},{}\n", "x".repeat(40), 7);
+        let csv = row.repeat(10_000);
+        let format = Format {
+            delimiter: b',',
+            encoding: UTF_8,
+            columns: 2,
+        };
+        let read = std::rc::Rc::new(Cell::new(0));
+        let counting = Counting {
+            inner: csv.as_bytes(),
+            read: std::rc::Rc::clone(&read),
+        };
+        let mut rows = Vec::new();
+        super::read("T", counting, &format, 1000, &mut |b| {
+            rows.push(b.num_rows());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(rows, [1000], "one batch of exactly 1,000 rows");
+        // 1,000 rows are 43 KB: the 64 KB prefix plus one more chunk at most, of 430 KB.
+        assert!(
+            read.get() <= 2 * CHUNK,
+            "read {} of {} bytes",
+            read.get(),
+            csv.len()
+        );
+    }
+
     #[test]
     fn memory_cap_names_the_table() {
         let csv = "Name\n".to_string() + &"some text\n".repeat(BATCH_ROWS * 2);
-        let r = import(
+        let r = connect(
             "Sales",
             csv.as_bytes(),
             Options::default(),
             culture("en-US"),
             4_096,
         );
-        let e = r.unwrap_err();
+        let e = r.err().unwrap();
         assert!(
             matches!(&e, Error::MemoryCap { table, .. } if table == "Sales"),
             "{e}"
@@ -656,6 +700,12 @@ mod tests {
             run(wide.as_bytes(), "en-US"),
             Err(Error::Source { .. })
         ));
+        let format = Format {
+            delimiter: b',',
+            encoding: UTF_8,
+            columns: 0,
+        };
+        assert!(super::read("T", &b"a"[..], &format, 1, &mut |_| Ok(())).is_err());
         // Invalid UTF-8 after the sniffed prefix is replaced, not fatal.
         let mut bytes = "a\n".repeat(CHUNK).into_bytes();
         bytes.extend_from_slice(b"\xFF\xFE\n");
@@ -668,27 +718,28 @@ mod tests {
         let opts = Options::default();
         // An endless line: refused after MAX_RECORD bytes, not read to the end of memory.
         let endless = b"a,b\n1,2\n".chain(io::repeat(b'x'));
-        let e = import("T", endless, opts, culture("en-US"), usize::MAX).unwrap_err();
+        let e = sniff("T", endless, opts).unwrap_err();
         assert!(e.to_string().contains("line 3: a record is longer"), "{e}");
         // An endless quoted field past the sample.
         let mut head = "n\n".repeat(SAMPLE_ROWS + 5);
         head.push('"');
+        let format = sniff("T", head.as_bytes().chain(io::repeat(b'y')), opts).unwrap();
         let endless = head.as_bytes().chain(io::repeat(b'y'));
-        let e = import("T", endless, opts, culture("en-US"), usize::MAX).unwrap_err();
+        let e = super::read("T", endless, &format, usize::MAX, &mut |_| Ok(())).unwrap_err();
         assert!(e.to_string().contains("line 206"), "{e}");
     }
 
     #[test]
     fn the_sample_counts_against_the_limit() {
         let csv = format!("{}\n", "z".repeat(5000)).repeat(10);
-        let e = import(
+        let e = connect(
             "Wide",
             csv.as_bytes(),
             Options::default(),
             culture("en-US"),
             4096,
         );
-        assert!(matches!(e, Err(Error::MemoryCap { .. })), "{e:?}");
+        assert!(matches!(e, Err(Error::MemoryCap { .. })), "{:?}", e.err());
     }
 
     #[test]
