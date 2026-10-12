@@ -5,6 +5,7 @@
 
 mod app;
 mod cmd;
+mod query;
 
 pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};
@@ -18,6 +19,8 @@ pub enum Error {
     Disabled(String),
     /// The params are missing, of the wrong type or out of range.
     InvalidParams { command: String, message: String },
+    /// The data layer failed (e.g. a Query's result would exceed the memory cap).
+    Data(opendash_data::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -28,6 +31,7 @@ impl std::fmt::Display for Error {
             Self::InvalidParams { command, message } => {
                 write!(f, "command `{command}`: {message}")
             }
+            Self::Data(e) => e.fmt(f),
         }
     }
 }

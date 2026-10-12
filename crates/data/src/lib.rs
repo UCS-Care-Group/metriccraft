@@ -3,10 +3,12 @@
 //! Layer L2 — see `docs/plan/0001-mvp.md` §1.
 
 pub mod culture;
+mod query;
 pub mod source;
 pub mod step;
 mod table;
 
+pub use query::Query;
 pub use table::{Table, TableBuilder, default_memory_cap};
 
 /// Errors from loading data.
@@ -18,6 +20,8 @@ pub enum Error {
     Arrow { table: String, message: String },
     /// A Source could not be read (bad file, wrong format, unsupported feature…).
     Source { source: String, message: String },
+    /// An Applied Step can't run on its input (a column it names is missing, a name collides…).
+    Step { step: &'static str, message: String },
 }
 
 impl std::fmt::Display for Error {
@@ -30,6 +34,7 @@ impl std::fmt::Display for Error {
             ),
             Self::Arrow { table, message } => write!(f, "`{table}`: {message}"),
             Self::Source { source, message } => write!(f, "{source}: {message}"),
+            Self::Step { step, message } => write!(f, "{step}: {message}"),
         }
     }
 }

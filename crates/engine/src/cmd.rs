@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::query::{self, has_queries};
 use crate::{App, Document, Result};
 
 /// What a command acts on.
@@ -46,5 +47,69 @@ pub static COMMANDS: &[Command] = &[
         params: "",
         enabled: App::can_redo,
         run: Run::App(|app, _| app.redo()),
+    },
+    // Applied Steps (spec Q-1), with the Power Query Editor's ribbon names. Each appends a step to
+    // `query` and re-runs it, replacing the Query's loaded table.
+    Command {
+        id: "transform.useFirstRowAsHeaders",
+        label: "Use First Row as Headers",
+        ribbon: "Transform > Table",
+        shortcut: None,
+        params: "query: text — the Query",
+        enabled: has_queries,
+        run: Run::Edit(query::use_first_row_as_headers),
+    },
+    Command {
+        id: "transform.changeType",
+        label: "Data Type",
+        ribbon: "Transform > Any Column",
+        shortcut: None,
+        params: "query: text — the Query\n\
+                 columns: list of text — the columns to change\n\
+                 type: text — text, decimal, whole, date, datetime or boolean",
+        enabled: has_queries,
+        run: Run::Edit(query::change_type),
+    },
+    Command {
+        id: "transform.renameColumn",
+        label: "Rename",
+        ribbon: "Transform > Any Column",
+        shortcut: Some("F2"),
+        params: "query: text — the Query\n\
+                 column: text — the column to rename\n\
+                 name: text — its new name, unique in the table",
+        enabled: has_queries,
+        run: Run::Edit(query::rename_column),
+    },
+    Command {
+        id: "home.removeColumns",
+        label: "Remove Columns",
+        ribbon: "Home > Manage Columns",
+        shortcut: Some("Delete"),
+        params: "query: text — the Query\n\
+                 columns: list of text — the columns to remove (at least one must remain)",
+        enabled: has_queries,
+        run: Run::Edit(query::remove_columns),
+    },
+    Command {
+        id: "transform.reorderColumns",
+        label: "Move",
+        ribbon: "Transform > Any Column",
+        shortcut: None,
+        params: "query: text — the Query\n\
+                 columns: list of text — these columns, in this order, fill the positions they \
+                 hold; the others stay put",
+        enabled: has_queries,
+        run: Run::Edit(query::reorder_columns),
+    },
+    Command {
+        id: "query.deleteStep",
+        label: "Delete",
+        ribbon: "",
+        shortcut: None,
+        params: "query: text — the Query\n\
+                 step: integer — the step's position in Applied Steps, 0 = first",
+        enabled: has_queries,
+        run: Run::Edit(query::delete_step),
     },
 ];

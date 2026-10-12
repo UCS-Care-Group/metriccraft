@@ -1,15 +1,17 @@
 use std::collections::VecDeque;
 
-use opendash_data::Table;
+use opendash_data::{Query, Table};
 use serde_json::Value;
 
 use crate::{COMMANDS, Command, Error, Result, Run};
 
-/// Everything that is saved and undoable. Filled in by later milestones (queries, model, report).
+/// Everything that is saved and undoable. Filled in by later milestones (model, report).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
     /// Loaded data. Columns are shared, never copied, so cloning a Document for undo is cheap.
     pub tables: Vec<Table>,
+    /// Queries; each one's result is the table of the same name in `tables`.
+    pub queries: Vec<Query>,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,
@@ -51,6 +53,14 @@ impl App {
 
     pub fn document(&self) -> &Document {
         &self.doc
+    }
+
+    /// Starts from `doc` (tests, until files and Get Data exist), with an empty undo history.
+    pub fn with_document(doc: Document) -> Self {
+        Self {
+            doc,
+            ..Self::default()
+        }
     }
 
     pub fn commands(&self) -> &'static [Command] {
