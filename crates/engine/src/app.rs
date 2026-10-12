@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use opendash_data::{Preview, Query, Table};
 use serde_json::Value;
@@ -12,6 +12,9 @@ pub struct Document {
     pub tables: Vec<Table>,
     /// Queries; each one's result is the table of the same name in `tables`.
     pub queries: Vec<Query>,
+    /// Queries edited since their table loaded (Stale, CONTEXT.md): the table is still the
+    /// previous result until Close & Apply or Refresh.
+    pub stale: BTreeSet<String>,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,

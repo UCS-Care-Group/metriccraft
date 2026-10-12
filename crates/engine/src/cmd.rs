@@ -76,8 +76,17 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_queries,
         run: Run::App(load::refresh),
     },
+    Command {
+        id: "home.closeApply",
+        label: "Close & Apply",
+        ribbon: "Power Query Editor: Home > Close",
+        shortcut: None,
+        params: "",
+        enabled: load::has_stale,
+        run: Run::App(load::close_apply),
+    },
     // Applied Steps (spec Q-1), with the Power Query Editor's ribbon names. Each appends a step to
-    // `query` and re-runs it, replacing the Query's loaded table.
+    // `query`, checks it on the Preview rows and marks the table Stale until Close & Apply.
     Command {
         id: "transform.useFirstRowAsHeaders",
         label: "Use First Row as Headers",

@@ -1,15 +1,20 @@
-//! Get Data, Refresh and Preview (spec S-1, S-2, Q-2).
+//! Get Data, Close & Apply, Refresh and Preview (spec S-1, S-2, Q-2): Power Query's edit model.
 //!
-//! - **Get Data** connects to a file: a Query with its automatic steps, loaded as a table.
-//! - **Refresh** re-runs every Query from its Source in full. All-or-nothing: the new tables are
-//!   built beside the old ones (≈ 2× memory briefly, ADR 0005) and replace them only if every
-//!   Query succeeds; otherwise nothing changes and the error names the Query.
-//! - **Preview** is derived (first 1,000 Source rows at a step) and not part of the Document.
+//! - **Get Data** connects to a file: a Query with its automatic steps, loaded as a table at
+//!   once (Power BI's "Load").
+//! - **Editing** a Query (every Applied Step command, delete, filter, merge) changes only the
+//!   Query: its steps are checked on the Preview rows, the Source is not re-read, and its table
+//!   stays as it was, marked **Stale** (`Document::stale`).
+//! - **Preview** is how edits are seen: derived (first 1,000 Source rows at a step), not part of
+//!   the Document.
+//! - **Close & Apply** loads every Stale Query, and every Query that merges one (transitively).
+//! - **Refresh** re-runs every Query from its Source in full and clears every Stale flag.
 //!
-//! Both commands are undoable edits: undo puts back the previous tables with the previous steps,
-//! so the Document never mixes a Query's steps with data from other steps. Editing a step (the
-//! Applied Step commands) also re-reads the Query's Source, so a loaded table is always its
-//! Query's result; there is no Stale table until Data caches exist (M2.4).
+//! Loading is all-or-nothing: the new tables are built beside the old ones (≈ 2× memory
+//! briefly, ADR 0005) and replace them only if every Query succeeds; otherwise nothing changes
+//! and the error names the Query. Queries a Query merges load first. Every command here is an
+//! undoable edit (undoing a refresh is something Power BI can't do): undo puts back the previous
+//! tables, steps and Stale flags together.
 
 use std::path::Path;
 
@@ -112,35 +117,72 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
 }
 
 pub(crate) fn refresh(app: &mut App, _params: &Value) -> Result {
+    app.edit_loading(|doc| load(doc, |_| true))
+}
+
+/// Whether Close & Apply has anything to load.
+pub(crate) fn has_stale(app: &App) -> bool {
+    !app.document().stale.is_empty()
+}
+
+/// Close & Apply: loads every Stale Query, and every Query that merges one (transitively).
+pub(crate) fn close_apply(app: &mut App, _params: &Value) -> Result {
     app.edit_loading(|doc| {
-        let cap = default_memory_cap();
-        let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
-        let mut report = LoadReport::default();
-        for query in merged_first(&doc.queries) {
-            // The new tables together must fit the cap; the old ones are held beside them.
-            let limit = cap.saturating_sub(loaded(&fresh));
-            let (table, cell_errors) =
-                query
-                    .run_with(&doc.queries, limit)
-                    .map_err(|error| Error::Refresh {
-                        query: query.name.clone(),
-                        error,
-                    })?;
-            report.tables.push(Loaded {
-                table: table.name().into(),
-                rows: table.rows(),
-                cell_errors,
-            });
-            fresh.push(table);
-        }
-        for table in fresh {
-            match doc.tables.iter_mut().find(|t| t.name() == table.name()) {
-                Some(t) => *t = table,
-                None => doc.tables.push(table),
+        let mut names: Vec<String> = doc.stale.iter().cloned().collect();
+        // Each pass adds at least one Query or stops, so this ends within `queries.len()` passes.
+        loop {
+            let more: Vec<String> = doc
+                .queries
+                .iter()
+                .filter(|q| !names.contains(&q.name) && names.iter().any(|n| q.merges(n)))
+                .map(|q| q.name.clone())
+                .collect();
+            if more.is_empty() {
+                break;
             }
+            names.extend(more);
         }
-        Ok(report)
+        load(doc, |q| names.contains(&q.name))
     })
+}
+
+/// Re-runs the Queries `pick` selects, from their Sources, and replaces their tables;
+/// all-or-nothing (the caller runs on a copy of the Document). Clears their Stale flags.
+fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool) -> Result<LoadReport> {
+    let kept: usize = doc
+        .tables
+        .iter()
+        .filter(|t| !doc.queries.iter().any(|q| q.name == t.name() && pick(q)))
+        .map(Table::memory)
+        .sum();
+    let cap = default_memory_cap().saturating_sub(kept);
+    let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
+    let mut report = LoadReport::default();
+    for query in merged_first(&doc.queries).into_iter().filter(|q| pick(q)) {
+        // The new tables together must fit the cap; the old ones are held beside them.
+        let limit = cap.saturating_sub(loaded(&fresh));
+        let (table, cell_errors) =
+            query
+                .run_with(&doc.queries, limit)
+                .map_err(|error| Error::Refresh {
+                    query: query.name.clone(),
+                    error,
+                })?;
+        report.tables.push(Loaded {
+            table: table.name().into(),
+            rows: table.rows(),
+            cell_errors,
+        });
+        fresh.push(table);
+    }
+    for table in fresh {
+        doc.stale.remove(table.name());
+        match doc.tables.iter_mut().find(|t| t.name() == table.name()) {
+            Some(t) => *t = table,
+            None => doc.tables.push(table),
+        }
+    }
+    Ok(report)
 }
 
 /// The Preview of Query `query` at Applied Step `step` (0 = first), or of its Source (`None`).
@@ -436,26 +478,69 @@ mod tests {
     }
 
     #[test]
-    fn step_edits_re_read_the_source() {
+    fn edits_mark_stale_and_close_apply_loads_only_stale_queries() {
         let dir = Dir::new();
         let mut app = two_queries(&dir);
+        assert_eq!(
+            app.run("home.closeApply", &Value::Null),
+            Err(Error::Disabled("home.closeApply".into())),
+            "nothing Stale"
+        );
+        // Both files change; only Sales is edited.
         dir.write("Sales.csv", "Region,Qty\nNorth,3\n");
+        dir.write("Stock.csv", "Item,Units\nPen,10\nInk,2\n");
+        let loaded = app.document().clone();
         app.run(
             "transform.renameColumn",
             &json!({"query": "Sales", "column": "Qty", "name": "Quantity"}),
         )
         .unwrap();
+        let doc = app.document();
+        assert_eq!(doc.tables, loaded.tables, "the edit doesn't load");
+        assert_eq!(doc.stale.iter().collect::<Vec<_>>(), ["Sales"]);
+        let p = app.preview("Sales", Some(2)).unwrap();
         assert_eq!(
-            app.document().tables[0].rows(),
-            1,
-            "the edit re-read the file"
+            p.batch.schema().field(1).name(),
+            "Quantity",
+            "seen in Preview"
         );
+        let edited = app.document().clone();
+        app.run("home.closeApply", &Value::Null).unwrap();
+        let doc = app.document();
+        assert_eq!(doc.tables[0].rows(), 1, "Sales re-read");
+        assert_eq!(doc.tables[1], loaded.tables[1], "Stock not loaded");
+        assert!(doc.stale.is_empty());
+        assert_eq!(app.last_load().unwrap().tables.len(), 1);
+        // Undo restores the old data and the Stale flag.
         app.run("edit.undo", &Value::Null).unwrap();
-        assert_eq!(
-            app.document().tables[0].rows(),
-            2,
-            "undo restores the data too"
+        assert_eq!(app.document(), &edited);
+        // Refresh loads everything and clears Stale; undo restores both.
+        app.run("home.refresh", &Value::Null).unwrap();
+        let doc = app.document();
+        assert_eq!((doc.tables[0].rows(), doc.tables[1].rows()), (1, 2));
+        assert!(doc.stale.is_empty());
+        app.run("edit.undo", &Value::Null).unwrap();
+        assert_eq!(app.document(), &edited);
+    }
+
+    #[test]
+    fn a_failing_close_apply_changes_nothing_and_names_the_query() {
+        let dir = Dir::new();
+        let mut app = two_queries(&dir);
+        app.run(
+            "transform.renameColumn",
+            &json!({"query": "Stock", "column": "Units", "name": "Count"}),
+        )
+        .unwrap();
+        // The file loses the column after the edit was checked.
+        dir.write("Stock.csv", "Item,Qty\nPen,10\n");
+        let before = app.document().clone();
+        let e = app.run("home.closeApply", &Value::Null).unwrap_err();
+        assert!(
+            matches!(&e, Error::Refresh { query, .. } if query == "Stock"),
+            "{e:?}"
         );
+        assert_eq!(app.document(), &before);
     }
 
     #[test]

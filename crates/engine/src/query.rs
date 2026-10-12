@@ -1,9 +1,7 @@
-//! Applied Step commands (spec Q-1). Each appends a step to a Query (or deletes one) and re-runs
-//! the Query, replacing its loaded table. All are [`Run::Edit`](crate::Run::Edit), so undo
-//! restores the steps and the table together, and a step that can't run changes nothing.
-//!
-//! The re-run reads the Query's Source again (see `load.rs`: Preview and Refresh live there).
-//! Open point: M1.7 prints each step as M.
+//! Applied Step commands (spec Q-1). Each appends a step to a Query (or deletes one), checks it
+//! on the Preview rows and marks the Query's table Stale; the table loads on Close & Apply or
+//! Refresh (see `load.rs`). All are [`Run::Edit`](crate::Run::Edit), so undo restores the steps
+//! and the Stale flags together, and a step that can't run changes nothing.
 
 use arrow_schema::DataType;
 use opendash_data::step::{
@@ -141,13 +139,16 @@ fn condition(doc: &Document, q: usize, c: &Value) -> Result<Condition> {
         other => return Err(invalid(ID, format!("unknown op `{other}`"))),
     };
     let query = doc.queries.get(q);
-    let ty = query
-        .and_then(|query| doc.tables.iter().find(|t| t.name() == query.name))
-        .and_then(|t| {
-            let schema = t.batch().schema();
-            let f = schema.field_with_name(&column).ok()?;
-            Some(f.data_type().clone())
-        });
+    // The column's type after the Query's steps so far (its table may be Stale).
+    let ty = query.and_then(|query| {
+        let step = query.steps.len().checked_sub(1);
+        let preview = query
+            .preview_with(&doc.queries, step, default_memory_cap())
+            .ok()?;
+        let schema = preview.batch.schema();
+        let f = schema.field_with_name(&column).ok()?;
+        Some(f.data_type().clone())
+    });
     let bad = |what: &str| invalid(ID, format!("`{column}`: {what}"));
     let value = match c.get("value") {
         None => return Err(bad("`value` is required (null for is null)")),
@@ -239,49 +240,25 @@ pub(crate) fn merge_queries(doc: &mut Document, params: &Value) -> Result {
     add_step(doc, ID, params, |_| Ok(Step::MergedQueries(merge)))
 }
 
-/// Re-runs Query `q`, and every Query that merges it (directly or not), replacing (or adding)
-/// their tables. A step that fails is an [`Error::InvalidParams`]: the edit asked for something
-/// the data doesn't allow.
+/// After an edit to Query `q`: checks its steps run on the Preview rows (a step that can't run
+/// is an [`Error::InvalidParams`]: the edit asked for something the data doesn't allow), then
+/// marks its table Stale. The table itself is not reloaded until Close & Apply or Refresh.
+/// A Source that can't be read doesn't stop the edit (as in Power Query, editing works offline).
 fn reload(doc: &mut Document, q: usize, id: &str) -> Result {
-    let first = doc
+    let query = doc
         .queries
         .get(q)
         .ok_or_else(|| invalid(id, "no such query".into()))?;
-    let mut affected = vec![first.name.clone()];
-    // Each pass adds at least one Query or stops, so this ends within `queries.len()` passes.
-    loop {
-        let more: Vec<String> = doc
-            .queries
-            .iter()
-            .filter(|q| !affected.contains(&q.name) && affected.iter().any(|a| q.merges(a)))
-            .map(|q| q.name.clone())
-            .collect();
-        if more.is_empty() {
-            break;
-        }
-        affected.extend(more);
-    }
-    for name in affected {
-        let Some(query) = doc.queries.iter().find(|q| q.name == name) else {
-            continue;
-        };
-        let others: usize = doc
-            .tables
-            .iter()
-            .filter(|t| t.name() != name)
-            .map(Table::memory)
-            .sum();
-        let (table, _cell_errors) = query
-            .run_with(&doc.queries, default_memory_cap().saturating_sub(others))
-            .map_err(|e| match e {
-                opendash_data::Error::Step { .. } => invalid(id, e.to_string()),
-                e => Error::Data(e),
-            })?;
-        match doc.tables.iter_mut().find(|t| t.name() == table.name()) {
-            Some(t) => *t = table,
-            None => doc.tables.push(table),
+    if let Some(last) = query.steps.len().checked_sub(1) {
+        let limit = default_memory_cap().saturating_sub(doc.tables.iter().map(Table::memory).sum());
+        if let Err(e @ opendash_data::Error::Step { .. }) =
+            query.preview_with(&doc.queries, Some(last), limit)
+        {
+            return Err(invalid(id, e.to_string()));
         }
     }
+    let name = query.name.clone();
+    doc.stale.insert(name);
     Ok(())
 }
 
@@ -362,11 +339,17 @@ mod tests {
         }
     }
 
+    /// `doc()` with headers promoted and applied.
     fn headed() -> App {
         let mut app = App::with_document(doc());
         app.run("transform.useFirstRowAsHeaders", &json!({"query": "Sales"}))
             .unwrap();
+        apply(&mut app);
         app
+    }
+
+    fn apply(app: &mut App) {
+        app.run("home.closeApply", &Value::Null).unwrap();
     }
 
     fn columns(app: &App) -> Vec<String> {
@@ -375,14 +358,24 @@ mod tests {
         schema.fields().iter().map(|f| f.name().clone()).collect()
     }
 
-    /// Runs `id`, checks the table is the Query's result, then that undo restores everything.
+    /// Runs `id`: the table stays as it was, marked Stale; Close & Apply loads the Query's result
+    /// and clears Stale; undoing both restores everything.
     fn runs_and_undoes(app: &mut App, id: &str, params: Value) {
         let before = app.document().clone();
         app.run(id, &params).unwrap();
         let doc = app.document();
+        assert_eq!(doc.tables, before.tables, "{id}: the table is unchanged");
+        assert!(doc.stale.contains("Sales"), "{id}: Stale");
+        apply(app);
+        let doc = app.document();
         let (want, _) = doc.queries[0].run(usize::MAX).unwrap();
         assert_eq!(doc.tables, [want], "{id}: the table is the Query's result");
-        assert_eq!(doc.tables.len(), 1);
+        assert!(doc.stale.is_empty());
+        app.run("edit.undo", &Value::Null).unwrap();
+        assert!(
+            app.document().stale.contains("Sales"),
+            "{id}: undo restores Stale"
+        );
         app.run("edit.undo", &Value::Null).unwrap();
         assert_eq!(app.document(), &before, "{id}: undo restores");
     }
@@ -446,6 +439,12 @@ mod tests {
         ] {
             app.run(id, &params).unwrap();
         }
+        assert_eq!(
+            columns(&app),
+            ["Region", "Qty", "Price"],
+            "Stale until applied"
+        );
+        apply(&mut app);
         assert_eq!(columns(&app), ["Price", "Quantity"]);
         let t = &app.document().tables[0];
         assert_eq!(t.rows(), 2);
@@ -562,6 +561,7 @@ mod tests {
             ]}),
         )
         .unwrap();
+        apply(&mut app);
         assert_eq!(app.document().tables[0].rows(), 1);
     }
 
@@ -612,6 +612,7 @@ mod tests {
             &json!({"query": "Targets"}),
         )
         .unwrap();
+        apply(&mut app);
         app
     }
 
@@ -624,6 +625,7 @@ mod tests {
         let mut app = two();
         let before = app.document().clone();
         app.run("home.mergeQueries", &merge_params()).unwrap();
+        apply(&mut app);
         assert_eq!(
             columns(&app),
             ["Region", "Qty", "Price", "Targets.Region", "Targets.Target"]
@@ -631,9 +633,9 @@ mod tests {
         assert_eq!(
             app.document().tables[0].rows(),
             3,
-            "North × 2 + unmatched null"
+            "North × 2 + unmatched blank"
         );
-        // Editing Targets re-runs Sales, which merges it.
+        // Editing Targets makes it Stale; Close & Apply also reloads Sales, which merges it.
         app.run(
             "transform.filterRows",
             &json!({"query": "Targets", "conditions": [
@@ -641,9 +643,14 @@ mod tests {
             ]}),
         )
         .unwrap();
+        assert_eq!(app.document().tables[0].rows(), 3);
+        assert_eq!(app.document().stale.iter().collect::<Vec<_>>(), ["Targets"]);
+        apply(&mut app);
         assert_eq!(app.document().tables[0].rows(), 2);
-        app.run("edit.undo", &Value::Null).unwrap();
-        app.run("edit.undo", &Value::Null).unwrap();
+        assert_eq!(app.document().tables[1].rows(), 1);
+        for _ in 0..4 {
+            app.run("edit.undo", &Value::Null).unwrap();
+        }
         assert_eq!(app.document(), &before);
 
         let mut p = merge_params();
@@ -654,6 +661,7 @@ mod tests {
                 .clone(),
         );
         app.run("home.mergeQueries", &p).unwrap();
+        apply(&mut app);
         assert_eq!(columns(&app), ["Region", "Qty", "Price", "Target"]);
         assert_eq!(app.document().tables[0].rows(), 2);
         let Some(Step::MergedQueries(m)) = app.document().queries[0].steps.last() else {

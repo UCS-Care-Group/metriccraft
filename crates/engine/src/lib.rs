@@ -23,7 +23,7 @@ pub enum Error {
     InvalidParams { command: String, message: String },
     /// The data layer failed (e.g. a Query's result would exceed the memory cap).
     Data(opendash_data::Error),
-    /// Refresh stopped at this Query; nothing was changed.
+    /// Refresh (or Close & Apply) stopped at this Query; nothing was changed.
     Refresh {
         query: String,
         error: opendash_data::Error,
@@ -44,7 +44,7 @@ impl std::fmt::Display for Error {
             Self::Refresh { query, error } => {
                 write!(
                     f,
-                    "refresh failed at query `{query}` (no data was changed): {error}"
+                    "loading query `{query}` failed (no data was changed): {error}"
                 )
             }
             Self::UnknownQuery(name) => write!(f, "there is no query `{name}`"),
