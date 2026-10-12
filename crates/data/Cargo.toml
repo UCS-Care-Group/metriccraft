@@ -21,6 +21,10 @@ bytes.workspace = true
 parquet.workspace = true
 csv.workspace = true
 encoding_rs.workspace = true
+calamine.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
+[dev-dependencies]
+rust_xlsxwriter = "0.99"
