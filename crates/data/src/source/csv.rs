@@ -742,8 +742,11 @@ mod tests {
         assert!(matches!(e, Err(Error::MemoryCap { .. })), "{:?}", e.err());
     }
 
+    /// Every byte × 4 flips and every cut, then random edits. Soak with `ODASH_FUZZ_SCALE` /
+    /// `ODASH_FUZZ_SEED` (see `crate::fuzz`): the random edits get `scale` times more.
     #[test]
     fn damaged_bytes_never_panic() {
+        let mut fuzz = crate::fuzz::Fuzz::new("csv-bytes", 0x9E37_79B9_7F4A_7C15);
         let good = "Name;Qty;When;Flag\n\"a;\"\"b\"\"\";1;2026-03-04;true\nc;-2,5;04/03/2026;\n\
                     \u{e9}t\u{e9};;;FALSE\n"
             .repeat(3)
@@ -752,9 +755,127 @@ mod tests {
             for flip in [0x01, 0x22, 0x80, 0xFF] {
                 let mut v = good.clone();
                 v[i] ^= flip;
-                let _ = run(&v, "en-US");
+                fuzz.case(&v, || drop(run(&v, "en-US")));
             }
-            let _ = run(&good[..i], "de-DE");
+            fuzz.case(&good[..i], || drop(run(&good[..i], "de-DE")));
         }
+        for _ in 0..fuzz.scaled(500) {
+            let mut v = good.clone();
+            for _ in 0..fuzz.below(6) + 1 {
+                let i = fuzz.below(v.len());
+                v[i] = fuzz.next() as u8;
+            }
+            fuzz.case(&v, || drop(run(&v, "en-US")));
+        }
+        fuzz.finish();
+    }
+
+    /// Generated CSV across delimiters, quoting, line ends, encodings and cultures, then
+    /// mutated (bytes deleted, inserted, swapped). 400 cases a run; soak with
+    /// `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).
+    #[test]
+    fn mutated_csv_never_panics() {
+        let mut fuzz = crate::fuzz::Fuzz::new("csv-mutated", 0x2545_F491_4F6C_DD1D);
+        let fields = [
+            "",
+            "x",
+            "North",
+            "1",
+            "-2",
+            "2,5",
+            "1.234,5",
+            "1,234.5",
+            "1e308",
+            "-0",
+            "NaN",
+            "9223372036854775808",
+            "2026-03-04",
+            "04/03/2026",
+            "31.12.1999",
+            "29/02/2001",
+            "3/4/2026 1:00 PM",
+            "2026-03-04T10:11:12.123",
+            "true",
+            "FALSE",
+            "caf\u{e9}",
+            "\u{1F600}",
+            "\"q\"",
+            "\"a,b;c\td|e\"",
+            "\"multi\nline\"",
+            "\"say \"\"hi\"\"\"",
+            "\"",
+            "\"\"\"",
+            "#(lf)",
+            "\u{0}",
+        ];
+        let specials = b",;\t|\"\r\n\x00\xFF\xFE\xEF\xBB\xBF\\ ";
+        let cultures = ["en-US", "en-GB", "de-DE", "fr-FR"];
+        for _ in 0..fuzz.scaled(400) {
+            let delim = [",", ";", "\t", "|"][fuzz.below(4)];
+            let eol = ["\n", "\r\n", "\r"][fuzz.below(3)];
+            let width = fuzz.below(6) + 1;
+            let mut text = String::new();
+            for _ in 0..fuzz.below(12) {
+                // Mostly rectangular, sometimes ragged.
+                let w = if fuzz.below(5) == 0 {
+                    fuzz.below(8)
+                } else {
+                    width
+                };
+                let row: Vec<&str> = (0..w).map(|_| fields[fuzz.below(fields.len())]).collect();
+                text.push_str(&row.join(delim));
+                text.push_str(eol);
+            }
+            let mut bytes = match fuzz.below(5) {
+                0 => [&[0xEF, 0xBB, 0xBF][..], text.as_bytes()].concat(),
+                1 | 2 => {
+                    let be = fuzz.below(2) == 0;
+                    let mut v = if be {
+                        vec![0xFE, 0xFF]
+                    } else {
+                        vec![0xFF, 0xFE]
+                    };
+                    for u in text.encode_utf16() {
+                        v.extend(if be { u.to_be_bytes() } else { u.to_le_bytes() });
+                    }
+                    v
+                }
+                3 => WINDOWS_1252.encode(&text).0.into_owned(),
+                _ => text.into_bytes(),
+            };
+            for _ in 0..fuzz.below(5) {
+                let at = fuzz.below(bytes.len() + 1);
+                match fuzz.below(3) {
+                    0 if at < bytes.len() => drop(bytes.remove(at)),
+                    1 => bytes.insert(at, specials[fuzz.below(specials.len())]),
+                    _ => {
+                        let other = fuzz.below(bytes.len());
+                        if at < bytes.len() && other < bytes.len() {
+                            bytes.swap(at, other);
+                        }
+                    }
+                }
+            }
+            let options = Options {
+                delimiter: (fuzz.below(4) == 0).then(|| b",;\t|"[fuzz.below(4)]),
+                encoding: (fuzz.below(4) == 0).then(|| {
+                    [
+                        UTF_8,
+                        encoding_rs::UTF_16LE,
+                        encoding_rs::UTF_16BE,
+                        WINDOWS_1252,
+                    ][fuzz.below(4)]
+                }),
+            };
+            let culture = culture(cultures[fuzz.below(cultures.len())]);
+            let limit = match fuzz.below(8) {
+                0 => fuzz.below(4096),
+                _ => usize::MAX,
+            };
+            fuzz.case(&bytes, || {
+                drop(connect("T", &bytes, options, culture, limit))
+            });
+        }
+        fuzz.finish();
     }
 }

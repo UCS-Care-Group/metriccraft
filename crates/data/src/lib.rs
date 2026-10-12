@@ -4,6 +4,9 @@
 
 mod cell;
 pub mod culture;
+#[cfg(test)]
+#[path = "../../m/src/fuzz.rs"]
+mod fuzz;
 pub mod m;
 mod merge;
 mod preview;
