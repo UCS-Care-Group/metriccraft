@@ -115,8 +115,9 @@ impl App {
     }
 
     pub fn command(&self, id: &str) -> Option<&'static Command> {
-        // ponytail: linear scan, ~1.5 ns per command (bench engine/dispatch_unknown). Switch to a
-        // sorted slice + binary search once the ribbon has hundreds of commands.
+        // ponytail: linear scan; `==` rejects on length first, ~1 ns per command (bench
+        // engine/dispatch_unknown). Binary search measured slower at 36 commands (shared
+        // `modeling.` prefixes); use a HashMap once the ribbon has hundreds.
         self.commands.iter().find(|c| c.id == id)
     }
 
