@@ -2,6 +2,7 @@
 //!
 //! Layer L2 — see `docs/plan/0001-mvp.md` §1.
 
+pub mod source;
 mod table;
 
 pub use table::{Table, TableBuilder, default_memory_cap};
@@ -13,6 +14,8 @@ pub enum Error {
     MemoryCap { table: String, limit: usize },
     /// Arrow rejected the data (mismatched batch, too many distinct values…).
     Arrow { table: String, message: String },
+    /// A Source could not be read (bad file, wrong format, unsupported feature…).
+    Source { source: String, message: String },
 }
 
 impl std::fmt::Display for Error {
@@ -24,6 +27,7 @@ impl std::fmt::Display for Error {
                 limit / (1 << 20)
             ),
             Self::Arrow { table, message } => write!(f, "`{table}`: {message}"),
+            Self::Source { source, message } => write!(f, "{source}: {message}"),
         }
     }
 }
