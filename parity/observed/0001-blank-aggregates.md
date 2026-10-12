@@ -75,5 +75,4 @@ Notes: No errors. The DAX query view grid shows numbers rounded to 2 decimal pla
 shows 2.42, while ×1e9 shows 2416666666.67, so the stored value is full precision (14.5 / 6).
 
 OneSlashZero shows an empty cell, although public DAX docs say `/` by zero returns Infinity.
-Open question for a follow-up case: is the value BLANK, or is Infinity displayed as empty by the
-grid? Distinguish with `ISBLANK(1 / 0)` and `1 / 0 > 1000000`.
+Resolved by case 0002: it is Infinity, displayed as an empty cell by the grid.
