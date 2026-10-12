@@ -109,11 +109,20 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
     if covers.is_empty() {
         return Err("missing `Covers:` line".into());
     }
+    let query = query.ok_or("missing ```dax block under ## Query")?;
+    // A case awaiting observation has no Observed block yet, so no Checks.
+    let Some(observed) = observed else {
+        return Ok(Case {
+            id: id.into(),
+            covers,
+            tables,
+            query,
+            observed: Table::default(),
+        });
+    };
     if !versioned {
         return Err("missing `Power BI Desktop version:` line".into());
     }
-    let query = query.ok_or("missing ```dax block under ## Query")?;
-    let observed = observed.ok_or("missing ```tsv block under ## Observed")?;
     if observed.rows.is_empty() {
         return Err("observed result has no rows".into());
     }
@@ -217,8 +226,8 @@ pub struct Report {
     pub stale: Vec<String>,
 }
 
-/// Runs every case under `root/observed/` against `root/passing.txt`.
-pub fn run(root: &Path) -> Result<Report> {
+/// Parses every case under `root/observed/`, in file order.
+pub fn cases(root: &Path) -> Result<Vec<Case>> {
     let dir = root.join("observed");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .map_err(|e| format!("{}: {e}", dir.display()))?
@@ -226,6 +235,22 @@ pub fn run(root: &Path) -> Result<Report> {
         .filter(|p| p.extension().is_some_and(|x| x == "md"))
         .collect();
     files.sort();
+    files
+        .iter()
+        .map(|path| {
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            let text =
+                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            parse(id, &text).map_err(|e| format!("{}: {e}", path.display()))
+        })
+        .collect()
+}
+
+/// Runs every case under `root/observed/` against `root/passing.txt`.
+pub fn run(root: &Path) -> Result<Report> {
     let passing = std::fs::read_to_string(root.join("passing.txt")).unwrap_or_default();
     let mut listed: BTreeSet<&str> = passing
         .lines()
@@ -234,15 +259,8 @@ pub fn run(root: &Path) -> Result<Report> {
         .collect();
 
     let mut checks = Vec::new();
-    for path in files {
-        let id = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        let text =
-            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let case = parse(&id, &text).map_err(|e| format!("{}: {e}", path.display()))?;
+    for case in cases(root)? {
+        let id = case.id.clone();
         let result = evaluate(&case);
         for name in &case.observed.columns {
             let expected = case.observed.column(name);
@@ -331,6 +349,12 @@ mod tests {
         assert_eq!(c.tables[0].rows[1], ["y", ""]);
         assert_eq!(c.observed.columns, ["S", "E"]);
         assert_eq!(c.observed.rows, [["1.5", ""]]);
+    }
+
+    #[test]
+    fn case_awaiting_observation_has_no_checks() {
+        let i = CASE.find("## Observed").unwrap();
+        assert!(parse("x", &CASE[..i]).unwrap().observed.columns.is_empty());
     }
 
     #[test]

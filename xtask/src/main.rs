@@ -1,7 +1,7 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
 //! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
-//! `bench [--save]`, `parity [--update]`.
+//! `bench [--save]`, `parity [--update | --export]`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         "assets" => assets(),
         "wasm" => wasm(),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
+        "parity" if std::env::args().any(|a| a == "--export") => parity_export(),
         "parity" => parity(std::env::args().any(|a| a == "--update")),
         _ => {
             Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]>".into())
@@ -378,6 +379,28 @@ fn parity(update: bool) -> Result {
         return Ok(());
     }
     report(run.problems())
+}
+
+/// Writes each case's datasets and query as plain CRLF files into the gitignored
+/// `observations/cases/`, ready to copy from Notepad in the Windows VM.
+fn parity_export() -> Result {
+    let out = Path::new("observations/cases");
+    std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
+    let crlf = |lines: Vec<String>| (lines.join("\n") + "\n").replace('\n', "\r\n");
+    for case in opendash_model::parity::cases(Path::new("parity"))? {
+        let mut files = vec![(format!("{}.dax", case.id), crlf(vec![case.query.clone()]))];
+        for t in &case.tables {
+            let mut lines = vec![t.columns.join("\t")];
+            lines.extend(t.rows.iter().map(|r| r.join("\t")));
+            files.push((format!("{}.{}.tsv", case.id, t.name), crlf(lines)));
+        }
+        for (name, body) in files {
+            let path = out.join(&name);
+            std::fs::write(&path, body).map_err(|e| format!("writing {}: {e}", path.display()))?;
+            eprintln!("  {}", path.display());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

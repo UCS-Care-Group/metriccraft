@@ -23,6 +23,8 @@ is ADR 0004: one markdown file per case in `parity/observed/`.
 
 ## Running a case
 
+0. **Get the copyable files.** On the host, `cargo xtask parity --export` writes each case's
+   query (`.dax`) and datasets (`.<Table>.tsv`) to `observations/cases/` (CRLF, for Notepad).
 1. **New report.** File → New. One case per report; don't reuse models between cases.
 2. **Load the dataset.** Home → Enter data. Paste the case's table (tab-separated, header row),
    name the table as the case says, then *Edit* (Power Query) and set each column's type as the
