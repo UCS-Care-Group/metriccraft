@@ -282,7 +282,8 @@ impl Source {
             Self::Excel { kind, .. } => *kind == ExcelKind::Sheet,
         };
         let mut steps = Vec::with_capacity(2);
-        let below = sample.slice(1, sample.num_rows().saturating_sub(1));
+        // `slice` panics past the end: a zero-row sample (an empty sheet) has nothing below.
+        let below = sample.slice(sample.num_rows().min(1), sample.num_rows().saturating_sub(1));
         let mut batch = sample.slice(0, sample.num_rows().min(SAMPLE_ROWS));
         if headerless
             && sample.num_rows() > 1
@@ -524,6 +525,33 @@ mod tests {
             .column(1)
             .as_primitive::<arrow_array::types::Float64Type>();
         assert_eq!((qty.value(0), errors), (1.5, 0));
+    }
+
+    #[test]
+    fn an_empty_sheet_connects_without_panicking() {
+        let mut book = rust_xlsxwriter::Workbook::new();
+        book.add_worksheet().set_name("Empty").unwrap();
+        let file = File::Bytes {
+            name: "e.xlsx".into(),
+            bytes: Bytes::from(book.save_to_buffer().unwrap()),
+        };
+        let source = Source::Excel {
+            file,
+            item: "Empty".into(),
+            kind: ExcelKind::Sheet,
+        };
+        // Ok (no rows) or a clear error are both fine; a panic fails the test.
+        if let Ok(q) = crate::Query::connect("E", source.clone(), culture(), usize::MAX) {
+            let _ = q.preview(None, usize::MAX);
+            let _ = q.run(usize::MAX);
+        }
+        // `detect` on a zero-row sample, whichever Source gave it.
+        let empty = RecordBatch::new_empty(std::sync::Arc::new(arrow_schema::Schema::new(vec![
+            arrow_schema::Field::new("Column1", arrow_schema::DataType::Utf8, true),
+        ])));
+        for s in [source, csv_source("a,b\n")] {
+            assert!(s.detect(&empty, culture()).is_ok());
+        }
     }
 
     #[test]
