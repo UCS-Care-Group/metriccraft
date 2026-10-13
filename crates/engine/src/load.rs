@@ -13,6 +13,11 @@
 //!   Query and remove its Table; a Query that merges it still runs it, within the load.
 //!   Toggling it marks the Query Stale, as editing does: the Table goes (or comes) at the next
 //!   Close & Apply, as in Power BI.
+//! - Each loaded Table's text is folded first (`opendash_data::fold_case`, ADR 0006): values
+//!   differing only by case become one, spelled as the first row has it, so sort by,
+//!   Relationships and DAX see the folded values. Power Query doesn't: a Query's merges within
+//!   the load use the unfolded results, and a Preview never merges against a folded Table
+//!   ([`fresh`]).
 //! - Every loaded Table's model is updated after the load (`opendash_model::ModelTable::load`):
 //!   column properties carried over by name, type overrides re-applied, sort by checked. A
 //!   failure there fails the whole load.
@@ -43,7 +48,7 @@ use std::path::Path;
 
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
-use opendash_data::{Pass, Preview, Query, Table};
+use opendash_data::{Pass, Preview, Query, Table, fold_case};
 use opendash_file::cache::{Provenance, now_ms};
 use opendash_model::{ModelTable, Relationship};
 use serde_json::Value;
@@ -136,6 +141,8 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         let provenance = Provenance::of(std::slice::from_ref(&query), &name, now_ms());
         let (table, cell_errors) = query.run(limit).map_err(Error::Data)?;
         let limit = limit.saturating_sub(table.memory());
+        let (table, extra) = fold(table, limit)?;
+        let limit = limit.saturating_sub(extra);
         let (model, table) =
             ModelTable::load(None, table, query.culture, limit).map_err(Error::Model)?;
         let mut report = LoadReport {
@@ -225,6 +232,8 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
         })?;
         // Type overrides convert columns beside the pass's results.
         used = used.saturating_add(table.memory());
+        let (table, extra) = fold(table, limit.saturating_sub(used))?;
+        used = used.saturating_add(extra);
         let previous = doc.model.table(&query.name);
         let (model, table) =
             ModelTable::load(previous, table, query.culture, limit.saturating_sub(used))
@@ -313,9 +322,10 @@ pub(crate) fn fresh(doc: &Document) -> Vec<&Table> {
             .table(name)
             .is_some_and(|m| m.columns.iter().any(|c| c.overridden()))
     };
+    // A folded Table (text differing only by case made one, M3.10) isn't what Power Query sees.
     doc.tables
         .iter()
-        .filter(|t| !doc.stale.contains(t.name()) && !overridden(t.name()))
+        .filter(|t| !doc.stale.contains(t.name()) && !overridden(t.name()) && !t.folded())
         .collect()
 }
 
@@ -345,6 +355,23 @@ fn merged_first(queries: &[Query]) -> Vec<&Query> {
         .collect();
     order.extend(rest);
     order
+}
+
+/// `table` as the Model holds it: text differing only by case made one (M3.10, ADR 0006), and
+/// the bytes its new (folded) columns use, counted beside the unfolded result a merge may still
+/// share. Folding before the model load lets sort by and Relationships see the folded values.
+fn fold(table: Table, limit: usize) -> Result<(Table, usize)> {
+    let before = table.batch().columns().to_vec();
+    let table = fold_case(table, limit).map_err(Error::Data)?;
+    let extra = table
+        .batch()
+        .columns()
+        .iter()
+        .zip(&before)
+        .filter(|(new, old)| !std::sync::Arc::ptr_eq(new, old))
+        .map(|(new, _)| new.get_array_memory_size())
+        .sum();
+    Ok((table, extra))
 }
 
 fn loaded(tables: &[Table]) -> usize {
@@ -382,6 +409,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use arrow_array::StringArray;
+    use arrow_array::types::Int8Type;
     use opendash_data::step::{ColumnType, Step};
     use serde_json::json;
 
@@ -842,5 +871,96 @@ mod tests {
             Err(Error::UnknownQuery("Nope".into()))
         );
         assert!(matches!(app.preview("Sales", Some(9)), Err(Error::Data(_))));
+    }
+
+    /// Text column `column` of Table `table` (small: `Int8` keys): each row, and the distinct
+    /// values.
+    fn text(app: &App, table: &str, column: usize) -> (Vec<Option<String>>, Vec<String>) {
+        use arrow_array::cast::AsArray;
+        let t = app
+            .document()
+            .tables
+            .iter()
+            .find(|t| t.name() == table)
+            .unwrap();
+        let dict = t.batch().column(column).as_dictionary::<Int8Type>();
+        let rows: Vec<Option<String>> = dict
+            .downcast_dict::<StringArray>()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.map(String::from))
+            .collect();
+        let mut distinct: Vec<String> = rows.iter().flatten().cloned().collect();
+        distinct.sort();
+        distinct.dedup();
+        (rows, distinct)
+    }
+
+    fn preview_text(p: &Preview, column: usize) -> Vec<String> {
+        let c = p.batch.column(column);
+        let s = c.as_any().downcast_ref::<StringArray>().unwrap();
+        s.iter().flatten().map(String::from).collect()
+    }
+
+    #[test]
+    fn loaded_text_differing_only_by_case_is_one_value_with_the_first_casing() {
+        let dir = Dir::new();
+        let path = dir.write("Names.csv", "Name,N\nabc,1\nABC,2\nAbc,3\nxyz,4\n");
+        let mut app = App::new();
+        app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+            .unwrap();
+        let (rows, distinct) = text(&app, "Names", 0);
+        assert_eq!(distinct, ["abc", "xyz"]);
+        assert_eq!(rows.iter().flatten().filter(|s| *s == "abc").count(), 3);
+        assert!(app.document().tables[0].folded());
+        // Power Query's Preview stays case-sensitive.
+        let p = app.preview("Names", Some(1)).unwrap();
+        assert_eq!(preview_text(&p, 0), ["abc", "ABC", "Abc", "xyz"]);
+        // Refreshed with another first casing: that one is kept.
+        dir.write("Names.csv", "Name,N\nABC,1\nabc,2\n");
+        app.run("home.refresh", &Value::Null).unwrap();
+        assert_eq!(text(&app, "Names", 0).1, ["ABC"]);
+    }
+
+    #[test]
+    fn merges_stay_case_sensitive_against_a_folded_table() {
+        let dir = Dir::new();
+        let sales = dir.write("Sales.csv", "Region,Qty\nNORTH,3\n");
+        let targets = dir.write("Targets.csv", "Region,Target\nNorth,10\nNORTH,20\n");
+        let mut app = App::new();
+        for path in [&sales, &targets] {
+            app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+                .unwrap();
+        }
+        assert_eq!(text(&app, "Targets", 0).1, ["North"], "folded in the Model");
+        let merge = json!({"query": "Sales", "keys": ["Region"], "with": "Targets",
+            "withKeys": ["Region"], "expand": ["Target"]});
+        app.run("home.mergeQueries", &merge).unwrap();
+        // The Preview merges Targets' own (unfolded) rows: NORTH matches only NORTH.
+        let p = app.preview("Sales", Some(2)).unwrap();
+        let target = format!("{:?}", p.batch.column(2));
+        assert!(target.contains("20") && !target.contains("10"), "{target}");
+        // So does the load's merge.
+        app.run("home.closeApply", &Value::Null).unwrap();
+        let t = &app.document().tables[0];
+        let c = t.batch().column(2);
+        let loaded = c.as_any().downcast_ref::<arrow_array::Int8Array>().unwrap();
+        assert_eq!(loaded.iter().collect::<Vec<_>>(), [Some(20)]);
+    }
+
+    #[test]
+    fn the_data_cache_keeps_the_folded_data() {
+        let dir = Dir::new();
+        let path = dir.write("Names.csv", "Name,N\nabc,1\nABC,2\n");
+        let mut app = App::new();
+        app.run(GET_DATA, &json!({"kind": "csv", "path": path}))
+            .unwrap();
+        let project = dir.0.join("Proj").display().to_string();
+        app.run("file.saveAs", &json!({"path": project})).unwrap();
+        let mut other = App::new();
+        other.run("file.open", &json!({"path": project})).unwrap();
+        assert!(other.document().stale.is_empty(), "opened from the cache");
+        assert_eq!(text(&other, "Names", 0), text(&app, "Names", 0));
+        assert_eq!(text(&other, "Names", 0).1, ["abc"]);
     }
 }

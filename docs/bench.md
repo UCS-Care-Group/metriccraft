@@ -39,6 +39,10 @@ date, a datetime and a boolean column, some with nulls. 10M rows is about 460 MB
 
 Measured with other builds running (load average 5–12), so the times are pessimistic.
 
+M3.10 (case fold at load, 2026-10-14, A/B on a busy host, load average ~18): `import/parquet_1m`
+about +5–10% time and +5 MB peak (8 bytes per distinct text value, hashed once; 1M distinct
+`OrderNumber`s), `import/csv_200k` about +10–15% time, peak unchanged. Baseline not re-recorded (needs a quiet tardis2).
+
 ## Power BI Desktop comparison (spec N-8)
 
 In the Windows VM, on the same data:
