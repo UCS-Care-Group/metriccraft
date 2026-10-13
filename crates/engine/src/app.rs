@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use opendash_data::{Preview, Query, Table, default_memory_cap};
 use opendash_model::Model;
@@ -20,6 +20,9 @@ pub struct Document {
     pub unloaded: BTreeSet<String>,
     /// The model properties of the loaded Tables (one per Table, same name).
     pub model: Model,
+    /// How each Table's data was loaded (its Query's M hash, Source fingerprints and time), by
+    /// Table name: the Data cache's metadata (`opendash_file::cache`), undone with the data.
+    pub provenance: BTreeMap<String, opendash_file::cache::Provenance>,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,

@@ -10,7 +10,9 @@
 //! are small): every entry is checked before it is read: at most [`Limits::entries`] entries; no
 //! absolute paths, `..`, backslashes or duplicates; only stored or Deflate entries; no symlinks
 //! or encryption; and at most [`Limits::bytes`] bytes uncompressed in all, counted as they are
-//! inflated (a zip bomb's declared sizes are not trusted).
+//! inflated (a zip bomb's declared sizes are not trusted). Data cache Parquet (`.cache/*.parquet`) is
+//! counted against [`Limits::cache`] instead (the app passes its memory cap, since that data is
+//! loaded anyway); one that doesn't fit is left out, so its table opens without data.
 
 use std::io::{Cursor, Read, Write};
 
@@ -30,17 +32,19 @@ pub const LEVEL: i64 = 6;
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub entries: usize,
-    /// Total uncompressed bytes.
+    /// Total uncompressed bytes of everything but the Data cache Parquet.
     pub bytes: u64,
+    /// Total uncompressed bytes of the Data cache Parquet (`.cache/*.parquet`).
+    pub cache: u64,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
             entries: 100_000,
-            // Definitions only, so far. ponytail: M2.6 adds Parquet caches; read those
-            // against the memory cap instead of raising this.
             bytes: 512 << 20,
+            // The app passes its memory cap instead.
+            cache: 1 << 30,
         }
     }
 }
@@ -92,7 +96,8 @@ pub fn unpack_with(bytes: &[u8], limits: Limits) -> Result<FileSet> {
     }
     let mut files = FileSet::new();
     let mut seen = std::collections::BTreeSet::new();
-    let mut left = limits.bytes;
+    let mut defs_left = limits.bytes;
+    let mut cache_left = limits.cache;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(zip_err)?;
         let name = std::str::from_utf8(entry.name_raw())
@@ -117,6 +122,12 @@ pub fn unpack_with(bytes: &[u8], limits: Limits) -> Result<FileSet> {
         if !seen.insert(name.to_lowercase()) {
             return Err(Error::Package(format!("`{name}` appears twice")));
         }
+        let cache = name.starts_with(".cache/") && name.ends_with(".parquet");
+        let left = if cache {
+            &mut cache_left
+        } else {
+            &mut defs_left
+        };
         // Read at most one byte past what's left, so an oversized entry is caught whatever its
         // header says.
         let mut data = Vec::new();
@@ -125,13 +136,17 @@ pub fn unpack_with(bytes: &[u8], limits: Limits) -> Result<FileSet> {
             .read_to_end(&mut data)
             .map_err(zip_err)?;
         let read = u64::try_from(read).unwrap_or(u64::MAX);
-        if read > left {
+        if read > *left {
+            if cache {
+                // Data over the cap is left out: that table opens without it.
+                continue;
+            }
             return Err(Error::Package(format!(
                 "more than {} MB uncompressed",
                 limits.bytes >> 20
             )));
         }
-        left = left.saturating_sub(read);
+        *left = left.saturating_sub(read);
         files.insert(name, data);
     }
     Ok(files)

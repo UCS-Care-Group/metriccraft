@@ -28,6 +28,10 @@
 //! undoable edit (undoing a refresh is something Power BI can't do): undo puts back the previous
 //! tables, steps and Stale flags together.
 //!
+//! Each load records the loaded Tables' provenance (`Document::provenance`: the Query's M hash
+//! and its Source files' fingerprints, taken just before reading, and the time), which the
+//! Data cache saves beside the data (`file.rs`).
+//!
 //! **Memory cap** (spec N-4, [`App::memory_cap`]): a load may use the cap less every distinct
 //! column buffer held by the document, undo and redo ([`App::memory`]; snapshots share
 //! buffers, so each counts once), the tables being replaced included. When the new data won't
@@ -40,6 +44,7 @@ use std::path::Path;
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
 use opendash_data::{Pass, Preview, Query, Table};
+use opendash_file::cache::{Provenance, now_ms};
 use opendash_model::{ModelTable, Relationship};
 use serde_json::Value;
 
@@ -127,6 +132,8 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
             return Err(invalid(GET_DATA, format!("`{name}` already exists")));
         }
         let query = Query::connect(&name, source.clone(), culture, limit).map_err(Error::Data)?;
+        // Before the read: a change to the file while it is read then shows as Stale.
+        let provenance = Provenance::of(std::slice::from_ref(&query), &name, now_ms());
         let (table, cell_errors) = query.run(limit).map_err(Error::Data)?;
         let limit = limit.saturating_sub(table.memory());
         let (model, table) =
@@ -142,6 +149,7 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         doc.queries.push(query);
         doc.tables.push(table);
         doc.model.put(model);
+        doc.provenance.insert(name.clone(), provenance);
         let one = std::slice::from_ref(&name);
         relate(doc, one, one, &mut report)?;
         Ok(report)
@@ -199,11 +207,18 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
     let mut used = 0usize;
     let mut dropped = Vec::new();
     let before: Vec<String> = doc.tables.iter().map(|t| t.name().to_string()).collect();
+    let now = now_ms();
+    let mut provenance = Vec::new();
     for query in merged_first(&doc.queries).into_iter().filter(|q| pick(q)) {
         if doc.unloaded.contains(&query.name) {
             dropped.push(query.name.clone());
             continue;
         }
+        // Before the read: a change to a file while it is read then shows as Stale.
+        provenance.push((
+            query.name.clone(),
+            Provenance::of(&doc.queries, &query.name, now),
+        ));
         let (table, cell_errors) = pass.run(query).map_err(|error| Error::Refresh {
             query: query.name.clone(),
             error,
@@ -230,6 +245,7 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
     for model in models {
         doc.model.put(model);
     }
+    doc.provenance.extend(provenance);
     let loaded: Vec<String> = fresh.iter().map(|t| t.name().to_string()).collect();
     for table in fresh {
         doc.stale.remove(table.name());
@@ -244,6 +260,9 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
         .cloned()
         .collect();
     relate(doc, &loaded, &new, &mut report)?;
+    let tables = &doc.tables;
+    doc.provenance
+        .retain(|name, _| tables.iter().any(|t| t.name() == name));
     Ok(report)
 }
 

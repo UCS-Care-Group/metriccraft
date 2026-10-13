@@ -511,7 +511,8 @@ mod fuzz {
                 .map(|t| t.name().to_owned())
                 .collect::<Vec<_>>()
         };
-        if names(opened) != names(doc) || opened.tables.iter().any(|t| t.rows() != 0) {
+        // The Package carries the Data cache (M2.6): tables reopen with the data they had.
+        if names(opened) != names(doc) || opened.tables != doc.tables {
             return Err(format!(
                 "opened tables {:?}, saved {:?}",
                 names(opened),
