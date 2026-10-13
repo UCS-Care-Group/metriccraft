@@ -19,6 +19,9 @@ use crate::{Error, Result};
 pub struct Table {
     name: Arc<str>,
     batch: RecordBatch,
+    /// Whether loading folded text that differed only by case (`fold.rs`): the data is then no
+    /// longer its Query's result as Power Query sees it. Not saved with the Data cache.
+    folded: bool,
 }
 
 impl Table {
@@ -34,6 +37,22 @@ impl Table {
 
     pub fn rows(&self) -> usize {
         self.batch.num_rows()
+    }
+
+    /// Whether [`crate::fold_case`] changed any of this table's text.
+    pub fn folded(&self) -> bool {
+        self.folded
+    }
+
+    /// This table with `columns` (same types, same rows) in place of its own, marked folded.
+    pub(crate) fn with_folded(&self, columns: Vec<ArrayRef>) -> Result<Table> {
+        let batch = RecordBatch::try_new(self.batch.schema(), columns)
+            .map_err(|e| self.error(e.to_string()))?;
+        Ok(Table {
+            name: Arc::clone(&self.name),
+            batch,
+            folded: true,
+        })
     }
 
     /// This table with column `index` replaced by `column` (a plain Arrow array, as a step
@@ -72,6 +91,7 @@ impl Table {
         Ok(Table {
             name: Arc::clone(&self.name),
             batch,
+            folded: self.folded,
         })
     }
 
@@ -80,6 +100,7 @@ impl Table {
         Table {
             name: Arc::from(name),
             batch: self.batch.clone(),
+            folded: self.folded,
         }
     }
 
@@ -99,6 +120,7 @@ impl Table {
         Ok(Table {
             name: Arc::clone(&self.name),
             batch,
+            folded: self.folded,
         })
     }
 
@@ -351,6 +373,7 @@ impl TableBuilder {
         Ok(Table {
             name: self.name.into(),
             batch,
+            folded: false,
         })
     }
 
