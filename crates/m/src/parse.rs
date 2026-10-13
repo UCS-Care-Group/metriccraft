@@ -6,6 +6,10 @@ use crate::{BinOp, Binding, Error, Expr, KEYWORDS, Let, PRIMITIVE_TYPES};
 pub const MAX_DEPTH: usize = 200;
 /// Largest M text accepted, in bytes (a Query's M is a few KB).
 pub const MAX_SOURCE: usize = 4 << 20;
+/// Most tokens lexed from one M text. A token takes ~64 bytes, so text dense with one-byte
+/// tokens (`{,,,,…`) would otherwise hold ~16× its own size; this caps that near 32 MB. Real M
+/// runs several bytes per token (a 10,000-condition filter is ~70,000 tokens).
+pub const MAX_TOKENS: usize = MAX_SOURCE / 8;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Tok {
@@ -84,6 +88,13 @@ impl<'a> Lexer<'a> {
                 Some(c) => self.token(c)?,
             };
             let done = tok == Tok::Eof;
+            if !done && out.len() >= MAX_TOKENS {
+                return Err(Error::new(
+                    line,
+                    column,
+                    format!("M text has more than {MAX_TOKENS} tokens"),
+                ));
+            }
             out.push(Token {
                 tok,
                 line,
@@ -451,16 +462,29 @@ impl Parser<'_> {
     }
 
     /// Precedence climbing; every operator applied counts as a nesting level so left-leaning
-    /// chains (`a + b + c …`) are bounded too.
+    /// chains (`a + b + c …`) are bounded too. `and`/`or` are the exception: a run of the same
+    /// one builds one flat [`Expr::Chain`] costing a single level, so long filters parse.
     fn binary(&mut self, min: u8) -> Result<Expr, Error> {
         let saved = self.depth;
         let result = (|| {
             let mut lhs = self.unary()?;
             while let Some(op) = self.binop().filter(|op| op.precedence() >= min) {
                 self.next();
+                let chain = matches!(op, BinOp::And | BinOp::Or);
+                // The level the chain's operands parse at stays one in from where it started.
+                let level = self.depth;
                 self.enter()?;
                 let rhs = self.binary(op.precedence().saturating_add(1))?;
-                lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs));
+                lhs = match lhs {
+                    Expr::Chain(o, mut operands) if chain && o == op => {
+                        operands.push(rhs);
+                        // Extending a chain doesn't nest any deeper.
+                        self.depth = level;
+                        Expr::Chain(op, operands)
+                    }
+                    lhs if chain => Expr::Chain(op, vec![lhs, rhs]),
+                    lhs => Expr::Binary(op, Box::new(lhs), Box::new(rhs)),
+                };
             }
             Ok(lhs)
         })();
@@ -749,6 +773,52 @@ mod tests {
     fn oversized_input_is_rejected() {
         let big = " ".repeat(MAX_SOURCE + 1);
         assert!(parse(&big).is_err());
+    }
+
+    /// Review M1 #13: one-byte tokens can't multiply the input ~16× in memory.
+    #[test]
+    fn token_count_is_capped() {
+        assert!(std::mem::size_of::<Token>() <= 64);
+        let dense = ",".repeat(MAX_TOKENS + 1);
+        assert!(dense.len() <= MAX_SOURCE);
+        let e = parse(&dense).unwrap_err();
+        assert!(e.message.contains("tokens"), "{e}");
+        // Up to the cap the lexer runs; this fails later, in the parser.
+        let e = parse(&",".repeat(MAX_TOKENS)).unwrap_err();
+        assert!(e.message.contains("an expression"), "{e}");
+    }
+
+    #[test]
+    fn and_or_runs_parse_flat() {
+        for op in ["and", "or"] {
+            let src = vec!["[A] = 1"; 10_000].join(&format!(" {op} "));
+            let e = parse(&src).unwrap_or_else(|e| panic!("{op}: {e}"));
+            let Expr::Chain(_, operands) = &e else {
+                panic!("{op}: not a chain")
+            };
+            assert_eq!(operands.len(), 10_000);
+            assert_eq!(print(&e), src);
+        }
+        // Mixed and parenthesised runs keep their shape and their text.
+        for src in [
+            "a and b or c and d or e",
+            "a or b and c or d",
+            "a or (b or c) or d",
+            "(a or b) or c",
+            "not a and b + 1 = 2 or c",
+            "each [A] > 1 and [B] < 2",
+        ] {
+            round_trip(src);
+        }
+        let e = parse("a and b or c and d or e").unwrap();
+        let Expr::Chain(BinOp::Or, operands) = &e else {
+            panic!("top level is the `or` chain")
+        };
+        assert_eq!(operands.len(), 3);
+        assert!(matches!(operands[0], Expr::Chain(BinOp::And, _)));
+        // A run inside brackets nests one level, however long; deep brackets are still capped.
+        let deep = format!("{}a{}", "(a or ".repeat(100_000), ")".repeat(100_000));
+        assert!(parse(&deep).unwrap_err().message.contains("nested"));
     }
 
     /// 20,000 cases a run; soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).

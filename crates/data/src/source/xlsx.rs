@@ -13,10 +13,11 @@
 //! Excel's range is a Cell error too; its message is ours (parity uncertainty).
 //!
 //! **Hostile files** (spec N-1, N-4). [`Workbook::open`] reads every XML part calamine will
-//! parse (relationships, workbook, shared strings, styles, each sheet) once itself first, with
-//! quick-xml through a metered reader: no single XML event (tag or text run) may exceed
-//! [`MAX_EVENT`] bytes, and the parts calamine keeps in memory (shared strings, styles…) may
-//! not exceed the memory limit, so a decompression bomb can't fill memory. A shared-strings
+//! parse (relationships, workbook, shared strings, styles, each sheet — or with
+//! [`Workbook::open_item`], only the sheet read) once itself first, with quick-xml through a
+//! metered reader: no single XML event (tag or text run) may exceed [`MAX_EVENT`] bytes, and
+//! the parts calamine keeps in memory (shared strings, styles…) may not exceed the memory
+//! limit together, so a decompression bomb can't fill memory. A shared-strings
 //! `uniqueCount` far above the strings present is refused (calamine reserves it up front), and
 //! password-protected (OLE) files are refused before calamine's OLE parser sees them. Excel
 //! tables are read from their own parts here, not through calamine (whose table loader trusts
@@ -75,6 +76,10 @@ pub struct CellError {
 pub struct Workbook<R: Read + Seek> {
     xlsx: Xlsx<R>,
     tables: Vec<TablePart>,
+    /// What errors are labelled with (the Query's name).
+    name: String,
+    /// The sheets whose XML was walked on opening; `None` for all of them.
+    checked: Option<HashSet<String>>,
 }
 
 /// An Excel table, read from its own part (`xl/tables/tableN.xml`).
@@ -99,8 +104,30 @@ type Cells<'a> = Box<dyn Iterator<Item = Result<(u32, u32, Data)>> + 'a>;
 
 impl<R: Read + Seek> Workbook<R> {
     /// Opens a workbook, checking all of it first (see the module docs), with `limit` bytes
-    /// for the parts held in memory.
-    pub fn open(mut reader: R, limit: usize) -> Result<Self> {
+    /// for the parts held in memory. `name` (the Query's) labels errors.
+    pub fn open(name: &str, reader: R, limit: usize) -> Result<Self> {
+        Self::open_checking(name, reader, limit, None)
+    }
+
+    /// [`Workbook::open`] to read one sheet or table (`item`): of the sheets' XML, only that
+    /// one's is walked, so a Preview of one sheet doesn't read every sheet of the workbook.
+    /// Reading any other sheet of it is an error.
+    pub fn open_item(
+        name: &str,
+        reader: R,
+        limit: usize,
+        item: &str,
+        kind: super::ExcelKind,
+    ) -> Result<Self> {
+        Self::open_checking(name, reader, limit, Some((item, kind)))
+    }
+
+    fn open_checking(
+        name: &str,
+        mut reader: R,
+        limit: usize,
+        only: Option<(&str, super::ExcelKind)>,
+    ) -> Result<Self> {
         let mut magic = [0; 8];
         let mut n = 0;
         while n < magic.len() {
@@ -108,26 +135,29 @@ impl<R: Read + Seek> Workbook<R> {
                 Ok(0) => break,
                 Ok(k) => n += k,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(source(e.to_string())),
+                Err(e) => return Err(source(name, e.to_string())),
             }
         }
         if magic == OLE {
             return Err(source(
+                name,
                 "the workbook is password-protected (or not an XLSX file)".into(),
             ));
         }
         reader
             .seek(SeekFrom::Start(0))
-            .map_err(|e| source(e.to_string()))?;
-        let mut zip = ZipArchive::new(reader).map_err(|e| source(e.to_string()))?;
-        let tables = check_package(&mut zip, limit as u64)?;
+            .map_err(|e| source(name, e.to_string()))?;
+        let mut zip = ZipArchive::new(reader).map_err(|e| source(name, e.to_string()))?;
+        let (tables, checked) = check_package(&mut zip, name, limit as u64, only)?;
         let mut reader = zip.into_inner();
         reader
             .seek(SeekFrom::Start(0))
-            .map_err(|e| source(e.to_string()))?;
+            .map_err(|e| source(name, e.to_string()))?;
         Ok(Self {
-            xlsx: Xlsx::new(reader).map_err(error)?,
+            xlsx: Xlsx::new(reader).map_err(|e| error(name, e))?,
             tables,
+            name: name.into(),
+            checked,
         })
     }
 
@@ -186,7 +216,8 @@ impl<R: Read + Seek> Workbook<R> {
         errors: Option<&mut Vec<CellError>>,
     ) -> Result<usize> {
         let is_1904 = self.xlsx.has_1904_epoch();
-        let scan = scan(self.sheet_cells(name)?, header, is_1904, max)?;
+        let label = self.name.clone();
+        let scan = scan(&label, self.sheet_cells(name)?, header, is_1904, max)?;
         let (Some((top, bottom)), Some((left, right))) = (scan.rows, scan.cols) else {
             // An empty sheet is one blank column with no rows (Arrow needs a column).
             let (headers, kinds) = (vec![String::new()], vec![Kind::Empty]);
@@ -197,15 +228,16 @@ impl<R: Read + Seek> Workbook<R> {
                 rows: 0,
             };
             return import(
-                name, headers, kinds, at, cells, 0, is_1904, decimal, limit, sink, errors,
+                &label, headers, kinds, at, cells, 0, is_1904, decimal, limit, sink, errors,
             );
         };
         let width = to_usize(right.saturating_sub(left)).saturating_add(1);
         let rows = to_usize(bottom.saturating_sub(top)).saturating_add(usize::from(!header));
         if width > MAX_COLS || rows > MAX_ROWS {
-            return Err(source(format!(
-                "sheet `{name}` is larger than Excel allows"
-            )));
+            return Err(source(
+                &label,
+                format!("sheet `{name}` is larger than Excel allows"),
+            ));
         }
         // Blank names become `Column1..N`.
         let headers = (left..=right)
@@ -221,7 +253,7 @@ impl<R: Read + Seek> Workbook<R> {
             rows: rows.min(max),
         };
         import(
-            name,
+            &label,
             headers,
             kinds,
             at,
@@ -257,26 +289,25 @@ impl<R: Read + Seek> Workbook<R> {
         errors: Option<&mut Vec<CellError>>,
     ) -> Result<usize> {
         let is_1904 = self.xlsx.has_1904_epoch();
-        let table = self
-            .tables
-            .iter()
-            .find(|t| t.name == name)
-            .or_else(|| {
-                self.tables
-                    .iter()
-                    .find(|t| t.name.eq_ignore_ascii_case(name))
-            })
-            .ok_or_else(|| source(format!("no table `{name}`")))?;
+        let label = self.name.clone();
+        let table = find_table(&self.tables, name)
+            .ok_or_else(|| source(&label, format!("no table `{name}`")))?;
         let mut area = table
             .area
             .clone()
-            .map_err(|m| source(format!("table `{name}`: {m}")))?;
+            .map_err(|m| source(&label, format!("table `{name}`: {m}")))?;
         area.rows = area.rows.min(rows);
         let sheet = table.sheet.clone();
         let headers = (0..to_usize(area.width))
             .map(|i| table.columns.get(i).cloned().unwrap_or_default())
             .collect();
-        let scan = scan(self.area_cells(&sheet, area)?, false, is_1904, usize::MAX)?;
+        let scan = scan(
+            &label,
+            self.area_cells(&sheet, area)?,
+            false,
+            is_1904,
+            usize::MAX,
+        )?;
         let kinds = (0..area.width)
             .map(|i| {
                 let c = area.left.saturating_add(i);
@@ -290,7 +321,7 @@ impl<R: Read + Seek> Workbook<R> {
             rows: area.rows,
         };
         import(
-            name,
+            &label,
             headers,
             kinds,
             at,
@@ -305,7 +336,19 @@ impl<R: Read + Seek> Workbook<R> {
     }
 
     fn sheet_cells(&mut self, name: &str) -> Result<Cells<'_>> {
-        let mut reader = self.xlsx.worksheet_cells_reader(name).map_err(error)?;
+        let label = self.name.clone();
+        // Opened for one item: calamine may only stream a sheet walked on opening.
+        let unchecked = self.checked.as_ref().is_some_and(|c| !c.contains(name));
+        if unchecked && self.xlsx.sheet_names().iter().any(|n| n == name) {
+            return Err(source(
+                &label,
+                format!("sheet `{name}` wasn't checked when the workbook was opened"),
+            ));
+        }
+        let mut reader = self
+            .xlsx
+            .worksheet_cells_reader(name)
+            .map_err(|e| error(&label, e))?;
         Ok(Box::new(
             std::iter::from_fn(move || match reader.next_cell() {
                 Ok(Some(cell)) => {
@@ -313,7 +356,7 @@ impl<R: Read + Seek> Workbook<R> {
                     Some(Ok((r, c, Data::from(cell.get_value().clone()))))
                 }
                 Ok(None) => None,
-                Err(e) => Some(Err(error(e))),
+                Err(e) => Some(Err(error(&label, e))),
             })
             // A table's rows can outlast the cells; calamine errors if asked again after the end.
             .fuse(),
@@ -404,6 +447,7 @@ type Xml<'a, R> = quick_xml::Reader<Metered<zip::read::ZipFile<'a, R>>>;
 fn part<'a, R: Read + Seek>(
     zip: &'a mut ZipArchive<R>,
     parts: &Parts,
+    name: &str,
     path: &str,
     cap: u64,
 ) -> Result<Option<Xml<'a, R>>> {
@@ -424,19 +468,21 @@ fn part<'a, R: Read + Seek>(
             Ok(Some(xml))
         }
         Err(ZipError::FileNotFound) => Ok(None),
-        Err(e) => Err(source(format!("`{path}`: {e}"))),
+        Err(e) => Err(source(name, format!("`{path}`: {e}"))),
     }
 }
 
-/// Reads every event of a part, calling `f` with each start tag. A part too large is an
-/// error; an XML syntax error just ends the walk (calamine stops at the same place).
+/// Reads every event of a part, calling `f` with each start tag; returns the bytes read. A
+/// part too large is an error; an XML syntax error just ends the walk (calamine stops at the
+/// same place).
 fn walk<R: Read + Seek>(
+    name: &str,
     xml: Option<Xml<'_, R>>,
     path: &str,
     mut f: impl FnMut(&BytesStart<'_>, quick_xml::encoding::Decoder),
-) -> Result<()> {
+) -> Result<u64> {
     let Some(mut xml) = xml else {
-        return Ok(());
+        return Ok(0);
     };
     let mut buf = Vec::new();
     loop {
@@ -445,15 +491,18 @@ fn walk<R: Read + Seek>(
         let event = xml.read_event_into(&mut buf);
         // Checked after each event too: one can end exactly as it crosses the budget.
         if xml.get_ref().over() {
-            return Err(source(format!(
-                "`{path}` is too large (an XML element over {} MB, or the part over the memory \
-                 limit)",
-                MAX_EVENT >> 20
-            )));
+            return Err(source(
+                name,
+                format!(
+                    "`{path}` is too large (an XML element over {} MB, or the parts held in \
+                     memory over the memory limit)",
+                    MAX_EVENT >> 20
+                ),
+            ));
         }
         match event {
             Ok(Event::Start(e) | Event::Empty(e)) => f(&e, xml.decoder()),
-            Ok(Event::Eof) | Err(_) => return Ok(()),
+            Ok(Event::Eof) | Err(_) => return Ok(xml.get_ref().total),
             Ok(_) => {}
         }
     }
@@ -514,15 +563,62 @@ fn unique_count(raw: &[u8]) -> u128 {
     max
 }
 
-/// Checks the package before calamine reads it, and reads its Excel tables.
-fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<Vec<TablePart>> {
-    let parts = Parts::new(zip);
+/// The package being checked: its parts, and the bytes left for the parts held in memory.
+struct Package<'z, R> {
+    zip: &'z mut ZipArchive<R>,
+    parts: Parts,
+    name: &'z str,
+    left: u64,
+}
+
+impl<R: Read + Seek> Package<'_, R> {
+    /// Walks part `path` (see [`walk`]). A `held` part spends from one budget shared by all of
+    /// them (calamine keeps the shared strings and styles together, so a cap per part would let
+    /// their total pass the limit); a streamed part (a sheet) only has its events bounded.
+    fn walk(
+        &mut self,
+        path: &str,
+        held: bool,
+        f: impl FnMut(&BytesStart<'_>, quick_xml::encoding::Decoder),
+    ) -> Result<()> {
+        let cap = if held { self.left } else { u64::MAX };
+        let xml = part(self.zip, &self.parts, self.name, path, cap)?;
+        let read = walk(self.name, xml, path, f)?;
+        if held {
+            self.left = self.left.saturating_sub(read);
+        }
+        Ok(())
+    }
+}
+
+/// The table named `name` (exactly, else ignoring ASCII case).
+fn find_table<'t>(tables: &'t [TablePart], name: &str) -> Option<&'t TablePart> {
+    tables
+        .iter()
+        .find(|t| t.name == name)
+        .or_else(|| tables.iter().find(|t| t.name.eq_ignore_ascii_case(name)))
+}
+
+/// Checks the package before calamine reads it, and reads its Excel tables. Walks the XML of
+/// every sheet, or with `only`, just the sheet that item reads; returns the tables and the
+/// names of the sheets walked (`None`: all).
+fn check_package<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+    limit: u64,
+    only: Option<(&str, super::ExcelKind)>,
+) -> Result<(Vec<TablePart>, Option<HashSet<String>>)> {
+    let mut pkg = Package {
+        parts: Parts::new(zip),
+        zip,
+        name,
+        left: limit,
+    };
     let is = |e: &BytesStart<'_>, name: &[u8]| e.local_name().as_ref() == name;
 
     // The workbook's folder, as calamine finds it.
     let mut target = None;
-    let rels = "_rels/.rels";
-    walk(part(zip, &parts, rels, limit)?, rels, |e, d| {
+    pkg.walk("_rels/.rels", true, |e, d| {
         let office = attr(e, d, b"Type", false)
             .is_some_and(|t| t.ends_with("/relationships/officeDocument"));
         if is(e, b"Relationship") && office {
@@ -535,11 +631,10 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
     };
     let folder = folder.strip_prefix('/').unwrap_or(folder).to_string();
 
-    // The parts calamine holds in memory: each within the limit. calamine reserves the
-    // shared strings' `uniqueCount` before reading them.
-    let strings = format!("{folder}sharedStrings.xml");
+    // The parts calamine holds in memory: within the limit, all together. calamine reserves
+    // the shared strings' `uniqueCount` before reading them.
     let (mut unique, mut count) = (0u128, 0u128);
-    walk(part(zip, &parts, &strings, limit)?, &strings, |e, _| {
+    pkg.walk(&format!("{folder}sharedStrings.xml"), true, |e, _| {
         if is(e, b"sst") {
             unique = unique.max(unique_count(e.attributes_raw()));
         } else if is(e, b"si") {
@@ -547,26 +642,20 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
         }
     })?;
     if unique > (count * 2).max(4096) {
-        return Err(source(format!(
-            "the shared strings claim {unique} entries but hold {count}"
-        )));
+        return Err(source(
+            name,
+            format!("the shared strings claim {unique} entries but hold {count}"),
+        ));
     }
-    let styles = format!("{folder}styles.xml");
-    walk(part(zip, &parts, &styles, limit)?, &styles, |_, _| {})?;
+    pkg.walk(&format!("{folder}styles.xml"), true, |_, _| {})?;
     let mut targets = HashMap::new();
-    let workbook_rels = format!("{folder}_rels/workbook.xml.rels");
-    walk(
-        part(zip, &parts, &workbook_rels, limit)?,
-        &workbook_rels,
-        |e, d| {
-            if let (true, Some(id)) = (is(e, b"Relationship"), attr(e, d, b"Id", false)) {
-                targets.insert(id, attr(e, d, b"Target", false).unwrap_or_default());
-            }
-        },
-    )?;
+    pkg.walk(&format!("{folder}_rels/workbook.xml.rels"), true, |e, d| {
+        if let (true, Some(id)) = (is(e, b"Relationship"), attr(e, d, b"Id", false)) {
+            targets.insert(id, attr(e, d, b"Target", false).unwrap_or_default());
+        }
+    })?;
     let mut sheets = Vec::new();
-    let workbook = format!("{folder}workbook.xml");
-    walk(part(zip, &parts, &workbook, limit)?, &workbook, |e, d| {
+    pkg.walk(&format!("{folder}workbook.xml"), true, |e, d| {
         if is(e, b"sheet") {
             let name = attr(e, d, b"name", false).unwrap_or_default();
             let target = attr(e, d, b"id", true).and_then(|id| targets.get(&id));
@@ -580,10 +669,9 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
         }
     })?;
 
-    // Every sheet (streamed, so only its events are bounded), and its tables.
+    // Each sheet's tables.
     let mut tables = Vec::new();
     for (sheet, path) in &sheets {
-        walk(part(zip, &parts, path, u64::MAX)?, path, |_, _| {})?;
         let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
         let rels = if dir.is_empty() {
             format!("_rels/{file}.rels")
@@ -591,7 +679,7 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
             format!("{dir}/_rels/{file}.rels")
         };
         let mut found = Vec::new();
-        walk(part(zip, &parts, &rels, limit)?, &rels, |e, d| {
+        pkg.walk(&rels, true, |e, d| {
             let table = attr(e, d, b"Type", false).is_some_and(|t| t.ends_with("/table"));
             if let (true, true, Some(t)) =
                 (is(e, b"Relationship"), table, attr(e, d, b"Target", false))
@@ -606,7 +694,7 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
                 columns: Vec::new(),
                 area: Err("no `ref`".into()),
             };
-            walk(part(zip, &parts, &table, limit)?, &table, |e, d| {
+            pkg.walk(&table, true, |e, d| {
                 if is(e, b"table") {
                     let get = |k: &[u8]| attr(e, d, k, false);
                     t.name = get(b"displayName")
@@ -625,7 +713,21 @@ fn check_package<R: Read + Seek>(zip: &mut ZipArchive<R>, limit: u64) -> Result<
             }
         }
     }
-    Ok(tables)
+
+    // The sheets that will be read (streamed, so only their events are bounded).
+    let wanted = only.map(|(item, kind)| match kind {
+        super::ExcelKind::Sheet => item.to_string(),
+        super::ExcelKind::Table => find_table(&tables, item)
+            .map(|t| t.sheet.clone())
+            .unwrap_or_default(),
+    });
+    for (sheet, path) in &sheets {
+        if wanted.as_ref().is_none_or(|w| w == sheet) {
+            pkg.walk(path, false, |_, _| {})?;
+        }
+    }
+    let checked = wanted.map(|w| HashSet::from([w]));
+    Ok((tables, checked))
 }
 
 /// A relationship target relative to the folder `dir` (or absolute, from `/`).
@@ -814,7 +916,7 @@ struct Scan {
 
 /// First pass: bounds, headers (the first used row, if `header`), column kinds, error count.
 /// Stops after `max` rows below the headers.
-fn scan(cells: Cells<'_>, header: bool, is_1904: bool, max: usize) -> Result<Scan> {
+fn scan(name: &str, cells: Cells<'_>, header: bool, is_1904: bool, max: usize) -> Result<Scan> {
     let mut s = Scan::default();
     let max = u64::try_from(max).unwrap_or(u64::MAX);
     for cell in cells {
@@ -832,11 +934,10 @@ fn scan(cells: Cells<'_>, header: bool, is_1904: bool, max: usize) -> Result<Sca
         }
         let header_row = match s.rows {
             Some((_, bottom)) if r < bottom => {
-                return Err(source(format!(
-                    "rows out of order ({} after {})",
-                    r + 1,
-                    bottom + 1
-                )));
+                return Err(source(
+                    name,
+                    format!("rows out of order ({} after {})", r + 1, bottom + 1),
+                ));
             }
             Some((top, _)) => {
                 s.rows = Some((top, r));
@@ -959,7 +1060,7 @@ impl<I: Iterator<Item = Result<(u32, u32, Data)>>> Iterator for Batches<'_, I> {
         let arrays = cols.into_iter().map(|c| c.finish(n)).collect();
         Some(
             RecordBatch::try_new(Arc::clone(&self.schema), arrays)
-                .map_err(|e| source(e.to_string())),
+                .map_err(|e| source(self.name, e.to_string())),
         )
     }
 }
@@ -1164,15 +1265,17 @@ fn to_usize(n: u32) -> usize {
     usize::try_from(n).unwrap_or(usize::MAX)
 }
 
-fn source(message: String) -> Error {
+/// An error reading the workbook of the Query `name` (review M1 #12: named like CSV's and
+/// Parquet's, not "XLSX").
+fn source(name: &str, message: String) -> Error {
     Error::Source {
-        source: "XLSX".into(),
+        source: name.into(),
         message,
     }
 }
 
-fn error(e: calamine::XlsxError) -> Error {
-    source(e.to_string())
+fn error(name: &str, e: calamine::XlsxError) -> Error {
+    source(name, e.to_string())
 }
 
 #[cfg(test)]
@@ -1188,7 +1291,12 @@ mod tests {
     use super::*;
 
     fn open(book: &mut Writer) -> Workbook<Cursor<Vec<u8>>> {
-        Workbook::open(Cursor::new(book.save_to_buffer().unwrap()), usize::MAX).unwrap()
+        Workbook::open(
+            "Book",
+            Cursor::new(book.save_to_buffer().unwrap()),
+            usize::MAX,
+        )
+        .unwrap()
     }
 
     /// A workbook with one sheet, "Data", holding `rows` as text (empty strings left blank).
@@ -1440,7 +1548,7 @@ mod tests {
             b"not a workbook".to_vec(),
             vec![0x50, 0x4b, 3, 4, 0xff],
         ] {
-            let err = Workbook::open(Cursor::new(bytes), usize::MAX)
+            let err = Workbook::open("Book", Cursor::new(bytes), usize::MAX)
                 .err()
                 .unwrap();
             assert!(matches!(err, Error::Source { .. }), "{err:?}");
@@ -1505,6 +1613,10 @@ mod tests {
 
     /// A workbook with shared strings, numbers, dates, booleans, an error cell and a table.
     fn sample() -> Vec<u8> {
+        sample_book().save_to_buffer().unwrap()
+    }
+
+    fn sample_book() -> Writer {
         let mut book = sheet(&[&["Item", "Note"], &["Pen", "blue"], &["Ink", ""]]);
         let ws = book.worksheet_from_name("Data").unwrap();
         ws.write_string(0, 2, "Units").unwrap();
@@ -1528,7 +1640,7 @@ mod tests {
             .set_name("Stock")
             .set_columns(&cols);
         ws.add_table(0, 0, 2, 1, &table).unwrap();
-        book.save_to_buffer().unwrap()
+        book
     }
 
     fn unzip(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
@@ -1565,7 +1677,7 @@ mod tests {
 
     /// Opens and loads everything; returns whether it all worked. Must never panic.
     fn load_all(bytes: Vec<u8>, limit: usize) -> bool {
-        let Ok(mut wb) = Workbook::open(Cursor::new(bytes), limit) else {
+        let Ok(mut wb) = Workbook::open("Book", Cursor::new(bytes), limit) else {
             return false;
         };
         let mut ok = true;
@@ -1723,7 +1835,7 @@ mod tests {
             ("<table ", "<table totalsRowCount=\"-1\" "),
         ] {
             let bytes = edit(&good, &table, |x| x.replacen(from, to, 1));
-            let mut wb = Workbook::open(Cursor::new(bytes), usize::MAX).unwrap();
+            let mut wb = Workbook::open("Book", Cursor::new(bytes), usize::MAX).unwrap();
             assert_eq!(wb.tables(), ["Stock"], "{to}");
             let err = wb.load_table("Stock", usize::MAX).unwrap_err();
             assert!(matches!(err, Error::Source { .. }), "{to}: {err:?}");
@@ -1733,14 +1845,14 @@ mod tests {
         let bytes = edit(&good, &table, |x| {
             x.replacen("ref=\"A1:B3\"", "ref=\"A1:B1\"", 1)
         });
-        let mut wb = Workbook::open(Cursor::new(bytes), usize::MAX).unwrap();
+        let mut wb = Workbook::open("Book", Cursor::new(bytes), usize::MAX).unwrap();
         assert_eq!(wb.load_table("Stock", usize::MAX).unwrap().table.rows(), 0);
         // The whole sheet as a table is valid Excel, 16,384 × 1,048,575 mostly blank cells:
         // small batches, stopped by the memory limit rather than allocating it all.
         let bytes = edit(&good, &table, |x| {
             x.replacen("ref=\"A1:B3\"", "ref=\"A1:XFD1048576\"", 1)
         });
-        let mut wb = Workbook::open(Cursor::new(bytes), usize::MAX).unwrap();
+        let mut wb = Workbook::open("Book", Cursor::new(bytes), usize::MAX).unwrap();
         let err = wb.load_table("Stock", 64 << 20).unwrap_err();
         assert!(matches!(err, Error::MemoryCap { .. }), "{err:?}");
     }
@@ -1786,7 +1898,7 @@ mod tests {
                     .replacen("uniqueCount=\"6\"", huge, 1)
                     .replacen("uniqueCount = '6'", "uniqueCount = '4275609393456'", 1)
             });
-            let err = Workbook::open(Cursor::new(bytes), usize::MAX).err();
+            let err = Workbook::open("Book", Cursor::new(bytes), usize::MAX).err();
             assert!(
                 err.as_ref()
                     .is_some_and(|e| e.to_string().contains("claim")),
@@ -1813,7 +1925,7 @@ mod tests {
                 1,
             )
         });
-        let err = Workbook::open(Cursor::new(bytes), usize::MAX)
+        let err = Workbook::open("Book", Cursor::new(bytes), usize::MAX)
             .err()
             .unwrap();
         assert!(err.to_string().contains("too large"), "{err}");
@@ -1821,13 +1933,15 @@ mod tests {
         let bytes = edit(&good, "xl/sharedStrings.xml", |x| {
             x.replacen("uniqueCount=\"", "uniqueCount=\"4000000000", 1)
         });
-        assert!(Workbook::open(Cursor::new(bytes), usize::MAX).is_err());
+        assert!(Workbook::open("Book", Cursor::new(bytes), usize::MAX).is_err());
         // Shared strings past the memory limit.
-        assert!(Workbook::open(Cursor::new(good.clone()), 64).is_err());
+        assert!(Workbook::open("Book", Cursor::new(good.clone()), 64).is_err());
         // An encrypted (OLE) file.
         let mut ole = OLE.to_vec();
         ole.resize(4096, 0);
-        let err = Workbook::open(Cursor::new(ole), usize::MAX).err().unwrap();
+        let err = Workbook::open("Book", Cursor::new(ole), usize::MAX)
+            .err()
+            .unwrap();
         assert!(err.to_string().contains("password"), "{err}");
     }
 
@@ -1922,5 +2036,110 @@ mod tests {
         assert_eq!(strings(&t, 0)[999], Some("999".into()));
         let (t, _) = raw(&mut wb, "All", true, 5);
         assert_eq!((t.rows(), ints(&t, 0)[4]), (5, Some(5)));
+    }
+
+    /// Review M1 #9: the parts held in memory share one budget, not one each.
+    #[test]
+    fn held_parts_share_one_memory_budget() {
+        let good = sample();
+        let held: Vec<u64> = unzip(&good)
+            .into_iter()
+            .filter(|(n, _)| {
+                !n.starts_with("xl/worksheets/sheet") && n.ends_with("rels")
+                    || ["xl/sharedStrings.xml", "xl/styles.xml", "xl/workbook.xml"]
+                        .contains(&n.as_str())
+                    || n.starts_with("xl/tables/")
+            })
+            .map(|(_, data)| data.len() as u64)
+            .collect();
+        let largest = *held.iter().max().unwrap();
+        let total: u64 = held.iter().sum();
+        assert!(held.len() >= 5 && total > largest);
+        // Each part fits on its own; together they don't.
+        let err = Workbook::open("Book", Cursor::new(good.clone()), largest as usize)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("memory limit"), "{err}");
+        assert!(Workbook::open("Book", Cursor::new(good), total as usize).is_ok());
+    }
+
+    /// `sample()` plus a sheet `Other` holding one 4 MB+ text cell (an XML bomb).
+    fn with_bomb_sheet() -> Vec<u8> {
+        let mut book = sample_book();
+        book.add_worksheet()
+            .set_name("Other")
+            .unwrap()
+            .write_string(0, 0, "x")
+            .unwrap();
+        let huge = "x".repeat(MAX_EVENT as usize + 1);
+        edit(
+            &book.save_to_buffer().unwrap(),
+            "xl/worksheets/sheet2.xml",
+            |x| {
+                assert!(x.contains("<sheetData>"), "{x}");
+                x.replacen(
+                    "<sheetData>",
+                    &format!("<sheetData><row r=\"9\"><c r=\"A9\" t=\"inlineStr\"><is><t>{huge}</t></is></c></row>"),
+                    1,
+                )
+            },
+        )
+    }
+
+    /// Review M1 #11: opened for one item, only that item's sheet is walked.
+    #[test]
+    fn opening_for_one_item_walks_only_its_sheet() {
+        use crate::source::ExcelKind;
+        let bytes = with_bomb_sheet();
+        let open_all = Workbook::open("Book", Cursor::new(bytes.clone()), usize::MAX);
+        let err = open_all.err().unwrap();
+        assert!(err.to_string().contains("too large"), "{err}");
+        let item = |item: &str, kind| {
+            Workbook::open_item("Book", Cursor::new(bytes.clone()), usize::MAX, item, kind)
+        };
+        let mut wb = item("Data", ExcelKind::Sheet).unwrap();
+        assert_eq!(wb.sheets(), ["Data", "Other"]);
+        assert_eq!(raw(&mut wb, "Data", false, usize::MAX).0.rows(), 4);
+        // The other sheet wasn't walked, so it isn't read either.
+        let err = collect("Other", usize::MAX, |sink| {
+            wb.read_sheet("Other", usize::MAX, '.', usize::MAX, sink, None)
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("wasn't checked"), "{err}");
+        // A table walks its own sheet.
+        let mut wb = item("Stock", ExcelKind::Table).unwrap();
+        assert_eq!(raw(&mut wb, "Stock", true, usize::MAX).0.rows(), 2);
+        let err = item("Other", ExcelKind::Sheet).err().unwrap();
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+
+    /// Review M1 #12: errors name the Query, as CSV's and Parquet's do.
+    #[test]
+    fn errors_name_the_query() {
+        use crate::source::{ExcelKind, File, Source};
+        let mut wb = Workbook::open("Sales", Cursor::new(sample()), usize::MAX).unwrap();
+        for err in [
+            wb.load_sheet("Nope", usize::MAX).unwrap_err(),
+            wb.load_table("Nope", usize::MAX).unwrap_err(),
+            Workbook::open("Sales", Cursor::new(b"junk".to_vec()), usize::MAX)
+                .err()
+                .unwrap(),
+        ] {
+            assert!(
+                matches!(&err, Error::Source { source, .. } if source == "Sales"),
+                "{err:?}"
+            );
+        }
+        let s = Source::Excel {
+            file: File::Bytes {
+                name: "book.xlsx".into(),
+                bytes: crate::source::Bytes::from(sample()),
+            },
+            item: "Nope".into(),
+            kind: ExcelKind::Sheet,
+        };
+        let culture = crate::culture::Culture::get("en-US").unwrap();
+        let err = s.read_batch("Sales", 10, culture, usize::MAX).unwrap_err();
+        assert!(err.to_string().starts_with("Sales: "), "{err}");
     }
 }

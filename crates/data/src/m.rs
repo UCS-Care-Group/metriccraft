@@ -219,10 +219,14 @@ fn step_m(step: &Step, prev: Expr, culture: Option<&Culture>) -> Expr {
                 Combine::And => BinOp::And,
                 Combine::Or => BinOp::Or,
             };
-            let body = conditions
-                .iter()
-                .map(cond_m)
-                .reduce(|a, b| Expr::Binary(op, Box::new(a), Box::new(b)));
+            // One flat chain (not a nested tree), so printing and dropping it never recurse
+            // once per condition.
+            let mut operands: Vec<Expr> = conditions.iter().map(cond_m).collect();
+            let body = match operands.len() {
+                0 => None,
+                1 => operands.pop(),
+                _ => Some(Expr::Chain(op, operands)),
+            };
             let body = match body {
                 // An empty And keeps every row, an empty Or none.
                 None => Expr::Logical(*combine == Combine::And),
@@ -571,6 +575,14 @@ fn cond_from(e: &Expr) -> Option<Condition> {
 /// `a and b and c` → its conditions; a different operator inside is unsupported (`None`).
 fn flatten(e: &Expr, op: BinOp, out: &mut Vec<Condition>) -> Option<()> {
     match unparen(e) {
+        // A bracketed run of the same operator (`a or (b or c)`) recurses once per bracket,
+        // which the parser's nesting cap bounds.
+        Expr::Chain(o, operands) if *o == op => {
+            for e in operands {
+                flatten(e, op, out)?;
+            }
+            Some(())
+        }
         Expr::Binary(o, a, b) if *o == op => {
             flatten(a, op, out)?;
             flatten(b, op, out)
@@ -587,7 +599,7 @@ fn filter_from(body: &Expr) -> Option<Step> {
     let (combine, op) = match body {
         Expr::Logical(true) => (Combine::And, BinOp::And),
         Expr::Logical(false) => (Combine::Or, BinOp::Or),
-        Expr::Binary(BinOp::Or, ..) => (Combine::Or, BinOp::Or),
+        Expr::Chain(BinOp::Or, _) | Expr::Binary(BinOp::Or, ..) => (Combine::Or, BinOp::Or),
         _ => (Combine::And, BinOp::And),
     };
     let mut conditions = Vec::new();
@@ -990,6 +1002,42 @@ in
                 let e = parse(&m).unwrap_err();
                 assert!(e.to_string().contains("conditions"), "{e}");
             }
+        }
+    }
+
+    /// #45: a 1,000-condition filter round-trips (it hit the parser's nesting cap at ~190 when
+    /// `and`/`or` were binary), and its M is byte-identical to the binary tree's.
+    #[test]
+    fn a_thousand_condition_filter_round_trips_as_before() {
+        for (combine, op) in [(Combine::And, BinOp::And), (Combine::Or, BinOp::Or)] {
+            let conditions: Vec<Condition> = (0..1_000)
+                .map(|i| Condition {
+                    column: "A".into(),
+                    op: Op::Equals,
+                    value: Value::Number(i as f64),
+                })
+                .collect();
+            let tree = conditions
+                .iter()
+                .map(cond_m)
+                .reduce(|a, b| Expr::Binary(op, Box::new(a), Box::new(b)))
+                .unwrap();
+            let step = Step::FilteredRows {
+                combine,
+                conditions,
+            };
+            let m = round_trip(&query(csv(), vec![step.clone()]));
+            let printed = step_m(&step, Expr::ident("Source"), None);
+            let old = Expr::call(
+                "Table.SelectRows",
+                vec![
+                    Expr::ident("Source"),
+                    Expr::Each(Box::new(Expr::Paren(Box::new(tree)))),
+                ],
+                false,
+            );
+            assert_eq!(opendash_m::print(&printed), opendash_m::print(&old));
+            assert!(m.contains(&opendash_m::print(&old)));
         }
     }
 

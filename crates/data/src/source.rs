@@ -202,7 +202,8 @@ impl Source {
                     Input::Disk(f) => Seekable::Disk(BufReader::new(f)),
                     Input::Memory(b) => Seekable::Memory(Cursor::new(b)),
                 };
-                let mut wb = xlsx::Workbook::open(input, limit)?;
+                // Walks only the sheet read, not every sheet (review M1 #11).
+                let mut wb = xlsx::Workbook::open_item(name, input, limit, item, *kind)?;
                 let decimal = culture.decimal;
                 match kind {
                     ExcelKind::Sheet => wb.read_sheet(item, rows, decimal, limit, sink, errors),

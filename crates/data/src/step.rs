@@ -77,10 +77,11 @@ pub enum Step {
     MergedQueries(Merge),
 }
 
-/// Most conditions in one Filtered Rows step. Its M is one `and`/`or` chain, and the M parser
-/// counts each operator as a nesting level (`opendash_m::MAX_DEPTH`), so a longer chain would
-/// print M that doesn't parse back. The command, the M reader and the step itself enforce it.
-pub const MAX_CONDITIONS: usize = 100;
+/// Most conditions in one Filtered Rows step: a bound on hostile input (each condition is a
+/// column test per row), far past any hand-built filter. Its M is one flat `and`/`or` chain
+/// (`opendash_m::Expr::Chain`, one nesting level however long), well inside the M parser's
+/// size and token caps. The command, the M reader and the step itself enforce it.
+pub const MAX_CONDITIONS: usize = 10_000;
 
 /// The error for a Filtered Rows step with `n` > [`MAX_CONDITIONS`] conditions.
 pub fn too_many_conditions(n: usize) -> String {
