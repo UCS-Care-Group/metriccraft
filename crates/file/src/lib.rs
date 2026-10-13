@@ -20,7 +20,9 @@
 //! - [`escape`]: deterministic file names for table and query names.
 //! - [`package`]: the `.odash` zip.
 //! - [`folder`]: the Project folder on disk.
+//! - [`cache`]: the Data cache (`.cache/`): Parquet per table and its metadata.
 
+pub mod cache;
 pub mod escape;
 pub mod folder;
 pub mod manifest;
@@ -31,7 +33,9 @@ pub mod syntax;
 use std::collections::BTreeMap;
 use std::fmt;
 
-pub use folder::{Recover, read_folder, read_package, write_folder, write_package};
+pub use folder::{
+    Recover, read_folder, read_package, read_package_with, write_folder, write_package,
+};
 pub use manifest::{FORMAT_VERSION, MANIFEST};
 pub use package::{pack, unpack};
 pub use project::{Preserved, Project, decode, empty_table, encode};

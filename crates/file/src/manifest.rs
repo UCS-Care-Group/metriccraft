@@ -141,7 +141,7 @@ impl Manifest {
 }
 
 /// `v` with every object's keys sorted, whatever map order serde_json was built with.
-fn sorted(v: Value) -> Value {
+pub(crate) fn sorted(v: Value) -> Value {
     match v {
         Value::Object(map) => {
             let mut entries: Vec<(String, Value)> = map.into_iter().collect();

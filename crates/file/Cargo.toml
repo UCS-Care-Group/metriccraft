@@ -15,7 +15,9 @@ workspace = true
 opendash-data = { path = "../data" }
 opendash-model = { path = "../model" }
 arrow-array.workspace = true
+arrow-cast.workspace = true
 arrow-schema.workspace = true
+parquet.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 zip.workspace = true

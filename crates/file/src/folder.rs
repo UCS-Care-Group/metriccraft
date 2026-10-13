@@ -25,8 +25,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::manifest::{FORMAT_VERSION, MANIFEST, MAX_MANIFEST, Manifest, hash};
+use crate::package::{Limits, unpack_with};
 use crate::project::{GITIGNORE, GITIGNORE_TEXT};
-use crate::{Error, FileSet, Result, pack, unpack};
+use crate::{Error, FileSet, Result, pack};
 
 /// The staging folder inside a Project, while a save is in progress.
 pub const STAGING: &str = ".staging";
@@ -47,7 +48,7 @@ pub enum Recover {
     LastGood,
 }
 
-fn io(path: &Path, e: impl std::fmt::Display) -> Error {
+pub(crate) fn io(path: &Path, e: impl std::fmt::Display) -> Error {
     Error::Io {
         path: path.display().to_string(),
         message: e.to_string(),
@@ -55,7 +56,7 @@ fn io(path: &Path, e: impl std::fmt::Display) -> Error {
 }
 
 /// `root` + a `/`-separated relative path (already checked by [`crate::check_path`]).
-fn join(root: &Path, rel: &str) -> PathBuf {
+pub(crate) fn join(root: &Path, rel: &str) -> PathBuf {
     let mut p = root.to_path_buf();
     p.extend(rel.split('/'));
     p
@@ -63,7 +64,7 @@ fn join(root: &Path, rel: &str) -> PathBuf {
 
 /// The file's bytes, or `None` if there is nothing there. A non-file or one over `cap` bytes is
 /// an error.
-fn read_capped(path: &Path, cap: u64) -> Result<Option<Vec<u8>>> {
+pub(crate) fn read_capped(path: &Path, cap: u64) -> Result<Option<Vec<u8>>> {
     let meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -78,7 +79,7 @@ fn read_capped(path: &Path, cap: u64) -> Result<Option<Vec<u8>>> {
     fs::read(path).map(Some).map_err(|e| io(path, e))
 }
 
-fn write_file(path: &Path, bytes: &[u8]) -> Result {
+pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> Result {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
     }
@@ -87,14 +88,14 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result {
     f.sync_all().map_err(|e| io(path, e))
 }
 
-fn rename(from: &Path, to: &Path) -> Result {
+pub(crate) fn rename(from: &Path, to: &Path) -> Result {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
     }
     fs::rename(from, to).map_err(|e| io(from, e))
 }
 
-fn exists(path: &Path) -> bool {
+pub(crate) fn exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
 
@@ -224,8 +225,15 @@ pub fn write_folder(root: &Path, files: &FileSet) -> Result {
 
 /// A Package file's files (checked as [`crate::unpack`] does).
 pub fn read_package(path: &Path) -> Result<FileSet> {
-    let bytes = read_capped(path, MAX_PACKAGE)?.ok_or_else(|| io(path, "there is no such file"))?;
-    unpack(&bytes)
+    read_package_with(path, Limits::default())
+}
+
+/// [`read_package`] with `limits`; the file may be up to [`MAX_PACKAGE`] or the limits' total,
+/// whichever is larger.
+pub fn read_package_with(path: &Path, limits: Limits) -> Result<FileSet> {
+    let cap = MAX_PACKAGE.max(limits.bytes.saturating_add(limits.cache));
+    let bytes = read_capped(path, cap)?.ok_or_else(|| io(path, "there is no such file"))?;
+    unpack_with(&bytes, limits)
 }
 
 /// Saves `files` as a Package at `path`: written beside it as `<name>.tmp`, then renamed over it.

@@ -20,15 +20,15 @@
 //!
 //! **Source paths.** A file inside the Project's folder (`root`) is written relative to it, with
 //! `/`; any other path absolute. On read, relative paths are resolved against `root`.
-//! ponytail: `.local/` remapping of source paths lands with M2.6.
+//! ponytail: `.local/` remapping of source paths (Local overrides) is still to come.
 //!
 //! **Unknown content.** Keys, flags, blocks and objects we don't know, in any part, are kept
 //! ([`Preserved`], per object: model, relationships, each table, each query) and written back
 //! after the known items of the object they were in. Unknown parts listed in the Manifest are
 //! kept as they are; unknown Manifest keys too. Renaming an object loses its unknown items.
 //!
-//! **No data.** M2.4 saves definitions only (the Data cache is M2.6), so on open every Table is
-//! empty and every loaded Query is Stale.
+//! **No data.** The parts are definitions only; the Data cache (`.cache/`) is [`crate::cache`],
+//! written and read beside them by the app.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -281,14 +281,14 @@ fn parse_relationship(h: &str) -> Option<(String, String, String, String)> {
     rest.is_empty().then_some((ft, fc, tt, tc))
 }
 
-fn source_file_mut(source: &mut Source) -> &mut File {
+pub(crate) fn source_file_mut(source: &mut Source) -> &mut File {
     match source {
         Source::Csv { file, .. } | Source::Parquet { file } | Source::Excel { file, .. } => file,
     }
 }
 
 /// `path` relative to `root` with `/` separators, if it is inside it.
-fn relative(path: &Path, root: &Path) -> Option<String> {
+pub(crate) fn relative(path: &Path, root: &Path) -> Option<String> {
     let rest = path.strip_prefix(root).ok()?;
     let parts: Option<Vec<&str>> = rest
         .components()
@@ -861,7 +861,7 @@ fn check(project: &Project) -> Result {
 }
 
 /// An empty loaded table with `table`'s columns and Model types: what a Table is on open until
-/// it is refreshed (the Data cache arrives in M2.6).
+/// it is refreshed, when it has no usable Data cache.
 pub fn empty_table(table: &ModelTable) -> opendash_data::Result<Table> {
     let fields: Vec<Field> = table
         .columns

@@ -845,9 +845,11 @@ name = "opendash-file"
 version = "0.0.0"
 dependencies = [
  "arrow-array",
+ "arrow-cast",
  "arrow-schema",
  "opendash-data",
  "opendash-model",
+ "parquet",
  "serde_json",
  "sha2",
  "zip",

@@ -87,6 +87,7 @@ fn zip_bombs_and_huge_entry_counts_are_refused() {
     let small = Limits {
         entries: 10,
         bytes: 6 << 20,
+        cache: 6 << 20,
     };
     let e = unpack_with(&zip, small).unwrap_err();
     assert!(e.to_string().contains("uncompressed"), "{e}");
