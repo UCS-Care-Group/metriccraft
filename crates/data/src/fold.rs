@@ -13,7 +13,6 @@
 //! compared exactly.
 
 use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hasher};
 use std::sync::Arc;
 
 use arrow_array::cast::AsArray;
@@ -94,10 +93,16 @@ fn fold<K: ArrowDictionaryKeyType>(
         return Ok(None);
     };
     let mut buf = String::new();
+    // ponytail: FNV-1a over the lowercase bytes, ASCII lowered on the fly (no copy); SipHash
+    // cost ~25% of a 1M-row import. Collisions only cost an exact compare below.
     let hash = |s: &str, buf: &mut String| {
-        let mut h = DefaultHasher::new();
-        h.write(lower(s, buf).as_bytes());
-        h.finish()
+        let fnv = |h: u64, b: u8| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+        let start = 0xcbf2_9ce4_8422_2325;
+        if s.is_ascii() {
+            s.bytes().fold(start, |h, b| fnv(h, b.to_ascii_lowercase()))
+        } else {
+            lower(s, buf).bytes().fold(start, fnv)
+        }
     };
     let mut hashes: Vec<u64> = values.iter().flatten().map(|s| hash(s, &mut buf)).collect();
     hashes.sort_unstable();
