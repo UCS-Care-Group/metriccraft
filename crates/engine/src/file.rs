@@ -66,7 +66,7 @@ impl Location {
 
     /// The folder source paths are made relative to: the Project folder, or the folder holding
     /// the Package.
-    fn root(&self) -> Option<PathBuf> {
+    pub(crate) fn root(&self) -> Option<PathBuf> {
         let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
         match self {
             Self::Folder(p) => Some(absolute(p)),
@@ -78,19 +78,19 @@ impl Location {
 /// The file side of the open document.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FileState {
-    location: Option<Location>,
+    pub(crate) location: Option<Location>,
     /// The Project culture read from the files; `None` for a new document (en-US).
     culture: Option<String>,
     /// Kept up to date by renames (`rename.rs`).
     pub(crate) preserved: Preserved,
     /// The Data cache as last written to (or read from) the Project folder at `location`, by
     /// table file stem. Empty for a Package, which is always written whole.
-    cache: BTreeMap<String, Saved>,
+    pub(crate) cache: BTreeMap<String, Saved>,
 }
 
 /// One table's cache in the Project folder: which data, and its metadata bytes.
 #[derive(Clone, Debug, PartialEq)]
-struct Saved {
+pub(crate) struct Saved {
     data: DataKey,
     meta: Vec<u8>,
 }
@@ -121,7 +121,7 @@ impl DataKey {
 }
 
 /// One table's cache as it would be saved now.
-struct Entry {
+pub(crate) struct Entry {
     stem: String,
     /// A clone: shares the columns.
     table: Table,
@@ -133,7 +133,7 @@ struct Entry {
 const UNAPPLIED: &str = "unapplied";
 
 /// Where opening reads the Data cache from.
-enum CacheFrom<'a> {
+pub(crate) enum CacheFrom<'a> {
     /// The Project folder on disk.
     Folder(&'a Path),
     /// The `.cache/` entries of the files (a Package).
@@ -165,7 +165,9 @@ impl App {
     pub fn open_package_bytes(&mut self, bytes: &[u8]) -> Result {
         let files = opendash_file::package::unpack_with(bytes, self.package_limits())
             .map_err(Error::File)?;
-        self.open_files(files, None, None, &CacheFrom::Files)
+        self.open_files(files, None, None, &CacheFrom::Files, None)?;
+        self.discard_own_recovery();
+        Ok(())
     }
 
     /// The document as `.odash` Package bytes, with its Data cache (the web build's Save: a
@@ -197,7 +199,7 @@ impl App {
         }
     }
 
-    fn files(&self, root: Option<&Path>) -> Result<FileSet> {
+    pub(crate) fn files(&self, root: Option<&Path>) -> Result<FileSet> {
         opendash_file::encode(&self.project(), root, &self.file.preserved).map_err(Error::File)
     }
 
@@ -218,7 +220,7 @@ impl App {
 
     /// Every table stem, and the cache of each table that has data to keep (see the module
     /// docs), with paths in its metadata relative to `root`.
-    fn cache_entries(&self, root: Option<&Path>) -> Result<Vec<Entry>> {
+    pub(crate) fn cache_entries(&self, root: Option<&Path>) -> Result<Vec<Entry>> {
         let doc = self.document();
         let names: Vec<&str> = doc.model.tables.iter().map(|t| t.name.as_str()).collect();
         let mut out = Vec::new();
@@ -252,13 +254,17 @@ impl App {
         Ok(out)
     }
 
-    fn open_files(
+    /// Replaces the Document with `files`. `recovered`: the Stale Queries recorded with a
+    /// recovery copy, Stale whatever their cache says (e.g. a Query edited and edited back).
+    pub(crate) fn open_files(
         &mut self,
         mut files: FileSet,
         location: Option<Location>,
         root: Option<&Path>,
         from: &CacheFrom<'_>,
+        recovered: Option<&BTreeSet<String>>,
     ) -> Result {
+        let recorded = |name: &String| recovered.is_some_and(|r| r.contains(name));
         let (project, preserved) = opendash_file::decode(&files, root).map_err(Error::File)?;
         let mut doc = Document::default();
         let mut saved = BTreeMap::new();
@@ -280,6 +286,7 @@ impl App {
                     let name = model.name.clone();
                     if meta.provenance.is_stale(&project.queries, &name)
                         || project.unloaded.contains(&name)
+                        || recorded(&name)
                     {
                         stale_data = stale_data.saturating_add(1);
                     } else {
@@ -318,6 +325,13 @@ impl App {
             .filter(|q| !fresh.contains(&q.name))
             .map(|q| q.name.clone())
             .collect();
+        doc.stale.extend(
+            project
+                .queries
+                .iter()
+                .filter(|q| recorded(&q.name))
+                .map(|q| q.name.clone()),
+        );
         let no_data = doc.stale.len().saturating_sub(stale_data);
         doc.queries = project.queries;
         doc.unloaded = project.unloaded;
@@ -374,30 +388,7 @@ impl App {
                 if self.file.location.as_ref() != Some(&location) {
                     saved.clear();
                 }
-                let names: Vec<&str> = self
-                    .document()
-                    .model
-                    .tables
-                    .iter()
-                    .map(|t| t.name.as_str())
-                    .collect();
-                let keep: BTreeSet<String> = file_stems(&names).into_iter().collect();
-                let mut next = BTreeMap::new();
-                for e in entries {
-                    let data = DataKey::of(&e.table);
-                    let prev = saved.remove(&e.stem);
-                    let same = cache::exists_in(p, &e.stem)
-                        && prev.as_ref().is_some_and(|s| s.data == data);
-                    if !same {
-                        let bytes = cache::encode_table(&e.table).map_err(Error::File)?;
-                        cache::write(p, &e.stem, Some(&bytes), &e.meta).map_err(Error::File)?;
-                    } else if prev.as_ref().is_some_and(|s| s.meta != e.meta) {
-                        cache::write(p, &e.stem, None, &e.meta).map_err(Error::File)?;
-                    }
-                    next.insert(e.stem, Saved { data, meta: e.meta });
-                }
-                cache::remove_others(p, &keep).map_err(Error::File)?;
-                self.file.cache = next;
+                self.file.cache = write_cache(p, entries, saved, &self.stems())?;
             }
             Location::Package(p) => {
                 let files = self.package_files(root.as_deref(), data)?;
@@ -406,8 +397,51 @@ impl App {
             }
         }
         self.file.location = Some(location);
+        self.clean = Some(self.version);
+        // Saved: the recovery copy is no longer needed (best effort: the save itself succeeded).
+        self.discard_own_recovery();
         Ok(())
     }
+
+    /// The file stem of every model Table.
+    pub(crate) fn stems(&self) -> BTreeSet<String> {
+        let names: Vec<&str> = self
+            .document()
+            .model
+            .tables
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        file_stems(&names).into_iter().collect()
+    }
+}
+
+/// Writes the Data cache `entries` into the folder `dir` and deletes the cache of tables not in
+/// `keep`. `prev` is what `dir` holds (as last written there): a table whose data is the same
+/// buffers isn't rewritten, and its metadata only if its bytes changed. Each table is written in
+/// [`cache::write`]'s crash-safe order. Returns what `dir` now holds.
+pub(crate) fn write_cache(
+    dir: &Path,
+    entries: Vec<Entry>,
+    mut prev: BTreeMap<String, Saved>,
+    keep: &BTreeSet<String>,
+) -> Result<BTreeMap<String, Saved>> {
+    let mut next = BTreeMap::new();
+    for e in entries {
+        let data = DataKey::of(&e.table);
+        let before = prev.remove(&e.stem);
+        let same =
+            cache::exists_in(dir, &e.stem) && before.as_ref().is_some_and(|s| s.data == data);
+        if !same {
+            let bytes = cache::encode_table(&e.table).map_err(Error::File)?;
+            cache::write(dir, &e.stem, Some(&bytes), &e.meta).map_err(Error::File)?;
+        } else if before.as_ref().is_some_and(|s| s.meta != e.meta) {
+            cache::write(dir, &e.stem, None, &e.meta).map_err(Error::File)?;
+        }
+        next.insert(e.stem, Saved { data, meta: e.meta });
+    }
+    cache::remove_others(dir, keep).map_err(Error::File)?;
+    Ok(next)
 }
 
 /// Table `model`'s cached data, its metadata and the metadata's bytes; `None` if there is no
@@ -453,6 +487,7 @@ fn read_cached(
 pub(crate) fn new(app: &mut App, _params: &Value) -> Result {
     app.replace(Document::default());
     app.file = FileState::default();
+    app.discard_own_recovery();
     Ok(())
 }
 
@@ -483,14 +518,24 @@ pub(crate) fn open(app: &mut App, params: &Value) -> Result {
                 Some(location),
                 root.as_deref(),
                 &CacheFrom::Folder(&dir),
-            )
+                None,
+            )?;
         }
         Location::Package(p) => {
             let files =
                 opendash_file::read_package_with(p, app.package_limits()).map_err(Error::File)?;
-            app.open_files(files, Some(location), root.as_deref(), &CacheFrom::Files)
+            app.open_files(
+                files,
+                Some(location),
+                root.as_deref(),
+                &CacheFrom::Files,
+                None,
+            )?;
         }
     }
+    // The document it replaced is gone, unsaved changes and all: so is its recovery copy.
+    app.discard_own_recovery();
+    Ok(())
 }
 
 fn is_package_path(path: &Path) -> bool {
