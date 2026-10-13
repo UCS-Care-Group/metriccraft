@@ -488,3 +488,174 @@ fn new_starts_an_empty_document() {
     assert!(!app.can_undo());
     assert_eq!(app.location(), None);
 }
+
+// ---- Local overrides: source-path remapping (M2.9) ----
+
+/// Every tracked file of a Project (not `.cache/`, `.local/`).
+fn tracked(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    snapshot(root)
+        .into_iter()
+        .filter(|(k, _)| !k.starts_with(".cache") && !k.starts_with(".local"))
+        .collect()
+}
+
+/// Copies the tracked files of Project `from` to a new folder `to` (a clone: no Data cache).
+fn clone_project(from: &Path, to: &Path) {
+    for (rel, bytes) in tracked(from) {
+        let path = to.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+}
+
+#[test]
+fn a_remapped_project_loads_its_sources_without_touching_tracked_files() {
+    let dir = Dir::new();
+    let mut app = app(&dir);
+    app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
+        .unwrap();
+    let original = app.document().clone();
+    // A second machine: a clone, with Sales somewhere else.
+    clone_project(&dir.0.join("Proj"), &dir.0.join("B"));
+    std::fs::create_dir_all(dir.0.join("share")).unwrap();
+    std::fs::write(dir.0.join("share/Sales.csv"), SALES).unwrap();
+    let before = tracked(&dir.0.join("B"));
+
+    let mut b = open(&dir, "B");
+    assert_eq!(stale(&b), ["Regions", "Sales"]);
+    b.run(
+        "file.remapSource",
+        &json!({"from": "data/Sales.csv", "to": dir.path("share/Sales.csv")}),
+    )
+    .unwrap();
+    assert!(b.notice().unwrap().contains("Refresh"), "{:?}", b.notice());
+    assert!(!b.can_undo(), "not undoable");
+    let paths = std::fs::read_to_string(dir.0.join("B/.local/paths.odl")).unwrap();
+    assert_eq!(
+        paths,
+        format!(
+            "remap 'data/Sales.csv'\n  to: '{}'\n",
+            dir.path("share/Sales.csv")
+        )
+    );
+    b.run("home.refresh", &Value::Null).unwrap();
+    assert!(b.document().stale.is_empty());
+    assert_eq!(b.document().tables, original.tables);
+    b.run("file.save", &Value::Null).unwrap();
+    assert_eq!(tracked(&dir.0.join("B")), before, "tracked files untouched");
+    let meta = std::fs::read_to_string(dir.0.join("B/.cache/Sales.meta")).unwrap();
+    assert!(meta.contains(r#""path": "data/Sales.csv""#), "{meta}");
+
+    // Reopened: the remap applies again; nothing Stale.
+    let again = open(&dir, "B");
+    assert!(again.document().stale.is_empty(), "{:?}", stale(&again));
+    assert_eq!(again.document().tables, original.tables);
+    assert_eq!(again.notice(), None);
+    assert_eq!(
+        again.document().queries[0].source.file(),
+        &opendash_data::source::File::Path(dir.0.join("share/Sales.csv"))
+    );
+
+    // A Package never carries `.local/` and keeps the Project's paths.
+    let files = opendash_file::unpack(&again.package_bytes().unwrap()).unwrap();
+    assert!(files.keys().all(|k| !k.starts_with(".local")));
+    let odq = String::from_utf8(files["queries/Sales.odq"].clone()).unwrap();
+    let path = dir.0.join("B/data/Sales.csv").display().to_string();
+    assert!(odq.contains(&path), "{odq}");
+}
+
+#[test]
+fn a_remap_alone_never_makes_a_table_stale() {
+    let dir = Dir::new();
+    let mut app = app(&dir);
+    app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
+        .unwrap();
+    // The file moves (a rename keeps its size and modified time).
+    std::fs::rename(dir.0.join("Proj/data/Sales.csv"), dir.0.join("moved.csv")).unwrap();
+    let mut other = open(&dir, "Proj");
+    assert_eq!(stale(&other), ["Sales"], "its file is gone");
+    other
+        .run(
+            "file.remapSource",
+            &json!({"from": "data/Sales.csv", "to": dir.path("moved.csv")}),
+        )
+        .unwrap();
+    assert_eq!(stale(&other), ["Sales"], "the command changes no flag");
+    let reopened = open(&dir, "Proj");
+    assert!(
+        reopened.document().stale.is_empty(),
+        "{:?}",
+        stale(&reopened)
+    );
+
+    // Removing the remap: the Project's own path again, Stale (the file isn't there).
+    let mut other = open(&dir, "Proj");
+    other
+        .run(
+            "file.remapSource",
+            &json!({"from": "data/Sales.csv", "to": null}),
+        )
+        .unwrap();
+    assert!(!dir.0.join("Proj/.local/paths.odl").exists());
+    assert_eq!(
+        other.document().queries[0].source.file(),
+        &opendash_data::source::File::Path(dir.0.join("Proj/data/Sales.csv"))
+    );
+    assert_eq!(stale(&open(&dir, "Proj")), ["Sales"]);
+}
+
+#[test]
+fn remap_needs_a_project_folder_and_good_params() {
+    let dir = Dir::new();
+    let mut app = app(&dir);
+    let p = json!({"from": "a.csv", "to": "b.csv"});
+    assert!(app.run("file.remapSource", &p).is_err(), "unsaved");
+    app.run("file.saveAs", &json!({"path": dir.path("P.odash")}))
+        .unwrap();
+    assert!(app.run("file.remapSource", &p).is_err(), "a Package");
+    app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
+        .unwrap();
+    for bad in [
+        json!({}),
+        json!({"from": ""}),
+        json!({"from": "a\nb", "to": "c"}),
+        json!({"from": "a", "to": 3}),
+        json!({"from": "a", "to": " "}),
+    ] {
+        assert!(app.run("file.remapSource", &bad).is_err(), "{bad}");
+    }
+    assert!(!dir.0.join("Proj/.local").exists());
+    // A broken paths.odl is ignored, with a notice.
+    std::fs::create_dir_all(dir.0.join("Proj/.local")).unwrap();
+    std::fs::write(dir.0.join("Proj/.local/paths.odl"), "nonsense here\n").unwrap();
+    let other = open(&dir, "Proj");
+    let notice = other.notice().unwrap();
+    assert!(notice.contains(".local/paths.odl is ignored"), "{notice}");
+    assert!(other.document().stale.is_empty());
+}
+
+#[test]
+fn rename_then_save_and_open_keeps_tables_fresh() {
+    let dir = Dir::new();
+    let mut app = app(&dir);
+    app.run(
+        "home.mergeQueries",
+        &json!({"query": "Sales", "keys": ["Region"], "with": "Regions", "withKeys": ["Region"]}),
+    )
+    .unwrap();
+    app.run("home.closeApply", &Value::Null).unwrap();
+    app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
+        .unwrap();
+    app.run(
+        "modeling.renameTable",
+        &json!({"table": "Regions", "name": "Areas"}),
+    )
+    .unwrap();
+    assert!(app.document().provenance.contains_key("Areas"));
+    assert!(!app.document().provenance.contains_key("Regions"));
+    app.run("file.save", &Value::Null).unwrap();
+    let other = open(&dir, "Proj");
+    assert!(other.document().stale.is_empty(), "{:?}", stale(&other));
+    assert_eq!(other.notice(), None);
+    assert_eq!(other.document(), app.document());
+}

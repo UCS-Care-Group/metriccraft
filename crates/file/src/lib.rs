@@ -21,10 +21,12 @@
 //! - [`package`]: the `.odash` zip.
 //! - [`folder`]: the Project folder on disk.
 //! - [`cache`]: the Data cache (`.cache/`): Parquet per table and its metadata.
+//! - [`local`]: Local overrides (`.local/`): source-path remapping.
 
 pub mod cache;
 pub mod escape;
 pub mod folder;
+pub mod local;
 pub mod manifest;
 pub mod package;
 pub mod project;

@@ -9,6 +9,7 @@ mod file;
 mod load;
 mod model;
 mod query;
+mod recovery;
 mod relationship;
 mod rename;
 
@@ -16,6 +17,7 @@ pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};
 pub use file::Location;
 pub use load::{LoadReport, Loaded};
+pub use recovery::{DEFAULT_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES, RecoveryInfo, recovery_dir};
 
 /// Errors from running commands.
 #[derive(Clone, Debug, PartialEq)]

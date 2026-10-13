@@ -4,6 +4,7 @@ use crate::file;
 use crate::load;
 use crate::model::{self, has_tables};
 use crate::query::{self, has_queries};
+use crate::recovery;
 use crate::relationship;
 use crate::rename;
 use crate::{App, Document, Result};
@@ -89,6 +90,36 @@ pub static COMMANDS: &[Command] = &[
         params: file::SAVE_AS_PARAMS,
         enabled: |_| true,
         run: Run::App(file::save_as),
+    },
+    // Local overrides (`file.rs`): where a Source file is on this machine.
+    Command {
+        id: "file.remapSource",
+        label: "Remap source path",
+        // Like Data source settings > Change Source, but for this user only: not on the ribbon.
+        ribbon: "",
+        shortcut: None,
+        params: file::REMAP_PARAMS,
+        enabled: |_| true,
+        run: Run::App(file::remap_source),
+    },
+    // Autosave recovery (ADR 0003; `recovery.rs`): offered at launch, as Power BI's AutoRecovery.
+    Command {
+        id: "file.recover",
+        label: "Recover",
+        ribbon: "",
+        shortcut: None,
+        params: recovery::RECOVER_PARAMS,
+        enabled: |_| true,
+        run: Run::App(recovery::recover),
+    },
+    Command {
+        id: "file.discardRecovery",
+        label: "Discard",
+        ribbon: "",
+        shortcut: None,
+        params: recovery::DISCARD_PARAMS,
+        enabled: |_| true,
+        run: Run::App(recovery::discard),
     },
     // Get Data and Refresh (spec S-1, S-2); both undoable, both report what they loaded.
     Command {
@@ -432,5 +463,16 @@ pub static COMMANDS: &[Command] = &[
         params: "enabled: logical — default: the opposite of now",
         enabled: |_| true,
         run: Run::Edit(relationship::set_autodetect),
+    },
+    Command {
+        id: "options.autosaveMinutes",
+        label: "Store AutoRecovery information every N minutes",
+        // File > Options and settings > Options > Global > Auto recovery. An app option, not
+        // undoable.
+        ribbon: "",
+        shortcut: None,
+        params: "minutes: integer — 0 (off) to 1440; default 5",
+        enabled: |_| true,
+        run: Run::App(recovery::set_minutes),
     },
 ];

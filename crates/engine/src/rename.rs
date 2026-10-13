@@ -5,7 +5,9 @@
 //! renames the Query, its loaded Table and model Table, every Relationship end on it, every
 //! Merged Queries step in other Queries that takes it in (`Merge::query`; the merged column's
 //! own name, `Merge::column`, is the other Query's and is kept), and its Stale / Enable load
-//! flags. Nothing is reloaded and nothing goes Stale: the data is the same.
+//! flags, and its loaded data's provenance (so a save and open keep it fresh; a Query that merges
+//! it keeps its fresh provenance too). Nothing is reloaded and nothing goes Stale: the data is
+//! the same.
 //!
 //! **Rename a model Column** (`modeling.renameColumn`): Power BI renames a column of an import
 //! Table in Data / Report / Model view by adding a *Renamed Columns* step to its Query (Microsoft
@@ -38,6 +40,7 @@
 //!   *Enable load* (we copy it).
 
 use opendash_data::step::Step;
+use opendash_file::cache::m_hash;
 use opendash_model::same_name;
 use serde_json::Value;
 
@@ -86,6 +89,14 @@ fn rename(app: &mut App, id: &str, old: String, params: &Value) -> Result {
 
 /// Renames Query and Table `old` to `new` everywhere (see the module doc).
 fn rename_in(doc: &mut Document, old: &str, new: &str) {
+    // Provenance current before the rename stays current: the renamed Table's moves with it,
+    // and a hash that changes only because a merge now names `new` is recomputed.
+    let current: Vec<String> = doc
+        .provenance
+        .iter()
+        .filter(|(t, p)| p.m == m_hash(&doc.queries, t))
+        .map(|(t, _)| t.clone())
+        .collect();
     for q in &mut doc.queries {
         if q.name == old {
             q.name = new.into();
@@ -102,6 +113,16 @@ fn rename_in(doc: &mut Document, old: &str, new: &str) {
     for set in [&mut doc.stale, &mut doc.unloaded] {
         if set.remove(old) {
             set.insert(new.into());
+        }
+    }
+    if let Some(p) = doc.provenance.remove(old) {
+        doc.provenance.insert(new.into(), p);
+    }
+    for t in current {
+        let t = if t == old { new.to_string() } else { t };
+        let m = m_hash(&doc.queries, &t);
+        if let Some(p) = doc.provenance.get_mut(&t) {
+            p.m = m;
         }
     }
 }
@@ -196,6 +217,7 @@ fn delete(doc: &mut Document, id: &str, name: &str) -> Result {
     doc.model.delete_table(name);
     doc.stale.remove(name);
     doc.unloaded.remove(name);
+    doc.provenance.remove(name);
     Ok(())
 }
 

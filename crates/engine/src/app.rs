@@ -49,6 +49,14 @@ pub struct App {
     /// Where the document was opened from or last saved to, and what its files held beyond it
     /// (`file.rs`). Not part of the Document: not undone.
     pub(crate) file: crate::file::FileState,
+    /// Bumped on every change to the Document (edit, load, undo, redo, open): what dirty
+    /// tracking compares (`recovery.rs`).
+    pub(crate) version: u64,
+    /// `version` when the Document last matched its files (opened, new or saved); `None` after a
+    /// recovery, which must be saved.
+    pub(crate) clean: Option<u64>,
+    /// Autosave recovery (`recovery.rs`): the interval option and this app's recovery copy.
+    pub(crate) autosave: crate::recovery::Autosave,
 }
 
 impl Default for App {
@@ -73,6 +81,9 @@ impl App {
             memory_cap: default_memory_cap(),
             notice: None,
             file: crate::file::FileState::default(),
+            version: 0,
+            clean: Some(0),
+            autosave: crate::recovery::Autosave::default(),
         }
     }
 
@@ -83,6 +94,28 @@ impl App {
         self.undo.clear();
         self.redo.clear();
         self.last_load = None;
+        self.changed();
+        self.clean = Some(self.version);
+    }
+
+    /// The Document changed (see `version`).
+    fn changed(&mut self) {
+        self.version = self.version.wrapping_add(1);
+    }
+
+    /// Whether the Document has changed since it was opened or last saved (a recovered one is
+    /// dirty until saved). Undoing back to the saved state still counts as a change.
+    pub fn is_dirty(&self) -> bool {
+        self.clean != Some(self.version)
+    }
+
+    /// Applies `f` to the Document and every undo and redo step, recording nothing: for changes
+    /// to the environment rather than the Document (a remapped source path), which undo must
+    /// not bring back.
+    pub(crate) fn every_document(&mut self, mut f: impl FnMut(&mut Document)) {
+        f(&mut self.doc);
+        self.undo.iter_mut().for_each(&mut f);
+        self.redo.iter_mut().for_each(&mut f);
     }
 
     pub fn document(&self) -> &Document {
@@ -151,6 +184,7 @@ impl App {
         self.push_undo(prev);
         self.redo.clear();
         self.notice = notice;
+        self.changed();
         Ok(())
     }
 
@@ -208,6 +242,7 @@ impl App {
         self.push_undo(prev);
         self.redo.clear();
         self.last_load = Some(report);
+        self.changed();
         Ok(())
     }
 
@@ -238,6 +273,7 @@ impl App {
             .ok_or_else(|| Error::Disabled("edit.undo".into()))?;
         self.redo.push(std::mem::replace(&mut self.doc, prev));
         self.last_load = None;
+        self.changed();
         Ok(())
     }
 
@@ -249,6 +285,7 @@ impl App {
         let prev = std::mem::replace(&mut self.doc, next);
         self.push_undo(prev);
         self.last_load = None;
+        self.changed();
         Ok(())
     }
 

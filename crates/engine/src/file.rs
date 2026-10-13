@@ -20,8 +20,14 @@
 //! no provenance (e.g. renamed since it loaded) is saved with its Query's current hash and
 //! files, or as Stale if its Query has unapplied edits; one that never loaded isn't saved.
 //!
-//! ponytail: `.local/` source-path remapping (Local overrides) is not done yet: it needs the
-//! remap applied on open and undone on save, so the definitions don't change per user.
+//! **Local overrides** (`opendash_file::local`, M2.9). A Project folder's `.local/paths.odl`
+//! remaps Source paths for this user: applied on open to the Queries and the cached Source
+//! fingerprints (the Document holds the paths actually read), reversed on every save (Project,
+//! Package, recovery copy), so definitions and cache metadata keep the Project's own paths and a
+//! remap alone never makes a table Stale. `file.remapSource` changes one: written to `.local/`
+//! at once and applied to the Document and its whole undo history, recording no undo step
+//! (Power BI's *Data source settings* > *Change Source* isn't undoable either). The Data
+//! cache's M hash leaves paths out, so it never sees a remap.
 //!
 //! The web build has no file system: it uses [`App::open_package_bytes`] and
 //! [`App::package_bytes`] instead of the commands' paths.
@@ -33,6 +39,7 @@ use opendash_data::Table;
 use opendash_data::source::Bytes;
 use opendash_file::cache::{self, Meta, Provenance};
 use opendash_file::escape::file_stems;
+use opendash_file::local::{self, Remaps};
 use opendash_file::package::Limits;
 use opendash_file::{FileSet, MANIFEST, Preserved, Project, Recover};
 use opendash_model::ModelTable;
@@ -66,7 +73,7 @@ impl Location {
 
     /// The folder source paths are made relative to: the Project folder, or the folder holding
     /// the Package.
-    fn root(&self) -> Option<PathBuf> {
+    pub(crate) fn root(&self) -> Option<PathBuf> {
         let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
         match self {
             Self::Folder(p) => Some(absolute(p)),
@@ -78,19 +85,21 @@ impl Location {
 /// The file side of the open document.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FileState {
-    location: Option<Location>,
+    pub(crate) location: Option<Location>,
     /// The Project culture read from the files; `None` for a new document (en-US).
     culture: Option<String>,
     /// Kept up to date by renames (`rename.rs`).
     pub(crate) preserved: Preserved,
     /// The Data cache as last written to (or read from) the Project folder at `location`, by
     /// table file stem. Empty for a Package, which is always written whole.
-    cache: BTreeMap<String, Saved>,
+    pub(crate) cache: BTreeMap<String, Saved>,
+    /// Source-path remaps from the Project folder's `.local/` (see the module docs).
+    remaps: Remaps,
 }
 
 /// One table's cache in the Project folder: which data, and its metadata bytes.
 #[derive(Clone, Debug, PartialEq)]
-struct Saved {
+pub(crate) struct Saved {
     data: DataKey,
     meta: Vec<u8>,
 }
@@ -121,7 +130,7 @@ impl DataKey {
 }
 
 /// One table's cache as it would be saved now.
-struct Entry {
+pub(crate) struct Entry {
     stem: String,
     /// A clone: shares the columns.
     table: Table,
@@ -133,7 +142,7 @@ struct Entry {
 const UNAPPLIED: &str = "unapplied";
 
 /// Where opening reads the Data cache from.
-enum CacheFrom<'a> {
+pub(crate) enum CacheFrom<'a> {
     /// The Project folder on disk.
     Folder(&'a Path),
     /// The `.cache/` entries of the files (a Package).
@@ -165,7 +174,9 @@ impl App {
     pub fn open_package_bytes(&mut self, bytes: &[u8]) -> Result {
         let files = opendash_file::package::unpack_with(bytes, self.package_limits())
             .map_err(Error::File)?;
-        self.open_files(files, None, None, &CacheFrom::Files)
+        self.open_files(files, None, None, &CacheFrom::Files, None)?;
+        self.discard_own_recovery();
+        Ok(())
     }
 
     /// The document as `.odash` Package bytes, with its Data cache (the web build's Save: a
@@ -191,13 +202,17 @@ impl App {
                 .culture
                 .clone()
                 .unwrap_or_else(|| Project::default().culture),
-            queries: doc.queries.clone(),
+            queries: {
+                let mut queries = doc.queries.clone();
+                local::remap_queries(&self.file.remaps, &mut queries, true);
+                queries
+            },
             unloaded: doc.unloaded.clone(),
             model: doc.model.clone(),
         }
     }
 
-    fn files(&self, root: Option<&Path>) -> Result<FileSet> {
+    pub(crate) fn files(&self, root: Option<&Path>) -> Result<FileSet> {
         opendash_file::encode(&self.project(), root, &self.file.preserved).map_err(Error::File)
     }
 
@@ -218,7 +233,7 @@ impl App {
 
     /// Every table stem, and the cache of each table that has data to keep (see the module
     /// docs), with paths in its metadata relative to `root`.
-    fn cache_entries(&self, root: Option<&Path>) -> Result<Vec<Entry>> {
+    pub(crate) fn cache_entries(&self, root: Option<&Path>) -> Result<Vec<Entry>> {
         let doc = self.document();
         let names: Vec<&str> = doc.model.tables.iter().map(|t| t.name.as_str()).collect();
         let mut out = Vec::new();
@@ -226,7 +241,7 @@ impl App {
             let Some(table) = doc.tables.iter().find(|t| t.name() == model.name) else {
                 continue;
             };
-            let provenance = match doc.provenance.get(&model.name) {
+            let mut provenance = match doc.provenance.get(&model.name) {
                 Some(p) => p.clone(),
                 None => {
                     let stale = cache::closure(&doc.queries, &model.name)
@@ -242,6 +257,7 @@ impl App {
                     p
                 }
             };
+            local::remap_provenance(&self.file.remaps, &mut provenance, true);
             let meta = Meta::new(table, model, provenance).map_err(Error::File)?;
             out.push(Entry {
                 stem,
@@ -252,20 +268,33 @@ impl App {
         Ok(out)
     }
 
-    fn open_files(
+    /// Replaces the Document with `files`. `recovered`: the Stale Queries recorded with a
+    /// recovery copy, Stale whatever their cache says (e.g. a Query edited and edited back).
+    pub(crate) fn open_files(
         &mut self,
         mut files: FileSet,
         location: Option<Location>,
         root: Option<&Path>,
         from: &CacheFrom<'_>,
+        recovered: Option<&BTreeSet<String>>,
     ) -> Result {
-        let (project, preserved) = opendash_file::decode(&files, root).map_err(Error::File)?;
+        let recorded = |name: &String| recovered.is_some_and(|r| r.contains(name));
+        let (mut project, preserved) = opendash_file::decode(&files, root).map_err(Error::File)?;
+        let mut problems = Vec::new();
+        let remaps = match &location {
+            Some(Location::Folder(p)) => local::read_paths(&root_of(p)).unwrap_or_else(|e| {
+                problems.push(format!("{} is ignored ({e})", local::PATHS));
+                Vec::new()
+            }),
+            _ => Vec::new(),
+        };
+        local::remap_queries(&remaps, &mut project.queries, false);
         let mut doc = Document::default();
         let mut saved = BTreeMap::new();
         let mut used = 0usize;
         let mut fresh = BTreeSet::new();
         let mut stale_data = 0usize;
-        let mut problems = Vec::new();
+        let mut cache_problems = Vec::new();
         let names: Vec<&str> = project
             .model
             .tables
@@ -275,11 +304,13 @@ impl App {
         for (model, stem) in project.model.tables.iter().zip(file_stems(&names)) {
             let limit = self.memory_cap().saturating_sub(used);
             match read_cached(&mut files, from, root, model, &stem, limit) {
-                Ok(Some((table, meta, meta_bytes))) => {
+                Ok(Some((table, mut meta, meta_bytes))) => {
+                    local::remap_provenance(&remaps, &mut meta.provenance, false);
                     used = used.saturating_add(table.memory());
                     let name = model.name.clone();
                     if meta.provenance.is_stale(&project.queries, &name)
                         || project.unloaded.contains(&name)
+                        || recorded(&name)
                     {
                         stale_data = stale_data.saturating_add(1);
                     } else {
@@ -303,7 +334,7 @@ impl App {
                         .push(opendash_file::empty_table(model).map_err(Error::Data)?);
                 }
                 Err(why) => {
-                    problems.push(format!("`{}` ({why})", model.name));
+                    cache_problems.push(format!("`{}` ({why})", model.name));
                     doc.tables
                         .push(opendash_file::empty_table(model).map_err(Error::Data)?);
                 }
@@ -318,6 +349,13 @@ impl App {
             .filter(|q| !fresh.contains(&q.name))
             .map(|q| q.name.clone())
             .collect();
+        doc.stale.extend(
+            project
+                .queries
+                .iter()
+                .filter(|q| recorded(&q.name))
+                .map(|q| q.name.clone()),
+        );
         let no_data = doc.stale.len().saturating_sub(stale_data);
         doc.queries = project.queries;
         doc.unloaded = project.unloaded;
@@ -328,12 +366,13 @@ impl App {
             culture: Some(project.culture),
             preserved,
             cache: saved,
+            remaps,
         };
-        let mut notes = Vec::new();
-        if !problems.is_empty() {
+        let mut notes = problems;
+        if !cache_problems.is_empty() {
             notes.push(format!(
                 "the Data cache can't be used for {}",
-                problems.join(", ")
+                cache_problems.join(", ")
             ));
         }
         if no_data > 0 {
@@ -374,30 +413,13 @@ impl App {
                 if self.file.location.as_ref() != Some(&location) {
                     saved.clear();
                 }
-                let names: Vec<&str> = self
-                    .document()
-                    .model
-                    .tables
-                    .iter()
-                    .map(|t| t.name.as_str())
-                    .collect();
-                let keep: BTreeSet<String> = file_stems(&names).into_iter().collect();
-                let mut next = BTreeMap::new();
-                for e in entries {
-                    let data = DataKey::of(&e.table);
-                    let prev = saved.remove(&e.stem);
-                    let same = cache::exists_in(p, &e.stem)
-                        && prev.as_ref().is_some_and(|s| s.data == data);
-                    if !same {
-                        let bytes = cache::encode_table(&e.table).map_err(Error::File)?;
-                        cache::write(p, &e.stem, Some(&bytes), &e.meta).map_err(Error::File)?;
-                    } else if prev.as_ref().is_some_and(|s| s.meta != e.meta) {
-                        cache::write(p, &e.stem, None, &e.meta).map_err(Error::File)?;
-                    }
-                    next.insert(e.stem, Saved { data, meta: e.meta });
+                self.file.cache = write_cache(p, entries, saved, &self.stems())?;
+                // Local overrides go with the folder (never in the Manifest or a Package).
+                if !self.file.remaps.is_empty()
+                    && let Some(root) = &root
+                {
+                    local::write_paths(root, &self.file.remaps).map_err(Error::File)?;
                 }
-                cache::remove_others(p, &keep).map_err(Error::File)?;
-                self.file.cache = next;
             }
             Location::Package(p) => {
                 let files = self.package_files(root.as_deref(), data)?;
@@ -406,8 +428,51 @@ impl App {
             }
         }
         self.file.location = Some(location);
+        self.clean = Some(self.version);
+        // Saved: the recovery copy is no longer needed (best effort: the save itself succeeded).
+        self.discard_own_recovery();
         Ok(())
     }
+
+    /// The file stem of every model Table.
+    pub(crate) fn stems(&self) -> BTreeSet<String> {
+        let names: Vec<&str> = self
+            .document()
+            .model
+            .tables
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        file_stems(&names).into_iter().collect()
+    }
+}
+
+/// Writes the Data cache `entries` into the folder `dir` and deletes the cache of tables not in
+/// `keep`. `prev` is what `dir` holds (as last written there): a table whose data is the same
+/// buffers isn't rewritten, and its metadata only if its bytes changed. Each table is written in
+/// [`cache::write`]'s crash-safe order. Returns what `dir` now holds.
+pub(crate) fn write_cache(
+    dir: &Path,
+    entries: Vec<Entry>,
+    mut prev: BTreeMap<String, Saved>,
+    keep: &BTreeSet<String>,
+) -> Result<BTreeMap<String, Saved>> {
+    let mut next = BTreeMap::new();
+    for e in entries {
+        let data = DataKey::of(&e.table);
+        let before = prev.remove(&e.stem);
+        let same =
+            cache::exists_in(dir, &e.stem) && before.as_ref().is_some_and(|s| s.data == data);
+        if !same {
+            let bytes = cache::encode_table(&e.table).map_err(Error::File)?;
+            cache::write(dir, &e.stem, Some(&bytes), &e.meta).map_err(Error::File)?;
+        } else if before.as_ref().is_some_and(|s| s.meta != e.meta) {
+            cache::write(dir, &e.stem, None, &e.meta).map_err(Error::File)?;
+        }
+        next.insert(e.stem, Saved { data, meta: e.meta });
+    }
+    cache::remove_others(dir, keep).map_err(Error::File)?;
+    Ok(next)
 }
 
 /// Table `model`'s cached data, its metadata and the metadata's bytes; `None` if there is no
@@ -449,10 +514,74 @@ fn read_cached(
     Ok(Some((table, meta, meta_bytes)))
 }
 
+/// A Project folder as Source paths are resolved against: absolute.
+fn root_of(folder: &Path) -> PathBuf {
+    std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf())
+}
+
+const REMAP: &str = "file.remapSource";
+
+pub(crate) const REMAP_PARAMS: &str = "from: text — a Source file path as the Project's Queries name it (relative to the \
+     Project folder, or absolute)\n\
+     to: text or null — read it from here on this machine instead (relative to the Project \
+     folder, or absolute); null removes the remap. Kept in .local/, never shared";
+
+/// `file.remapSource`: reads a Source file from another path on this machine (Local overrides,
+/// see the module docs). Needs a Project folder. Not undoable; nothing goes Stale.
+pub(crate) fn remap_source(app: &mut App, params: &Value) -> Result {
+    let from = text(params, "from", REMAP)?;
+    let to = match params.get("to") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(text(params, "to", REMAP)?),
+    };
+    for p in std::iter::once(&from).chain(to.as_ref()) {
+        if p.trim().is_empty() || p.chars().any(char::is_control) {
+            return Err(invalid(
+                REMAP,
+                "paths must be non-empty, without control characters".into(),
+            ));
+        }
+    }
+    let Some(Location::Folder(folder)) = app.file.location.clone() else {
+        return Err(invalid(
+            REMAP,
+            "remapping a source needs a Project folder: save as one first".into(),
+        ));
+    };
+    let root = root_of(&folder);
+    let from = local::resolve(&root, &from);
+    let to = to.map(|t| local::resolve(&root, &t));
+    let mut remaps = app.file.remaps.clone();
+    let was = local::map(&remaps, &from).to_path_buf();
+    remaps.retain(|(f, _)| *f != from);
+    if let Some(to) = &to
+        && *to != from
+    {
+        remaps.push((from.clone(), to.clone()));
+    }
+    let now = to.unwrap_or_else(|| from.clone());
+    local::write_paths(&root, &remaps).map_err(Error::File)?;
+    app.file.remaps = remaps;
+    let change = [(was, now.clone())];
+    app.every_document(|doc| {
+        local::remap_queries(&change, &mut doc.queries, false);
+        for p in doc.provenance.values_mut() {
+            local::remap_provenance(&change, p, false);
+        }
+    });
+    app.note(&format!(
+        "{} is read from {}; Refresh to load it",
+        from.display(),
+        now.display()
+    ));
+    Ok(())
+}
+
 /// `file.new`: an empty document.
 pub(crate) fn new(app: &mut App, _params: &Value) -> Result {
     app.replace(Document::default());
     app.file = FileState::default();
+    app.discard_own_recovery();
     Ok(())
 }
 
@@ -483,14 +612,24 @@ pub(crate) fn open(app: &mut App, params: &Value) -> Result {
                 Some(location),
                 root.as_deref(),
                 &CacheFrom::Folder(&dir),
-            )
+                None,
+            )?;
         }
         Location::Package(p) => {
             let files =
                 opendash_file::read_package_with(p, app.package_limits()).map_err(Error::File)?;
-            app.open_files(files, Some(location), root.as_deref(), &CacheFrom::Files)
+            app.open_files(
+                files,
+                Some(location),
+                root.as_deref(),
+                &CacheFrom::Files,
+                None,
+            )?;
         }
     }
+    // The document it replaced is gone, unsaved changes and all: so is its recovery copy.
+    app.discard_own_recovery();
+    Ok(())
 }
 
 fn is_package_path(path: &Path) -> bool {
