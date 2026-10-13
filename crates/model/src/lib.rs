@@ -3,6 +3,7 @@
 //! Layer L2 — see `docs/plan/0001-mvp.md` §1. Depends on `opendash-data` (loaded tables,
 //! column types), never the other way.
 
+pub mod dax;
 pub mod parity;
 mod relationship;
 mod table;

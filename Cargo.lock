@@ -870,7 +870,9 @@ dependencies = [
  "arrow-array",
  "arrow-cast",
  "arrow-schema",
+ "opendash-core",
  "opendash-data",
+ "opendash-dax",
 ]
 
 [[package]]
