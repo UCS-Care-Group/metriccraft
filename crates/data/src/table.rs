@@ -15,13 +15,20 @@ use crate::{Error, Result};
 
 /// A loaded table. Cloning shares the column buffers; nothing is ever mutated in place, so a
 /// clone (e.g. an undo snapshot) costs a few pointers, not the data.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Table {
     name: Arc<str>,
     batch: RecordBatch,
     /// Whether loading folded text that differed only by case (`fold.rs`): the data is then no
-    /// longer its Query's result as Power Query sees it. Not saved with the Data cache.
+    /// longer its Query's result as Power Query sees it. Not saved with the Data cache; tables
+    /// read from it are assumed folded. Not part of equality: it says where the data came from.
     folded: bool,
+}
+
+impl PartialEq for Table {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.batch == other.batch
+    }
 }
 
 impl Table {

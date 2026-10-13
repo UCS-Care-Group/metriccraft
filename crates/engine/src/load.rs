@@ -962,5 +962,9 @@ mod tests {
         assert!(other.document().stale.is_empty(), "opened from the cache");
         assert_eq!(text(&other, "Names", 0), text(&app, "Names", 0));
         assert_eq!(text(&other, "Names", 0).1, ["abc"]);
+        assert!(
+            other.document().tables[0].folded(),
+            "a Preview never merges against it"
+        );
     }
 }

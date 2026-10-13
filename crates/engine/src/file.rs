@@ -511,6 +511,8 @@ fn read_cached(
             cache::decode_table(Bytes::from(bytes), &meta, limit)?
         }
     };
+    // Cached data was folded when it loaded (M3.10); the flag itself isn't stored.
+    let table = opendash_data::assume_folded(table).map_err(|e| e.to_string())?;
     Ok(Some((table, meta, meta_bytes)))
 }
 

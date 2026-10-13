@@ -75,6 +75,13 @@ enum Fold {
     Bad(String),
 }
 
+/// `table` marked folded without checking: for data that was folded when it loaded (the Data
+/// cache), so a Preview never merges against it.
+pub fn assume_folded(table: Table) -> Result<Table> {
+    let columns = table.batch().columns().to_vec();
+    table.with_folded(columns)
+}
+
 /// The folded column, or `None` if no two values differ only by case.
 fn fold<K: ArrowDictionaryKeyType>(
     column: &ArrayRef,

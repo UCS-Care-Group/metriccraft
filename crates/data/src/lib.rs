@@ -16,7 +16,7 @@ pub mod source;
 pub mod step;
 mod table;
 
-pub use fold::fold_case;
+pub use fold::{assume_folded, fold_case};
 pub use preview::Preview;
 pub use query::{Pass, Query};
 pub use table::{Table, TableBuilder, default_memory_cap};
