@@ -75,7 +75,7 @@ fn number(n: f64) -> String {
 
 fn precedence(e: &Expr) -> u8 {
     match e {
-        Expr::Binary(op, ..) => op.precedence(),
+        Expr::Binary(op, ..) | Expr::Chain(op, _) => op.precedence(),
         // Prefix forms that extend to the right: lowest, so they get parenthesised as operands.
         Expr::Let(_) | Expr::Each(_) => 0,
         Expr::Not(_) | Expr::Negate(_) => 7,
@@ -185,6 +185,19 @@ fn write_expr(out: &mut String, expr: &Expr, indent: usize) {
             out.push(' ');
             write_operand(out, r, indent, p.saturating_add(1));
         }
+        // Left-associative, as the `Binary` tree it stands for: only later operands at the same
+        // precedence need parentheses.
+        Expr::Chain(op, operands) => {
+            let p = op.precedence();
+            for (i, e) in operands.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                    out.push_str(op.symbol());
+                    out.push(' ');
+                }
+                write_operand(out, e, indent, if i == 0 { p } else { p.saturating_add(1) });
+            }
+        }
         Expr::Paren(e) => {
             out.push('(');
             write_expr(out, e, indent);
@@ -227,5 +240,30 @@ mod tests {
         assert_eq!(print(&e), "(1 + 2) * 3");
         let e = Expr::Binary(BinOp::Add, n(3.0), Box::new(sum));
         assert_eq!(print(&e), "3 + (1 + 2)");
+    }
+
+    #[test]
+    fn a_chain_prints_like_its_left_leaning_tree() {
+        let x = |s: &str| Expr::ident(s);
+        let tree = Expr::Binary(
+            BinOp::Or,
+            Box::new(Expr::Binary(BinOp::Or, Box::new(x("a")), Box::new(x("b")))),
+            Box::new(x("c")),
+        );
+        let chain = Expr::Chain(BinOp::Or, vec![x("a"), x("b"), x("c")]);
+        assert_eq!(print(&chain), print(&tree));
+        assert_eq!(print(&chain), "a or b or c");
+        // Later operands at the same precedence are bracketed; tighter ones aren't.
+        let nested = Expr::Chain(
+            BinOp::Or,
+            vec![
+                Expr::Chain(BinOp::Or, vec![x("a"), x("b")]),
+                Expr::Chain(BinOp::Or, vec![x("c"), x("d")]),
+                Expr::Chain(BinOp::And, vec![x("e"), x("f")]),
+            ],
+        );
+        assert_eq!(print(&nested), "a or b or (c or d) or e and f");
+        let and = Expr::Chain(BinOp::And, vec![chain, x("g")]);
+        assert_eq!(print(&and), "(a or b or c) and g");
     }
 }

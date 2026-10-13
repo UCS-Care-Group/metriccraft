@@ -13,7 +13,7 @@ mod fuzz;
 mod parse;
 mod print;
 
-pub use parse::{MAX_DEPTH, MAX_SOURCE, parse};
+pub use parse::{MAX_DEPTH, MAX_SOURCE, MAX_TOKENS, parse};
 pub use print::{print, quote_identifier};
 
 /// An M expression.
@@ -52,6 +52,11 @@ pub enum Expr {
     Not(Box<Expr>),
     Negate(Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
+    /// A flat `a or b or c` / `a and b and c` chain: what the parser builds for `and`/`or`
+    /// (never a nested [`Expr::Binary`]), so a filter of thousands of conditions costs one
+    /// nesting level, not one per operator. Prints like the left-leaning [`Expr::Binary`] tree
+    /// it stands for. Built in code it should have at least two operands.
+    Chain(BinOp, Vec<Expr>),
     /// Parentheses the author wrote, kept so printing reproduces them.
     Paren(Box<Expr>),
 }

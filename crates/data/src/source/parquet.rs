@@ -19,9 +19,10 @@
 //! input, and on wasm a panic aborts the app. So nothing reaches them unchecked:
 //! - the footer is walked first ([`thrift`]): every list, binary and nesting depth must fit the
 //!   bytes present (no allocation bombs), and schema child counts must fit the schema;
-//! - every page header is walked before any page is read: sizes inside the column chunk,
-//!   decompressed size at most [`PAGE_CAP`] and the memory limit, DataPage v2 level lengths
-//!   inside the page;
+//! - every page header of a column chunk is walked before any of its pages is read: sizes
+//!   inside the column chunk, decompressed size at most [`PAGE_CAP`] and the memory limit,
+//!   DataPage v2 level lengths inside the page. Lazily, as the decoder reaches each chunk, so a
+//!   Preview of the first rows walks only the row groups it reads, not the whole file;
 //! - each page is checked as the decoder pulls it ([`Checked`]): a dictionary-encoded page needs
 //!   a dictionary page first; a dictionary page claiming 0 values must be empty; definition
 //!   levels (RLE/bit-packed) must fit their bytes; a v2 page's levels may not promise more
@@ -32,15 +33,17 @@
 //! huge batch. Native builds keep a `catch_unwind` as a last-resort net; the fuzz tests run
 //! without it.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ::parquet::arrow::arrow_reader::{ParquetRecordBatchReader, RowGroups};
 use ::parquet::arrow::{ProjectionMask, parquet_to_arrow_field_levels, parquet_to_arrow_schema};
 use ::parquet::basic::{Encoding, Type as Physical};
 use ::parquet::column::page::{Page, PageIterator, PageMetadata, PageReader};
 use ::parquet::errors::ParquetError;
-use ::parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader, RowGroupMetaData};
+use ::parquet::file::metadata::{
+    ColumnChunkMetaData, ParquetMetaData, ParquetMetaDataReader, RowGroupMetaData,
+};
 pub use ::parquet::file::reader::ChunkReader;
 use ::parquet::file::serialized_reader::SerializedPageReader;
 use ::parquet::schema::types::ColumnDescPtr;
@@ -145,48 +148,47 @@ fn read_checked<R: ChunkReader + 'static>(
         if group.columns().len() != descr.num_columns() {
             return Err(corrupt(name, "row group column count"));
         }
-        for chunk in group.columns() {
-            let start = chunk
-                .dictionary_page_offset()
-                .unwrap_or(chunk.data_page_offset());
-            let range = u64::try_from(start)
-                .ok()
-                .zip(u64::try_from(chunk.compressed_size()).ok())
-                .and_then(|(s, n)| Some((s, s.checked_add(n)?)))
-                .filter(|&(_, end)| end <= reader.len());
-            let Some((start, end)) = range else {
-                return Err(corrupt(name, "column chunk outside the file"));
-            };
-            scan_pages(name, &reader, start, end, limit)?;
-        }
     }
 
     let levels = parquet_to_arrow_field_levels(&descr, ProjectionMask::all(), Some(arrow.fields()))
         .map_err(|e| err(e.to_string()))?;
     let budget = Arc::new(Budget::new(limit));
+    let scan = Arc::new(Scan {
+        name: name.into(),
+        limit,
+        failed: Mutex::new(None),
+    });
     let groups = Groups {
         reader: Arc::new(reader),
         meta: Arc::new(meta),
         budget: Arc::clone(&budget),
+        scan: Arc::clone(&scan),
         rows,
     };
+    // A failed page-header scan says why itself; anything else is the decoder's message.
+    let failed = |e: ParquetError| scan.take().unwrap_or_else(|| err(e.to_string()));
     let batch = batch_rows(rows_wanted);
     let mut reader =
         ParquetRecordBatchReader::try_new_with_row_groups(&levels, &groups, batch, None)
-            .map_err(|e| err(e.to_string()))?;
+            .map_err(failed)?;
     let schema = Arc::new(Schema::new(fields));
     let batches =
         std::iter::from_fn(|| {
             budget.reset();
             let batch = match reader.next()? {
                 Ok(batch) => batch,
-                Err(_) if budget.exceeded() => {
-                    return Some(Err(Error::MemoryCap {
-                        table: name.into(),
-                        limit,
-                    }));
+                Err(e) => {
+                    if let Some(e) = scan.take() {
+                        return Some(Err(e));
+                    }
+                    if budget.exceeded() {
+                        return Some(Err(Error::MemoryCap {
+                            table: name.into(),
+                            limit,
+                        }));
+                    }
+                    return Some(Err(err(e.to_string())));
                 }
-                Err(e) => return Some(Err(err(e.to_string()))),
             };
             let columns = batch
                 .columns()
@@ -328,11 +330,53 @@ impl Budget {
     }
 }
 
+/// What a column chunk's page-header walk needs, and the error of the first walk that failed
+/// (the decoder only passes on a [`ParquetError`]).
+struct Scan {
+    name: String,
+    limit: usize,
+    failed: Mutex<Option<Error>>,
+}
+
+impl Scan {
+    /// Walks the page headers of `chunk` (see [`scan_pages`]).
+    fn chunk<R: ChunkReader>(
+        &self,
+        reader: &R,
+        chunk: &ColumnChunkMetaData,
+    ) -> ::parquet::errors::Result<()> {
+        let start = chunk
+            .dictionary_page_offset()
+            .unwrap_or(chunk.data_page_offset());
+        let range = u64::try_from(start)
+            .ok()
+            .zip(u64::try_from(chunk.compressed_size()).ok())
+            .and_then(|(s, n)| Some((s, s.checked_add(n)?)))
+            .filter(|&(_, end)| end <= reader.len());
+        let walked = match range {
+            Some((start, end)) => scan_pages(&self.name, reader, start, end, self.limit),
+            None => Err(corrupt(&self.name, "column chunk outside the file")),
+        };
+        walked.map_err(|e| {
+            let message = e.to_string();
+            if let Ok(mut failed) = self.failed.lock() {
+                failed.get_or_insert(e);
+            }
+            ParquetError::General(message)
+        })
+    }
+
+    fn take(&self) -> Option<Error> {
+        self.failed.lock().ok()?.take()
+    }
+}
+
 /// The file's row groups, read through [`Checked`] page readers.
 struct Groups<R> {
     reader: Arc<R>,
     meta: Arc<ParquetMetaData>,
     budget: Arc<Budget>,
+    scan: Arc<Scan>,
     rows: usize,
 }
 
@@ -354,6 +398,7 @@ impl<R: ChunkReader + 'static> RowGroups for Groups<R> {
             reader: Arc::clone(&self.reader),
             meta: Arc::clone(&self.meta),
             budget: Arc::clone(&self.budget),
+            scan: Arc::clone(&self.scan),
             descr,
             column,
             group: 0,
@@ -374,6 +419,7 @@ struct Chunks<R> {
     reader: Arc<R>,
     meta: Arc<ParquetMetaData>,
     budget: Arc<Budget>,
+    scan: Arc<Scan>,
     descr: ColumnDescPtr,
     column: usize,
     group: usize,
@@ -392,6 +438,8 @@ impl<R: ChunkReader + 'static> Iterator for Chunks<R> {
                 .ok_or_else(|| ParquetError::General("no such column".into()))?;
             let rows = usize::try_from(group.num_rows())
                 .map_err(|_| ParquetError::General("row count".into()))?;
+            // The chunk's page headers, before the decoder reads any of its pages.
+            self.scan.chunk(self.reader.as_ref(), chunk)?;
             let inner = SerializedPageReader::new(Arc::clone(&self.reader), chunk, rows, None)?;
             Ok(Box::new(Checked {
                 inner,
@@ -592,7 +640,14 @@ impl<P> Checked<P> {
                 Ok(bytes)
             }
             Encoding::DELTA_BYTE_ARRAY => {
+                // The prefixes are held while the suffixes are walked: count them first and pay
+                // for them from the budget (up to limit/2 bytes otherwise unaccounted).
+                let (count, _) = delta_binary(values, 32, rows, &mut |_| Ok(()))?;
+                self.budget.spend(count.saturating_mul(8))?;
                 let mut prefixes = Vec::new();
+                prefixes
+                    .try_reserve_exact(usize::try_from(count).map_err(|_| "prefix count")?)
+                    .map_err(|_| "memory limit")?;
                 let (_, split) = delta_binary(values, 32, rows, &mut |p| {
                     prefixes.push(u64::try_from(p).map_err(|_| "negative prefix")?);
                     Ok(())
@@ -1331,6 +1386,67 @@ mod tests {
             Ok(())
         });
         assert_eq!((ok, seen), (Ok((1, 5)), vec![3]));
+    }
+
+    /// Review M1 #11: page headers are walked as each row group is read, so a Preview of the
+    /// first rows doesn't walk the whole file, and a damaged later group still fails the load.
+    #[test]
+    fn page_headers_are_walked_only_for_the_row_groups_read() {
+        let ids = Int64Array::from_iter_values(0..5000);
+        let good = write(
+            &batch(vec![("id", Arc::new(ids) as ArrayRef)]),
+            Compression::UNCOMPRESSED,
+            1000,
+        );
+        let meta = ParquetMetaDataReader::new()
+            .parse_and_finish(&good)
+            .unwrap();
+        assert_eq!(meta.num_row_groups(), 5);
+        let last = meta.row_group(4).column(0);
+        let at = last
+            .dictionary_page_offset()
+            .unwrap_or(last.data_page_offset()) as usize;
+        let mut bad = good.to_vec();
+        bad[at..at + 8].fill(0xFF);
+        let bad = Bytes::from(bad);
+        let rows = |n: usize| {
+            collect("Ids", BIG, |sink| {
+                read_checked("Ids", bad.clone(), n, BIG, sink)
+            })
+            .map(|(t, ())| t.rows())
+        };
+        assert_eq!(rows(1000), Ok(1000));
+        let e = rows(usize::MAX).unwrap_err();
+        assert!(
+            matches!(&e, Error::Source { source, message } if source == "Ids" && message.starts_with("corrupt file")),
+            "{e}"
+        );
+    }
+
+    /// Review M1 #8: DELTA_BYTE_ARRAY's held prefixes (8 bytes each) are paid from the budget.
+    #[test]
+    fn delta_byte_array_prefixes_count_against_the_budget() {
+        // 1,000 zero lengths: 128-value blocks of 4 mini-blocks, each block a zero min delta
+        // and four zero bit widths.
+        let mut stream = vec![0x80, 0x01, 4, 0xE8, 0x07, 0];
+        for _ in 0..999usize.div_ceil(128) {
+            stream.extend([0, 0, 0, 0, 0]);
+        }
+        let values = [stream.clone(), stream].concat();
+        let checked = |limit: usize| Checked {
+            inner: (),
+            nullable: false,
+            physical: Physical::BYTE_ARRAY,
+            type_length: 0,
+            dictionary: None,
+            budget: Arc::new(Budget::new(limit)),
+        };
+        let check =
+            |c: &Checked<()>| c.check_values(Encoding::DELTA_BYTE_ARRAY, &values, Some(1000), 1000);
+        assert_eq!(check(&checked(1 << 20)), Ok(0));
+        let small = checked(4000);
+        assert_eq!(check(&small), Err("memory limit".to_string()));
+        assert!(small.budget.exceeded());
     }
 
     #[test]
