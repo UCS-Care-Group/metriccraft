@@ -7,7 +7,26 @@
     "os": "linux",
     "threads": 12
   },
+  "memory": {
+    "engine/idle/steady": 4763648.0,
+    "import/csv_200k/peak": 45248512.0,
+    "import/csv_200k/steady": 43323392.0,
+    "import/csv_200k/table": 22992260.0,
+    "import/parquet_10m/peak": 1506295808.0,
+    "import/parquet_10m/steady": 1370230784.0,
+    "import/parquet_10m/table": 986330436.0,
+    "import/parquet_1m/peak": 173551616.0,
+    "import/parquet_1m/steady": 171048960.0,
+    "import/parquet_1m/table": 96777668.0,
+    "import/xlsx_50k/peak": 27213824.0,
+    "import/xlsx_50k/steady": 27213824.0,
+    "import/xlsx_50k/table": 6535620.0
+  },
   "results": {
-    "engine/dispatch_unknown": 18.0
+    "engine/dispatch_unknown": 36.1,
+    "import/csv_200k": 181320040.0,
+    "import/parquet_10m": 5043180128.0,
+    "import/parquet_1m": 411692998.0,
+    "import/xlsx_50k": 1021434366.0
   }
 }
