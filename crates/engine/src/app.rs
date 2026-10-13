@@ -109,6 +109,15 @@ impl App {
         self.clean != Some(self.version)
     }
 
+    /// Applies `f` to the Document and every undo and redo step, recording nothing: for changes
+    /// to the environment rather than the Document (a remapped source path), which undo must
+    /// not bring back.
+    pub(crate) fn every_document(&mut self, mut f: impl FnMut(&mut Document)) {
+        f(&mut self.doc);
+        self.undo.iter_mut().for_each(&mut f);
+        self.redo.iter_mut().for_each(&mut f);
+    }
+
     pub fn document(&self) -> &Document {
         &self.doc
     }

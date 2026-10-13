@@ -20,7 +20,8 @@
 //!
 //! **Source paths.** A file inside the Project's folder (`root`) is written relative to it, with
 //! `/`; any other path absolute. On read, relative paths are resolved against `root`.
-//! ponytail: `.local/` remapping of source paths (Local overrides) is still to come.
+//! A per-user remap (`.local/paths.odl`, [`crate::local`]) is applied and reversed by the app
+//! around these functions, so the paths here are always the Project's own.
 //!
 //! **Unknown content.** Keys, flags, blocks and objects we don't know, in any part, are kept
 //! ([`Preserved`], per object: model, relationships, each table, each query) and written back

@@ -91,6 +91,17 @@ pub static COMMANDS: &[Command] = &[
         enabled: |_| true,
         run: Run::App(file::save_as),
     },
+    // Local overrides (`file.rs`): where a Source file is on this machine.
+    Command {
+        id: "file.remapSource",
+        label: "Remap source path",
+        // Like Data source settings > Change Source, but for this user only: not on the ribbon.
+        ribbon: "",
+        shortcut: None,
+        params: file::REMAP_PARAMS,
+        enabled: |_| true,
+        run: Run::App(file::remap_source),
+    },
     // Autosave recovery (ADR 0003; `recovery.rs`): offered at launch, as Power BI's AutoRecovery.
     Command {
         id: "file.recover",
