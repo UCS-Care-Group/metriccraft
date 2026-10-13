@@ -6,8 +6,11 @@
 //! everything else is **Pending**. A listed Check that fails, or an unlisted one that passes,
 //! is a problem until `cargo xtask parity --update` rewrites the list.
 //!
-//! **Shaping cases** (datasets given as `Source: csv` files) run now, without a DAX evaluator:
-//! see [`shaping`]. Every other case waits for the M3 evaluator.
+//! **Shaping cases** (datasets given as `Source: csv` files) run through Get Data and a small
+//! `EVALUATE 'Table'` reader: see [`shaping`]. Every other case runs on the DAX evaluator
+//! ([`crate::dax`]) over its *Enter data* tables (read in en-GB, the VM's regional settings).
+//! An `EVALUATE ROW(…)` that fails is retried a column at a time, so a column using a function
+//! we don't have yet stays Pending without failing its neighbours.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -315,10 +318,162 @@ fn tsv(lines: &[&str], bracketed: bool) -> Result<Table> {
 /// Why a query can't be evaluated yet.
 const NO_EVALUATOR: &str = "no DAX evaluator yet (M3)";
 
-/// Runs a case's query against its dataset and renders the result as Power BI copies it.
-fn evaluate(_case: &Case) -> Result<Table> {
-    // ponytail: no evaluator until M3; every Check stays Pending.
-    Err(NO_EVALUATOR.into())
+/// Memory cap for a case's data and query: tiny datasets, generous cap.
+const LIMIT: usize = 256 << 20;
+
+/// The Culture *Enter data* values are read in: the VM's regional settings.
+const DATASET_CULTURE: &str = "en-GB";
+
+/// Errors of single result columns, by column name.
+type ColumnErrors = BTreeMap<String, String>;
+
+/// Runs a case's query against its dataset and renders the result as Power BI copies it. A
+/// failing `EVALUATE ROW(…)` is retried a column at a time, so one unsupported column leaves
+/// the others' Checks to pass or fail on their own; their errors are returned by column.
+fn evaluate(case: &Case) -> (Result<Table>, ColumnErrors) {
+    let mut errors = ColumnErrors::new();
+    let result = (|| {
+        let db = dataset(case)?;
+        let query = opendash_dax::parse_query(&case.query).map_err(|e| e.to_string())?;
+        let options = crate::dax::Options {
+            cancel: None,
+            memory_cap: LIMIT,
+        };
+        match crate::dax::run_query(&db, &query, options) {
+            Ok(results) => {
+                let [result] = results.as_slice() else {
+                    return Err(format!(
+                        "the query has {} EVALUATEs; a case needs one",
+                        results.len()
+                    ));
+                };
+                Ok(copied(result))
+            }
+            Err(e) => {
+                let Some(columns) = row_columns(&query) else {
+                    return Err(e.to_string());
+                };
+                let mut table = Table::default();
+                let mut row = Vec::new();
+                for (name, one) in columns {
+                    match crate::dax::run_query(&db, &one, options) {
+                        Ok(r) => {
+                            let cell = r.first().and_then(|t| t.rows.first()?.first().cloned());
+                            table.columns.push(name);
+                            row.push(cell.map(|v| v.copy_text()).unwrap_or_default());
+                        }
+                        Err(e) => {
+                            errors.insert(name, e.to_string());
+                        }
+                    }
+                }
+                table.rows.push(row);
+                Ok(table)
+            }
+        }
+    })();
+    (result, errors)
+}
+
+/// The case's *Enter data* tables, loaded as Get Data would (types converted, text
+/// dictionary-encoded), as the evaluator's database. Empty cells are blanks.
+fn dataset(case: &Case) -> Result<crate::dax::Database> {
+    use arrow_array::{ArrayRef, RecordBatch, StringArray};
+    use opendash_data::TableBuilder;
+    use opendash_data::step::ColumnType;
+
+    let culture = opendash_data::culture::Culture::get(DATASET_CULTURE)
+        .ok_or("the dataset Culture is missing")?;
+    let mut model = crate::Model::default();
+    let mut loaded = Vec::new();
+    for t in &case.tables {
+        let mut columns: Vec<(String, ArrayRef)> = Vec::new();
+        for (i, (name, ty)) in t.columns.iter().zip(&t.types).enumerate() {
+            let ty = match ty.as_str() {
+                "text" => ColumnType::Text,
+                "decimal" => ColumnType::Decimal,
+                "whole" => ColumnType::Whole,
+                "date" => ColumnType::Date,
+                "datetime" => ColumnType::DateTime,
+                "boolean" => ColumnType::Boolean,
+                other => return Err(format!("unknown type `{other}`")),
+            };
+            let text: StringArray = t
+                .rows
+                .iter()
+                .map(|r| r.get(i).map(String::as_str).filter(|s| !s.is_empty()))
+                .collect();
+            let (array, bad) = ty.convert(&text, culture);
+            if bad > 0 {
+                return Err(format!(
+                    "table {}: {bad} value(s) of column {name} aren't {}",
+                    t.name,
+                    ty.name()
+                ));
+            }
+            columns.push((name.clone(), array));
+        }
+        let batch = RecordBatch::try_from_iter(columns).map_err(|e| e.to_string())?;
+        let mut b = TableBuilder::new(&t.name, batch.schema(), LIMIT);
+        b.push(&batch).map_err(|e| e.to_string())?;
+        let table = b.finish().map_err(|e| e.to_string())?;
+        let (m, table) =
+            crate::ModelTable::load(None, table, culture, LIMIT).map_err(|e| e.to_string())?;
+        model.put(m);
+        loaded.push(table);
+    }
+    Ok(crate::dax::Database::new(&model, &loaded))
+}
+
+/// A result as Power BI copies it.
+fn copied(r: &crate::dax::ResultTable) -> Table {
+    Table {
+        columns: r.columns.clone(),
+        rows: r
+            .rows
+            .iter()
+            .map(|row| row.iter().map(|v| v.copy_text()).collect())
+            .collect(),
+        ..Table::default()
+    }
+}
+
+/// For a query that is one `EVALUATE ROW("A", a, "B", b, …)`: each column as its own query
+/// (same `DEFINE`s), with its name.
+fn row_columns(q: &opendash_dax::Query) -> Option<Vec<(String, opendash_dax::Query)>> {
+    use opendash_dax::{Evaluate, Expr, ExprKind};
+    let [ev] = q.evaluates.as_slice() else {
+        return None;
+    };
+    let ExprKind::Call { name, args } = &ev.table.kind else {
+        return None;
+    };
+    if !name.eq_ignore_ascii_case("ROW") || args.len() % 2 != 0 {
+        return None;
+    }
+    args.chunks(2)
+        .map(|pair| {
+            let [n, _] = pair else { return None };
+            let ExprKind::Text(text) = &n.kind else {
+                return None;
+            };
+            let one = opendash_dax::Query {
+                defines: q.defines.clone(),
+                evaluates: vec![Evaluate {
+                    table: Expr {
+                        kind: ExprKind::Call {
+                            name: name.clone(),
+                            args: pair.to_vec(),
+                        },
+                        span: ev.table.span,
+                    },
+                    order_by: Vec::new(),
+                    span: ev.span,
+                }],
+            };
+            Some((text.clone(), one))
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -381,17 +536,23 @@ pub fn run(root: &Path) -> Result<Report> {
         let id = case.id.clone();
         // A shaping case that doesn't load (or whose M isn't ours) is malformed, observed or not.
         let shaping = shaping::prepare(&case).map_err(|e| format!("{id}: {e}"))?;
+        let mut column_errors = ColumnErrors::new();
         let (result, extras) = match &shaping {
             Some(s) => s.outcome(&case),
-            None => (evaluate(&case), BTreeMap::new()),
+            None => {
+                let (result, errors) = evaluate(&case);
+                column_errors = errors;
+                (result, BTreeMap::new())
+            }
         };
         let mut found = Vec::new();
         for name in &case.observed.columns {
             let expected = case.observed.column(name);
             let (pass, detail) = match &result {
-                Ok(t) => match t.column(name) {
-                    got if got == expected => (true, String::new()),
-                    got => (false, format!("expected {expected:?}, got {got:?}")),
+                Ok(t) => match (t.column(name), column_errors.get(name)) {
+                    (got, _) if got == expected => (true, String::new()),
+                    (None, Some(e)) => (false, e.clone()),
+                    (got, _) => (false, format!("expected {expected:?}, got {got:?}")),
                 },
                 Err(e) => (false, e.clone()),
             };
