@@ -22,6 +22,10 @@ use super::eval::{Evaluator, Rows, RowsColumn, TableVal, Val};
 use super::{DaxError, FilterContext, Result};
 use crate::same_name;
 
+/// IF, SWITCH, DIVIDE, ISBLANK, ISERROR, IFERROR, CONTAINSROW and the `IN` operator (M3.5).
+#[path = "logic.rs"]
+pub mod logic;
+
 /// A function call being evaluated.
 pub struct Call<'e> {
     /// As written (any case).
@@ -75,6 +79,13 @@ pub fn lookup(lower: &str) -> Option<Function> {
         "false" => false_,
         "row" => row,
         "countrows" => countrows,
+        "if" => logic::IF,
+        "switch" => logic::SWITCH,
+        "divide" => logic::DIVIDE,
+        "isblank" => logic::ISBLANK,
+        "iserror" => logic::ISERROR,
+        "iferror" => logic::IFERROR,
+        "containsrow" => logic::CONTAINSROW,
         _ => return None,
     })
 }

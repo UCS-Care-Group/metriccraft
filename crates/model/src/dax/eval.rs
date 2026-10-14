@@ -294,6 +294,8 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             ExprKind::Column { table, column } => self.column(table.as_deref(), column, span, fc),
             ExprKind::Call { name, args } => self.call(name, args, span, fc),
             ExprKind::Unary(op, x) => self.unary(*op, x, span, fc),
+            // `IN` skips `binary`'s frame: nested `IN`s must fit the stack too.
+            ExprKind::Binary(BinOp::In, l, r) => functions::logic::in_op(self, l, r, span, fc),
             ExprKind::Binary(op, l, r) => self.binary(*op, l, r, span, fc),
             ExprKind::Var { vars, body } => self.var(vars, body, fc),
             ExprKind::Table(rows) => self.constructor(rows, span, fc),
@@ -360,8 +362,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         fc: &FilterContext,
     ) -> Result<Val> {
         if op == BinOp::In {
-            // TODO(M3.5): `IN` (CONTAINSROW semantics).
-            return Err(DaxError::new(span, "OpenDash BI doesn't support IN (yet)"));
+            return functions::logic::in_op(self, l, r, span, fc);
         }
         let a = self.scalar(l, fc)?;
         let b = self.scalar(r, fc)?;
