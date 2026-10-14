@@ -315,6 +315,20 @@ fn distinct(
     let Some(t) = ev.db.tables.get(table) else {
         return Ok(Vec::new());
     };
+    if let [c] = columns
+        && let Some(col) = t.columns.get(*c)
+    {
+        let values = storage::distinct_values(&col.data, t.rows, mask, ev.cancel)?;
+        let bytes = values.iter().fold(0usize, |b, v| {
+            let b = b.saturating_add(VALUE_BYTES.saturating_add(KEY_BYTES));
+            match v {
+                Value::Text(s) => b.saturating_add(s.len().saturating_mul(2)),
+                _ => b,
+            }
+        });
+        ev.charge(bytes, span)?;
+        return Ok(values.into_iter().map(|v| vec![v]).collect());
+    }
     let mut seen: HashSet<Vec<Option<Key>>> = HashSet::new();
     let mut out = Vec::new();
     let mut bytes = 0usize;
