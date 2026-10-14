@@ -15,6 +15,7 @@ workspace = true
 opendash-data = { path = "../data" }
 opendash-model = { path = "../model" }
 opendash-file = { path = "../file" }
+opendash-visuals = { path = "../visuals", default-features = false }
 arrow-schema.workspace = true
 serde_json.workspace = true
 

@@ -7,7 +7,7 @@
 //!                           when there are none
 //! model/tables/<t>.odm      table, its columns and their properties, its measures
 //! queries/<q>.odq           query: load, culture (when not the Project's), m: block
-//! report/…                  reserved for the report (M4); not written yet
+//! report/…                  the report (M4.2): JSON parts, carried here as opaque bytes
 //! .gitignore                .cache/, .local/, .staging/ — written on create, then the user's
 //! ```
 //!
@@ -37,6 +37,10 @@
 //! kept as they are; unknown Manifest keys too. A rename carries an object's unknown items to
 //! its new name ([`Preserved::rename_table`], [`Preserved::rename_column`]).
 //!
+//! **Report.** Parts under `report/` ([`Project::report`]) are JSON the app (`opendash-engine`)
+//! reads and writes: this crate is below the Visual definitions (layer 2 < 3), so it only lists,
+//! hashes and carries them, like any part.
+//!
 //! **No data.** The parts are definitions only; the Data cache (`.cache/`) is [`crate::cache`],
 //! written and read beside them by the app.
 
@@ -65,7 +69,7 @@ pub const MODEL: &str = "model/model.odm";
 pub const RELATIONSHIPS: &str = "model/relationships.odm";
 pub const TABLES: &str = "model/tables/";
 pub const QUERIES: &str = "queries/";
-/// Reserved for report parts (M4): `report/report.json`, `report/pages/<pageId>/…`.
+/// Report parts: `report/report.json`, `report/pages/<pageId>/…` ([`Project::report`]).
 pub const REPORT: &str = "report/";
 pub const GITIGNORE: &str = ".gitignore";
 /// The `.gitignore` written when a Project is created.
@@ -73,7 +77,7 @@ pub const GITIGNORE_TEXT: &str = ".cache/\n.local/\n.staging/\n";
 /// The Project culture when `model.odm` doesn't name one (Get Data's default).
 pub const DEFAULT_CULTURE: &str = "en-US";
 
-/// What a Project holds (besides data and the report, still to come).
+/// What a Project holds (besides data).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Project {
     /// The Project culture's name: the culture of Queries that don't name their own.
@@ -83,6 +87,8 @@ pub struct Project {
     /// Queries with *Enable load* off.
     pub unloaded: BTreeSet<String>,
     pub model: Model,
+    /// The report's parts: path (under [`REPORT`]) → bytes, opaque here (see the module docs).
+    pub report: BTreeMap<String, Vec<u8>>,
 }
 
 impl Default for Project {
@@ -92,6 +98,7 @@ impl Default for Project {
             queries: Vec::new(),
             unloaded: BTreeSet::new(),
             model: Model::default(),
+            report: BTreeMap::new(),
         }
     }
 }
@@ -548,6 +555,13 @@ pub fn encode(project: &Project, root: Option<&Path>, preserved: &Preserved) -> 
     if let Some(bytes) = print(model, &Key::Model, &MODEL_FILE) {
         parts.insert(MODEL.into(), bytes);
     }
+    for (path, bytes) in &project.report {
+        if !path.starts_with(REPORT) {
+            return Err(Error::Save(format!("`{path}` is not a report part")));
+        }
+        crate::check_path(path).map_err(Error::Save)?;
+        parts.insert(path.clone(), bytes.clone());
+    }
     for (path, bytes) in &preserved.parts {
         parts.entry(path.clone()).or_insert_with(|| bytes.clone());
     }
@@ -949,7 +963,13 @@ fn decode_tree(
             pre.parts.insert(path, syntax::print(&items).into_bytes());
         }
     }
-    pre.parts.extend(tree.other);
+    for (path, bytes) in tree.other {
+        if path.starts_with(REPORT) {
+            project.report.insert(path, bytes);
+        } else {
+            pre.parts.insert(path, bytes);
+        }
+    }
 
     order(&mut project.queries, |q| &q.name, &refs.0);
     order(&mut project.model.tables, |t| &t.name, &refs.1);

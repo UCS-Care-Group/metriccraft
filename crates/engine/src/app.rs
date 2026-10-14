@@ -26,6 +26,8 @@ pub struct Document {
     /// The Calculated columns whose DAX failed when last computed (they hold BLANKs), in Model
     /// order: derived from the Model and the data (`expression.rs`), never saved.
     pub formula_errors: Vec<opendash_model::Error>,
+    /// The report: Pages of Visuals (`report.rs`).
+    pub report: crate::report::Report,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,

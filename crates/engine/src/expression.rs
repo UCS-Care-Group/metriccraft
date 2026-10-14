@@ -185,6 +185,7 @@ pub(crate) fn rename_measure(app: &mut App, params: &Value) -> Result {
         doc.model
             .rename_measure(&table, &old, &new)
             .map_err(Error::Model)?;
+        doc.report.rename_measure(&old, &new);
         Ok(None)
     })?;
     app.file.preserved.rename_measure(&table, &old, &new);

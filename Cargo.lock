@@ -893,6 +893,7 @@ dependencies = [
  "opendash-data",
  "opendash-file",
  "opendash-model",
+ "opendash-visuals",
  "serde_json",
 ]
 
