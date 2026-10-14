@@ -5,6 +5,7 @@
 
 pub mod draw;
 pub mod layout;
+pub mod parity;
 #[cfg(feature = "png")]
 pub mod png;
 pub mod query;

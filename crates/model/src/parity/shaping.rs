@@ -497,7 +497,22 @@ pub fn copy_text(t: &Table) -> String {
 pub fn export(case: &Case) -> Result<Vec<(String, Vec<u8>)>> {
     let crlf = |text: &str| (text.trim_end().to_string() + "\n").replace('\n', "\r\n");
     let id = &case.id;
-    let mut files = vec![(format!("{id}/query.dax"), crlf(&case.query).into_bytes())];
+    let mut files = Vec::new();
+    match &case.visual {
+        Some(v) => files.push((format!("{id}/visual.json"), crlf(v).into_bytes())),
+        None => files.push((format!("{id}/query.dax"), crlf(&case.query).into_bytes())),
+    }
+    if !case.measures.is_empty() {
+        let lines: Vec<String> = case
+            .measures
+            .iter()
+            .map(|(t, n, dax)| format!("{t}[{n}] = {dax}"))
+            .collect();
+        files.push((
+            format!("{id}/measures.dax"),
+            crlf(&lines.join("\n")).into_bytes(),
+        ));
+    }
     for t in &case.tables {
         let mut lines = vec![t.columns.join("\t")];
         lines.extend(t.rows.iter().map(|r| r.join("\t")));
@@ -551,8 +566,27 @@ fn readme(case: &Case, pasted: &[String]) -> String {
             "Close & Apply. Record `Load errors: <Query> <n>` for every Query (0 if none).".into(),
         );
     }
-    steps.push("DAX query view: paste query.dax > Run > copy the whole result > paste it into the case's Observed block, under the `Power BI Desktop version:` line.".into());
-    let mut out = format!("Parity case {id} (parity/observed/{id}.md)\n\n");
+    if case.visual.is_some() {
+        if !case.measures.is_empty() {
+            steps.push(
+                "Add each measure in measures.dax (Home > New measure, on the table before `[`)."
+                    .into(),
+            );
+        }
+        steps.push("Report view: build the visual visual.json describes (type, fields per well in order, format options); Fields that are Columns in Values use their default summarization.".into());
+        for f in &case.filters {
+            steps.push(format!("Add a slicer and select: {f}."));
+        }
+        steps.push("View > Performance analyzer > Start recording > Refresh visuals. Expand the visual's entry > Copy query. DAX query view: paste > Run > copy the whole result > paste it into the case's Observed block, under the `Power BI Desktop version:` line. Add a `Map: <observed header> = <our column>` line per column that holds a group or value (see docs/parity.md).".into());
+    } else {
+        steps.push("DAX query view: paste query.dax > Run > copy the whole result > paste it into the case's Observed block, under the `Power BI Desktop version:` line.".into());
+    }
+    let dir = if case.visual.is_some() {
+        "visuals"
+    } else {
+        "observed"
+    };
+    let mut out = format!("Parity case {id} (parity/{dir}/{id}.md)\n\n");
     for (i, s) in steps.iter().enumerate() {
         out.push_str(&format!("{}. {s}\n", i + 1));
     }

@@ -177,3 +177,23 @@ files) or generated in code; deferred. Open questions from `xlsx.rs` / `source.r
   (`unique_names` in `xlsx.rs`: Power Query may trim or number differently);
 - the navigation step (`Source{[Item="Sheet1",Kind="Sheet"]}[Data]`) name and spacing;
 - dates stored as numbers with a date format, and the 1900 leap-year bug.
+
+## Visual cases (M4.6)
+
+Cases in `parity/visuals/` check what a **Visual** shows, not a DAX query (ADR 0004, amended).
+Each has the dataset, optional `## Measures` (`Table[Name] = DAX` lines), a `## Visual` JSON block
+(our report file's visual shape: `type`, `wells`, `format`) and optional `Filter:` lines (slicer
+selections). `cargo xtask parity --export` writes `visual.json`, `measures.dax` and a README.
+
+1. Load the dataset as for any case; add each measure from `measures.dax`.
+2. Build the visual: the type, the Fields in each well in order (Columns in Values keep their
+   default summarization), the format options given. Add a slicer per `Filter:` line with those
+   items selected.
+3. **View → Performance analyzer → Start recording → Refresh visuals.** Expand the visual's
+   entry → **Copy query**. Never paste that query into the repo: it is Power BI's output.
+4. DAX query view → paste → Run → copy the whole result → paste it into the case's Observed
+   block under the version line, verbatim.
+5. Under the block, add one `Map: <observed header> = <our column>` line per column that holds a
+   group key or a value: our columns are the Fields' labels (`Region`, `Sum of Amount`, a
+   Measure's name). Flag columns (`IsGrandTotalRowTotal`…) aren't mapped. Each mapped column is
+   a Check; rows are compared as sorted records, with a total's keys empty.

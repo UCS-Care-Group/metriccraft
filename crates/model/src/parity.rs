@@ -34,7 +34,7 @@ pub struct Table {
 }
 
 impl Table {
-    fn column(&self, name: &str) -> Option<Vec<&str>> {
+    pub fn column(&self, name: &str) -> Option<Vec<&str>> {
         let i = self.columns.iter().position(|c| c == name)?;
         self.rows
             .iter()
@@ -67,7 +67,17 @@ pub struct Case {
     /// `## M` blocks: a Query's whole M as OpenDash BI prints it, its file named without a
     /// folder (`File.Contents("Sales.csv")`).
     pub m: Vec<String>,
+    /// The DAX query; empty for a visual case.
     pub query: String,
+    /// A visual case's Visual (`## Visual`, a ```` ```json ```` block in the report file's
+    /// visual shape, ADR 0003), run by `opendash_visuals::parity` instead of a query.
+    pub visual: Option<String>,
+    /// `## Measures`: (Table, Measure, DAX) from `Table[Name] = DAX` lines.
+    pub measures: Vec<(String, String, String)>,
+    /// `Filter: Table[Column] = value, …` lines: a visual case's slicer selections.
+    pub filters: Vec<String>,
+    /// `Map: <observed header> = <our column>` lines: which observed columns are Checks.
+    pub maps: Vec<(String, String)>,
     pub observed: Table,
     /// Observed facts beyond the result columns, as (Check name, observed text):
     /// `Get Data M <Query>`, `M accepted`, `Load errors <Query>`, `Column order`.
@@ -82,6 +92,10 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
     let mut culture = None;
     let mut m = Vec::new();
     let mut query = None;
+    let mut visual = None;
+    let mut measures = Vec::new();
+    let mut filters = Vec::new();
+    let mut maps = Vec::new();
     let mut observed = None;
     let mut extra = Vec::new();
     let mut versioned = false;
@@ -100,6 +114,12 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
             }
             match *info {
                 "dax" if section == "Query" => query = Some(body.join("\n")),
+                "json" if section == "Visual" => visual = Some(body.join("\n")),
+                "dax" if section == "Measures" => {
+                    for l in body.iter().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+                        measures.push(measure_line(l)?);
+                    }
+                }
                 "tsv" if section == "Observed" => observed = Some(tsv(body, true)?),
                 "csv" if section == "Dataset" => {
                     let file = next_source
@@ -149,6 +169,13 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
+        } else if let Some(spec) = line.strip_prefix("Filter:") {
+            filters.push(spec.trim().to_string());
+        } else if let Some(spec) = line.strip_prefix("Map:") {
+            let (o, ours) = spec
+                .split_once(" = ")
+                .ok_or("`Map:` needs `<observed header> = <our column>`")?;
+            maps.push((o.trim().to_string(), ours.trim().to_string()));
         } else if let Some(spec) = line.strip_prefix("Table:") {
             next_table = Some(table_line(spec)?);
         } else if let Some(spec) = line.strip_prefix("Source:") {
@@ -224,7 +251,15 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
             return Err(format!("observed `{name}` is given twice"));
         }
     }
-    let query = query.ok_or("missing ```dax block under ## Query")?;
+    let query = match (query, &visual) {
+        (Some(q), None) => q,
+        (None, Some(_)) => String::new(),
+        (None, None) => return Err("missing ```dax block under ## Query".into()),
+        (Some(_), Some(_)) => return Err("a case has a ## Query or a ## Visual, not both".into()),
+    };
+    if visual.is_none() && !(measures.is_empty() && filters.is_empty() && maps.is_empty()) {
+        return Err("## Measures, `Filter:` and `Map:` are for visual cases".into());
+    }
     // A case awaiting observation has no Observed block yet, so no Checks.
     let observed = observed.unwrap_or_default();
     if (!observed.columns.is_empty() || !extra.is_empty()) && !versioned {
@@ -234,7 +269,8 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
         if observed.rows.is_empty() {
             return Err("observed result has no rows".into());
         }
-        if observed.rows.len() > 1 && !query.to_uppercase().contains("ORDER BY") {
+        if visual.is_none() && observed.rows.len() > 1 && !query.to_uppercase().contains("ORDER BY")
+        {
             return Err("multi-row result needs ORDER BY in the query".into());
         }
         if !sources.is_empty() {
@@ -249,9 +285,26 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
         culture,
         m,
         query,
+        visual,
+        measures,
+        filters,
+        maps,
         observed,
         observed_extra: extra,
     })
+}
+
+/// `Sales[Total] = SUM(Sales[Amount])` → (Table, Measure, DAX).
+fn measure_line(l: &str) -> Result<(String, String, String)> {
+    let bad = || format!("measure line `{l}` isn't `Table[Name] = DAX`");
+    let (lhs, dax) = l.split_once('=').ok_or_else(bad)?;
+    let (table, name) = lhs.trim().split_once('[').ok_or_else(bad)?;
+    let name = name.strip_suffix(']').ok_or_else(bad)?;
+    let table = table.trim().trim_matches('\'');
+    if table.is_empty() || name.is_empty() || dax.trim().is_empty() {
+        return Err(bad());
+    }
+    Ok((table.into(), name.into(), dax.trim().into()))
 }
 
 /// `Table: Sales — Region: text, Amount: decimal, Qty: whole`
@@ -379,6 +432,12 @@ fn evaluate(case: &Case) -> (Result<Table>, ColumnErrors) {
 /// dictionary-encoded, Relationships auto-detected), as the evaluator's database. Empty cells
 /// are blanks.
 fn dataset(case: &Case) -> Result<crate::dax::Database> {
+    let (model, loaded) = loaded(case)?;
+    Ok(crate::dax::Database::new(&model, &loaded))
+}
+
+/// The case's Model (its *Enter data* tables and `## Measures`) and loaded tables.
+pub fn loaded(case: &Case) -> Result<(crate::Model, Vec<opendash_data::Table>)> {
     use arrow_array::{ArrayRef, RecordBatch, StringArray};
     use opendash_data::TableBuilder;
     use opendash_data::step::ColumnType;
@@ -425,7 +484,12 @@ fn dataset(case: &Case) -> Result<crate::dax::Database> {
     }
     // Power BI auto-detects Relationships when the tables load (same-named key columns).
     model.autodetect(&loaded, |_| true);
-    Ok(crate::dax::Database::new(&model, &loaded))
+    for (table, name, dax) in &case.measures {
+        model
+            .add_measure(table, crate::Measure::new(name, dax))
+            .map_err(|e| format!("measure {table}[{name}]: {e}"))?;
+    }
+    Ok((model, loaded))
 }
 
 /// A result as Power BI copies it.
@@ -504,8 +568,12 @@ pub struct Report {
 
 /// Parses every case under `root/observed/`, in file order.
 pub fn cases(root: &Path) -> Result<Vec<Case>> {
-    let dir = root.join("observed");
-    let mut files: Vec<_> = std::fs::read_dir(&dir)
+    cases_in(&root.join("observed"))
+}
+
+/// Parses every case file in `dir`, in file order.
+pub fn cases_in(dir: &Path) -> Result<Vec<Case>> {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
         .map_err(|e| format!("{}: {e}", dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "md"))
@@ -639,6 +707,29 @@ mod tests {
         Table: T — A: text, B: decimal\n\n```tsv\nA\tB\nx\t1.5\ny\t\n```\n\n\
         ## Query\n\n```dax\nEVALUATE ROW(\"S\", SUM(T[B]))\n```\n\n## Observed\n\n\
         Power BI Desktop version: 2.158\n\n```tsv\n[S]\t[E]\r\n1.5\t\n```\n";
+
+    #[test]
+    fn parses_a_visual_case() {
+        let v = "Covers: card\n\n## Dataset\n\nTable: T — A: text, B: decimal\n\n\
+            ```tsv\nA\tB\nx\t1.5\n```\n\n## Measures\n\n```dax\nT[S] = SUM(T[B])\n```\n\n\
+            ## Visual\n\nFilter: T[A] = x\n\n```json\n{\"type\": \"card\"}\n```\n\n\
+            ## Observed\n\nPower BI Desktop version: 2.158\n\n```tsv\n[S]\n1.5\n```\n\
+            Map: S = S\n";
+        let c = parse("v", v).unwrap();
+        assert_eq!(c.measures, [("T".into(), "S".into(), "SUM(T[B])".into())]);
+        assert_eq!(c.filters, ["T[A] = x"]);
+        assert_eq!(c.maps, [("S".into(), "S".into())]);
+        assert!(c.query.is_empty() && c.visual.is_some());
+        let (model, _) = loaded(&c).unwrap();
+        assert!(model.measure("S").is_some());
+        let both = v.replace(
+            "## Visual",
+            "## Query\n\n```dax\nEVALUATE T\n```\n\n## Visual",
+        );
+        assert!(parse("v", &both).unwrap_err().contains("not both"));
+        assert!(parse("v", &v.replace("T[S] =", "T S =")).is_err());
+        assert!(parse("x", &CASE.replace("Covers", "Map: a = b\nCovers")).is_err());
+    }
 
     #[test]
     fn parses_a_case() {

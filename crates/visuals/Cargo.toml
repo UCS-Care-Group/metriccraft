@@ -22,6 +22,7 @@ opendash-core = { path = "../core" }
 opendash-data = { path = "../data" }
 opendash-dax = { path = "../dax" }
 opendash-model = { path = "../model" }
+serde_json.workspace = true
 tiny-skia = { version = "0.12", optional = true, default-features = false, features = ["std", "png-format"] }
 
 [dev-dependencies]

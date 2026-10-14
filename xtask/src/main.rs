@@ -481,30 +481,43 @@ fn machine_info(id: &str) -> serde_json::Value {
 /// `parity/passing.txt` after an intended change; the gate itself is the `opendash-model` test.
 fn parity(update: bool, pending: bool) -> Result {
     let root = Path::new("parity");
-    let run = opendash_model::parity::run(root)?;
+    let dax = opendash_model::parity::run(root)?;
+    // Visual cases (M4.6) ratchet in their own list.
+    let visuals = opendash_visuals::parity::run(&root.join("visuals"))?;
+    let all: Vec<&opendash_model::parity::Check> =
+        dax.checks.iter().chain(&visuals.checks).collect();
     if pending {
-        for c in run.checks.iter().filter(|c| !c.pass) {
+        for c in all.iter().filter(|c| !c.pass) {
             eprintln!("PENDING {}: {}", c.key(), c.detail);
         }
     }
-    let tags = run.by_tag();
+    let mut tags = dax.by_tag();
+    for (tag, (p, t)) in visuals.by_tag() {
+        let e = tags.entry(tag).or_default();
+        e.0 += p;
+        e.1 += t;
+    }
     for (tag, (pass, total)) in &tags {
         eprintln!("  {tag:<10} {pass:>3} / {total:<3} Checks");
     }
-    let passing = run.checks.iter().filter(|c| c.pass).count();
+    let passing = all.iter().filter(|c| c.pass).count();
     let done = tags.values().filter(|(p, t)| p == t).count();
     eprintln!(
         "{passing} of {} Checks passing; {done} of {} tags complete",
-        run.checks.len(),
+        all.len(),
         tags.len()
     );
     if update {
-        std::fs::write(root.join("passing.txt"), run.passing_list())
+        std::fs::write(root.join("passing.txt"), dax.passing_list())
             .map_err(|e| format!("writing parity/passing.txt: {e}"))?;
-        eprintln!("wrote parity/passing.txt");
+        std::fs::write(root.join("visuals/passing.txt"), visuals.passing_list())
+            .map_err(|e| format!("writing parity/visuals/passing.txt: {e}"))?;
+        eprintln!("wrote parity/passing.txt and parity/visuals/passing.txt");
         return Ok(());
     }
-    report(run.problems())
+    let mut problems = dax.problems();
+    problems.extend(visuals.problems());
+    report(problems)
 }
 
 /// Writes one folder per case into the gitignored `observations/cases/` (cleared first), ready
@@ -515,7 +528,11 @@ fn parity_export() -> Result {
     if out.exists() {
         std::fs::remove_dir_all(out).map_err(|e| format!("clearing {}: {e}", out.display()))?;
     }
-    for case in opendash_model::parity::cases(Path::new("parity"))? {
+    let mut cases = opendash_model::parity::cases(Path::new("parity"))?;
+    cases.extend(opendash_model::parity::cases_in(Path::new(
+        "parity/visuals",
+    ))?);
+    for case in cases {
         for (name, body) in opendash_model::parity::export(&case)? {
             let path = out.join(&name);
             if let Some(dir) = path.parent() {
