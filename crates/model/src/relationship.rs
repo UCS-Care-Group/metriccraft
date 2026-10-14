@@ -357,7 +357,7 @@ fn check_key(table: &Table, column: &str) -> Result {
             )));
         };
         let key = if is_text {
-            v.trim_end_matches(' ').to_lowercase()
+            opendash_core::fold(v.trim_end_matches(' '))
         } else {
             v.to_string()
         };

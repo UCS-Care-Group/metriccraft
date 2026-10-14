@@ -293,7 +293,12 @@ impl Parser {
             while let Some(op) = self.binop().filter(|op| op.precedence() >= min) {
                 self.next();
                 self.enter()?;
-                let rhs = self.binary(op.precedence().saturating_add(1))?;
+                // `^` is right-associative: `2^3^2` = 512 (parity case 0039).
+                let next = match op {
+                    BinOp::Power => op.precedence(),
+                    _ => op.precedence().saturating_add(1),
+                };
+                let rhs = self.binary(next)?;
                 let span = lhs.span.to(rhs.span);
                 lhs = Expr {
                     kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
@@ -600,7 +605,7 @@ mod tests {
             ("1 + 2 * 3 - 4", "(- (+ 1 (* 2 3)) 4)"),
             ("-2 ^ 2", "(Negate (^ 2 2))"),
             ("2 ^ -1", "(^ 2 (Negate 1))"),
-            ("2 ^ 3 ^ 2", "(^ (^ 2 3) 2)"),
+            ("2 ^ 3 ^ 2", "(^ 2 (^ 3 2))"),
             ("-a * b", "(* (Negate a) b)"),
             ("\"a\" & 1 + 2 = \"a3\"", "(= (& \"a\" (+ 1 2)) \"a3\")"),
             ("NOT a = b && c || d", "(|| (&& (Not (= a b)) c) d)"),

@@ -4,10 +4,10 @@
 //! - **Lazy branches.** `IF`, `SWITCH` and `IFERROR` evaluate only the branch they take, so an
 //!   error in an untaken branch never surfaces (case 0033).
 //! - **Conditions** convert as `NOT` does: BLANK is FALSE, a number is TRUE unless 0.
-//! - **`SWITCH`** compares with `=` (BLANK matches 0), each value evaluated in order until one
-//!   matches.
-//! - **`DIVIDE(n, d, alt)`** gives `alt` (default BLANK) when `d` is 0 or BLANK, whatever `n`
-//!   is; otherwise `n / d`.
+//! - **`SWITCH`** compares strictly (`==`: BLANK doesn't match 0, case 0033), each value
+//!   evaluated in order until one matches.
+//! - **`DIVIDE(n, d, alt)`** is BLANK when `n` is BLANK (even for `d` 0, case 0034); else `alt`
+//!   (default BLANK) when `d` is 0 or BLANK; otherwise `n / d`.
 //! - **`ISERROR` / `IFERROR`** catch DAX errors ([`ErrorKind::Eval`]: not limits, the memory cap
 //!   or cancelling) and treat an infinite or NaN result as an error (case 0002).
 //! - **`IN` / `CONTAINSROW`** compare strictly (`==`: BLANK matches only BLANK, per Microsoft's
@@ -176,7 +176,7 @@ impl Step for If {
     }
 }
 
-/// `SWITCH(expr, value1, result1, …, [else])`: the result of the first value `=` to `expr`;
+/// `SWITCH(expr, value1, result1, …, [else])`: the result of the first value `==` to `expr`;
 /// values after the match and the results not taken aren't evaluated.
 #[derive(Default)]
 pub struct Switch {
@@ -209,7 +209,10 @@ impl Step for Switch {
             Some(subject) => {
                 let span = arg_span(call, self.i);
                 let v = value_of(ev, r, span)?;
-                if subject.equals(&v).map_err(|e| value_error(span, &e))? {
+                if subject
+                    .strict_equals(&v)
+                    .map_err(|e| value_error(span, &e))?
+                {
                     self.taken = true;
                     return args
                         .get(self.i.saturating_add(1))
@@ -260,6 +263,9 @@ impl Step for Divide {
         };
         let span = arg_span(call, 1);
         let d = value_of(ev, r, span)?;
+        if n.is_blank() {
+            return Ok(Next::Done(Val::Scalar(Value::Blank)));
+        }
         if is_zero(&d).map_err(|e| value_error(span, &e))? {
             let args: &'e [Expr] = call.args;
             return Ok(match args.get(2) {
@@ -602,7 +608,9 @@ mod tests {
             ("SWITCH(9, 1, \"one\", 2, \"two\", \"other\")", "other"),
             ("ISBLANK(SWITCH(9, 1, \"one\"))", "true"),
             ("SWITCH(TRUE(), 1 > 2, \"a\", 2 > 1, \"b\", \"c\")", "b"),
-            ("SWITCH(BLANK(), 0, \"zero\", \"other\")", "zero"),
+            ("SWITCH(BLANK(), 0, \"zero\", \"other\")", "other"),
+            ("SWITCH(BLANK(), BLANK(), \"blank\", \"other\")", "blank"),
+            ("SWITCH(1, 1.0, \"one\", \"other\")", "one"),
             ("SWITCH(1, 1, 10, \"a\" + 1)", "10"),
             ("SWITCH(1, 1, 10, 2, \"a\" + 1)", "10"),
             ("SWITCH(\"A\", \"a\", 1, 2)", "1"),
@@ -627,7 +635,7 @@ mod tests {
             ("ISBLANK(DIVIDE(0, 0))", "true"),
             ("ISBLANK(DIVIDE(1, BLANK()))", "true"),
             ("ISBLANK(DIVIDE(BLANK(), 2))", "true"),
-            ("DIVIDE(BLANK(), 0, -1)", "-1"),
+            ("ISBLANK(DIVIDE(BLANK(), 0, -1))", "true"),
             ("DIVIDE(1, 0, \"none\")", "none"),
             ("DIVIDE(-1, 4)", "-0.25"),
             ("DIVIDE(1, 0, -1)", "-1"),

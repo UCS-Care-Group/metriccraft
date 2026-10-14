@@ -3,7 +3,9 @@
 
 use std::fmt::Write;
 
-use crate::{Define, Expr, ExprKind, NOT_PRECEDENCE, Query, SIGN_PRECEDENCE, UnaryOp, is_keyword};
+use crate::{
+    BinOp, Define, Expr, ExprKind, NOT_PRECEDENCE, Query, SIGN_PRECEDENCE, UnaryOp, is_keyword,
+};
 
 /// Prints an expression on one line.
 pub fn print_expr(expr: &Expr) -> String {
@@ -159,12 +161,17 @@ fn write_expr(out: &mut String, expr: &Expr) {
             write_operand(out, e, SIGN_PRECEDENCE);
         }
         ExprKind::Binary(op, l, r) => {
+            // `^` is right-associative; every other operator left.
             let p = op.precedence();
-            write_operand(out, l, p);
+            let (lp, rp) = match op {
+                BinOp::Power => (p.saturating_add(1), p),
+                _ => (p, p.saturating_add(1)),
+            };
+            write_operand(out, l, lp);
             out.push(' ');
             out.push_str(op.symbol());
             out.push(' ');
-            write_operand(out, r, p.saturating_add(1));
+            write_operand(out, r, rp);
         }
         ExprKind::Var { vars, body } => {
             for (name, value) in vars {
@@ -242,5 +249,8 @@ mod tests {
         assert_eq!(print_expr(&neg(neg(n(1)))), "- -1");
         let pow = e(ExprKind::Binary(BinOp::Power, neg(n(2)), n(2)));
         assert_eq!(print_expr(&pow), "(-2) ^ 2");
+        let pow = |l, r| b(ExprKind::Binary(BinOp::Power, l, r));
+        assert_eq!(print_expr(&pow(n(2), pow(n(3), n(2)))), "2 ^ 3 ^ 2");
+        assert_eq!(print_expr(&pow(pow(n(2), n(3)), n(2))), "(2 ^ 3) ^ 2");
     }
 }

@@ -344,8 +344,8 @@ fn extreme_scan(
     })
 }
 
-/// The smaller (or larger) of two values; a BLANK is the other side's zero, both BLANK give
-/// BLANK, a tie gives the first.
+/// The smaller (or larger) of two values; a BLANK compares as the other side's zero and, when
+/// it wins, gives BLANK (`MIN(1, BLANK())`, case 0044); a tie gives the first.
 #[inline(never)]
 fn pick(a: Value, b: Value, call: &Call<'_>, max: bool) -> Result<Value> {
     if let Some(bad) = [&a, &b]
@@ -365,25 +365,7 @@ fn pick(a: Value, b: Value, call: &Call<'_>, max: bool) -> Result<Value> {
         .compare(&b)
         .map_err(|e| DaxError::new(call.span, e.to_string()))?;
     let take_b = o.is_some_and(|o| if max { o.is_lt() } else { o.is_gt() });
-    let (win, other) = if take_b { (b, a) } else { (a, b) };
-    Ok(if win.is_blank() {
-        zero_like(&other)
-    } else {
-        win
-    })
-}
-
-/// What a BLANK compares as against `v`: its type's zero (BLANK against BLANK).
-fn zero_like(v: &Value) -> Value {
-    match v {
-        Value::Blank => Value::Blank,
-        Value::Boolean(_) => Value::Boolean(false),
-        Value::Integer(_) => Value::Integer(0),
-        Value::Decimal(_) => Value::Decimal(0.0),
-        Value::Currency(_) => Value::Currency(0),
-        Value::Text(_) => Value::text(""),
-        Value::DateTime(_) => Value::DateTime(0.0),
-    }
+    Ok(if take_b { b } else { a })
 }
 
 #[cfg(test)]

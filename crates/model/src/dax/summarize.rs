@@ -3,12 +3,10 @@
 //!
 //! **`SUMMARIZECOLUMNS(T[c]…, "Name", expr…)`** (no filter-table arguments yet: one is an error):
 //! 1. **Groups.** The group-by columns' value combinations, over the rows the filter context
-//!    shows. Columns of one Table combine as the Table's existing rows do. A group-by Table that
-//!    another group-by Table reaches through active many-to-one Relationships (its *expanded*
-//!    Table) combines through the many side's rows: `Regions[Region], Sales[Product]` gives the
-//!    (Region, Product) pairs that Sales rows have, the Region read through the Relationship
-//!    (BLANK when a Sales row's key has no Region). The remaining, unrelated Tables cross-join;
-//!    the cross product is charged to the memory cap before it is built.
+//!    shows. Columns of one Table combine as the Table's existing rows do; different Tables
+//!    cross-join, related or not (case 0045: `Regions[Region], Sales[Product]` with a constant
+//!    expression gives all 3 × 3 pairs), and step 3 drops the pairs with nothing. The cross
+//!    product is charged to the memory cap before it is built.
 //! 2. **Expressions.** Each is evaluated in its group's filter context: the outer filter context
 //!    plus one equality filter per group-by column.
 //! 3. **Blank rows.** A group whose expressions are all BLANK is dropped, as Power BI does; with
@@ -20,19 +18,14 @@
 //! Without `ORDER BY` rows come in first-seen order (Power BI's order is unspecified).
 //!
 //! Parity guesses (to settle with cases):
-//! - Power BI is documented to cross-join the columns of *different* Tables and rely on the
-//!   blank-row rule; we use existing combinations through Relationships instead. They differ
-//!   only when an expression is non-blank for a pair no many-side row has (e.g. a constant).
-//! - The blank group of a one-side Table (many-side rows without a match) is shown, but its
-//!   equality filter finds no many-side rows here, so its expressions are BLANK and it drops;
-//!   Power BI's virtual blank row would keep it.
-//! - Two group-by Tables both expanding to a third: the third's columns follow the first.
+//! - With no expressions, the full cross join is kept (only case 0045's constant is observed).
+//! - A one-side Table has no virtual blank row here, so many-side rows whose key has no match
+//!   get no group; Power BI's blank row would show them.
 //!
 //! Performance: each group's expressions run their own scans (groups × rows); a one-pass
 //! group-by scan for plain aggregations is a later optimisation (N-3, M4).
 
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use opendash_core::Value;
@@ -252,16 +245,9 @@ pub fn summarize_rows(
     Ok(Rows { columns, rows })
 }
 
-/// One set of group-by columns combined by the rows of `root`: the columns of `root` and of the
-/// Tables it reaches, each with the Relationships from `root` to its Table.
-struct Combined {
-    root: usize,
-    /// (index into `group_by`, Relationship path from `root`).
-    columns: Vec<(usize, Vec<usize>)>,
-}
-
-/// The group combinations of `group_by` under `fc`, in `group_by` order; every row is charged
-/// for `width` values.
+/// The group combinations of `group_by` under `fc`, in `group_by` order: each Table's existing
+/// tuples of its group-by columns, cross-joined across Tables; every row is charged for `width`
+/// values.
 fn groups(
     ev: &mut Evaluator<'_, '_>,
     group_by: &[(usize, usize)],
@@ -269,71 +255,19 @@ fn groups(
     width: usize,
     span: Span,
 ) -> Result<Vec<Vec<Value>>> {
-    let mut tables: Vec<usize> = Vec::new();
-    for &(t, _) in group_by {
-        if !tables.contains(&t) {
-            tables.push(t);
-        }
-    }
-    let expanded = tables
-        .iter()
-        .map(|&t| calculate::expanded(ev, t, span))
-        .collect::<Result<Vec<_>>>()?;
-    let reaches = |j: usize, t: usize| expanded.get(j).is_some_and(|e| e.contains(&t));
-    // A root is a Table no other group-by Table reaches (of two that reach each other, the first).
-    let is_root = |i: usize, t: usize| {
-        !tables.iter().enumerate().any(|(j, &u)| {
-            j != i && reaches(j, t) && (!expanded.get(i).is_some_and(|e| e.contains(&u)) || j < i)
-        })
-    };
-    let roots: Vec<usize> = tables
-        .iter()
-        .enumerate()
-        .filter(|&(i, &t)| is_root(i, t))
-        .map(|(_, &t)| t)
-        .collect();
-    let mut sets: Vec<Combined> = roots
-        .iter()
-        .map(|&root| Combined {
-            root,
-            columns: Vec::new(),
-        })
-        .collect();
+    // Each Table with the positions in `group_by` of its columns.
+    let mut sets: Vec<(usize, Vec<usize>)> = Vec::new();
     for (k, &(t, _)) in group_by.iter().enumerate() {
-        let owner = sets.iter().position(|s| {
-            s.root == t
-                || tables
-                    .iter()
-                    .position(|&u| u == s.root)
-                    .is_some_and(|j| reaches(j, t))
-        });
-        let at = match owner {
-            Some(at) => at,
-            None => {
-                sets.push(Combined {
-                    root: t,
-                    columns: Vec::new(),
-                });
-                sets.len().saturating_sub(1)
-            }
-        };
-        let Some(set) = sets.get_mut(at) else {
-            continue;
-        };
-        let path = if set.root == t {
-            Vec::new()
-        } else {
-            calculate::path_to(ev, set.root, t, span)?.unwrap_or_default()
-        };
-        if let Some(set) = sets.get_mut(at) {
-            set.columns.push((k, path));
+        match sets.iter_mut().find(|(u, _)| *u == t) {
+            Some((_, ks)) => ks.push(k),
+            None => sets.push((t, vec![k])),
         }
     }
 
     // Each set's distinct tuples, then their cross product.
     let mut parts: Vec<Vec<Vec<Value>>> = Vec::with_capacity(sets.len());
-    for set in &sets {
-        parts.push(tuples(ev, set, group_by, fc, span)?);
+    for (t, ks) in &sets {
+        parts.push(tuples(ev, *t, ks, group_by, fc, span)?);
     }
     let n = parts
         .iter()
@@ -343,8 +277,8 @@ fn groups(
     ev.charge(n.saturating_mul(row_bytes), span)?;
     // Where each group-by column is: (set, position in the set's tuple).
     let mut place = vec![(0usize, 0usize); group_by.len()];
-    for (s, set) in sets.iter().enumerate() {
-        for (pos, (k, _)) in set.columns.iter().enumerate() {
+    for (s, (_, ks)) in sets.iter().enumerate() {
+        for (pos, k) in ks.iter().enumerate() {
             if let Some(p) = place.get_mut(*k) {
                 *p = (s, pos);
             }
@@ -378,58 +312,34 @@ fn groups(
     Ok(out)
 }
 
-/// The distinct value tuples of `set`'s columns over the visible rows of its root, in
-/// first-seen order; charged to the memory cap.
+/// The distinct value tuples of Table `t`'s group-by columns (`ks`, positions in `group_by`)
+/// over its visible rows, in first-seen order; charged to the memory cap.
 fn tuples(
     ev: &mut Evaluator<'_, '_>,
-    set: &Combined,
+    t: usize,
+    ks: &[usize],
     group_by: &[(usize, usize)],
     fc: &FilterContext,
     span: Span,
 ) -> Result<Vec<Vec<Value>>> {
     let db = ev.db;
-    let Some(root) = db.tables.get(set.root) else {
+    let Some(table) = db.tables.get(t) else {
         return Ok(Vec::new());
     };
-    let mut indexes: HashMap<usize, Rc<HashMap<Key, usize>>> = HashMap::new();
-    for (_, path) in &set.columns {
-        for &rel in path {
-            if let Entry::Vacant(e) = indexes.entry(rel) {
-                e.insert(calculate::related_index(ev, rel, span)?);
-            }
-        }
-    }
-    let mask = ev.mask(set.root, fc, span)?;
-    // The row of a path's last Table that root row `row` reaches (`None`: no match).
-    let follow = |path: &[usize], row: usize| -> Option<usize> {
-        let mut row = row;
-        for rel in path {
-            let r = db.relationships.get(*rel)?;
-            let col = db.tables.get(r.from_table)?.columns.get(r.from_column)?;
-            let key = Key::of(&col.data.value(row), true)?;
-            row = *indexes.get(rel)?.get(&key)?;
-        }
-        Some(row)
-    };
+    let cols: Vec<_> = ks
+        .iter()
+        .filter_map(|k| table.columns.get(group_by.get(*k)?.1))
+        .collect();
+    let mask = ev.mask(t, fc, span)?;
     let mut seen: HashSet<Vec<Option<Key>>> = HashSet::new();
     let mut out = Vec::new();
-    let tuple_bytes = set
-        .columns
+    let tuple_bytes = cols
         .len()
         .saturating_mul(VALUE_BYTES.saturating_add(KEY_BYTES))
         .saturating_add(ROW_BYTES);
     let cancel = ev.cancel;
-    storage::scan(root.rows, mask.as_ref(), cancel, |r| {
-        let values: Vec<Value> = set
-            .columns
-            .iter()
-            .map(|(k, path)| {
-                let (t, c) = group_by.get(*k).copied()?;
-                let row = follow(path, r)?;
-                Some(db.tables.get(t)?.columns.get(c)?.data.value(row))
-            })
-            .map(|v| v.unwrap_or(Value::Blank))
-            .collect();
+    storage::scan(table.rows, mask.as_ref(), cancel, |r| {
+        let values: Vec<Value> = cols.iter().map(|c| c.data.value(r)).collect();
         let key: Vec<Option<Key>> = values.iter().map(|v| Key::of(v, false)).collect();
         if seen.insert(key) {
             let bytes = values.iter().fold(tuple_bytes, |b, v| match v {

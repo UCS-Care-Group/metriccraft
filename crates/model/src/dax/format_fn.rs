@@ -73,7 +73,7 @@ mod tests {
         );
         assert_eq!(
             one("FORMAT(1234.5, \"Currency\", \"de-DE\")").unwrap(),
-            "1.234,50\u{A0}€"
+            "1.234,50 €"
         );
         assert_eq!(one("FORMAT(-0.5, \"0%;(0%)\")").unwrap(), "(50%)");
         assert_eq!(one("FORMAT(BLANK(), \"0.00\")").unwrap(), "");

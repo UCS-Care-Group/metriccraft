@@ -307,10 +307,10 @@ fn min_max_of_two_values() {
     let db = sales();
     assert_eq!(one(&db, "MIN(1, 2)"), Value::Integer(1));
     assert_eq!(one(&db, "MAX(1, 2.5)"), Value::Decimal(2.5));
-    // BLANK is zero against the other side (documented).
-    assert_eq!(one(&db, "MIN(1, BLANK())"), Value::Integer(0));
+    // BLANK compares as zero and, when it wins, stays BLANK (case 0044).
+    assert_eq!(one(&db, "MIN(1, BLANK())"), Value::Blank);
     assert_eq!(one(&db, "MIN(-1, BLANK())"), Value::Integer(-1));
-    assert_eq!(one(&db, "MAX(-1, BLANK())"), Value::Integer(0));
+    assert_eq!(one(&db, "MAX(-1, BLANK())"), Value::Blank);
     assert_eq!(one(&db, "MAX(BLANK(), BLANK())"), Value::Blank);
     assert_eq!(one(&db, "MIN(\"b\", \"A\")"), Value::text("A"));
     assert_eq!(one(&db, "MAX(SUM(Sales[Qty]), 20)"), Value::Integer(20));

@@ -147,7 +147,8 @@ fn parity_0043_summarizecolumns() {
 }
 
 #[test]
-fn no_expressions_gives_existing_combinations() {
+fn different_tables_cross_join() {
+    // Case 0045 (with a constant expression); with none, a parity guess.
     let q = "EVALUATE SUMMARIZECOLUMNS(Regions[Region], Sales[Product]) \
              ORDER BY Regions[Region], Sales[Product]";
     assert_eq!(
@@ -155,20 +156,29 @@ fn no_expressions_gives_existing_combinations() {
         rows(&[
             &["North", "Apple"],
             &["North", "Pear"],
+            &["North", "Plum"],
             &["South", "Apple"],
             &["South", "Pear"],
             &["South", "Plum"],
+            &["West", "Apple"],
+            &["West", "Pear"],
+            &["West", "Plum"],
         ])
     );
     // One Table: its distinct values (West has no Sales, but is a Region).
     let q = "EVALUATE SUMMARIZECOLUMNS(Regions[Region]) ORDER BY Regions[Region]";
     assert_eq!(cells(&db(), q), rows(&[&["North"], &["South"], &["West"]]));
-    // Through the Relationship, an unmatched key reads BLANK; BLANK sorts first.
-    let q = "EVALUATE SUMMARIZECOLUMNS(Sales[Region], Regions[Manager]) \
+    // With an expression, the pairs with no Sales rows drop. East has no Region row, so no
+    // Manager pairs with it (no virtual blank row: a parity guess).
+    let q = "EVALUATE SUMMARIZECOLUMNS(Sales[Region], Regions[Manager], \"n\", COUNTROWS(Sales)) \
              ORDER BY Regions[Manager], Sales[Region]";
+    let got = cells(&db_with(true), q);
+    assert_eq!(got.len(), 2, "{got:?}");
     assert_eq!(
-        cells(&db_with(true), q),
-        rows(&[&["East", ""], &["North", "Ann"], &["South", "Bob"]])
+        got.iter()
+            .map(|r| r.get(..2).unwrap_or_default().to_vec())
+            .collect::<Vec<_>>(),
+        rows(&[&["North", "Ann"], &["South", "Bob"]])
     );
 }
 

@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+opendash-core = { path = "../core" }
 opendash-m = { path = "../m" }
 arrow-array.workspace = true
 arrow-buffer.workspace = true

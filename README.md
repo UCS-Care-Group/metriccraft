@@ -1,8 +1,8 @@
 # OpenDash BI
 
-![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M2%20done-orange)
+![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M3%20done-orange)
 ![DAX parity](https://img.shields.io/badge/DAX%20MVP%20functions-17%20of%2017%20implemented-yellow)
-![parity checks](https://img.shields.io/badge/parity%20checks-28%20of%2028%20passing-brightgreen)
+![parity checks](https://img.shields.io/badge/parity%20checks-237%20of%20237%20passing-brightgreen)
 ![tests](https://img.shields.io/badge/tests-476%20passing-brightgreen)
 ![unsafe](https://img.shields.io/badge/unsafe-forbidden-success)
 ![rust](https://img.shields.io/badge/rust-1.98%2B%20%C2%B7%20edition%202024-b7410e)
@@ -23,7 +23,7 @@ saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced
 | M0        | **Foundations**: workspace, CI gates, command framework, benches   | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M1        | **Connect + shape**: CSV/XLSX/Parquet, Applied Steps, M            | ![11/13](https://img.shields.io/badge/-11%2F13-yellow)                |
 | M2        | **Model + file**: tables, relationships, Project and Package       | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![10/11](https://img.shields.io/badge/-10%2F11-yellow)                |
+| M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M5        | **Desktop UI**: ribbon, Power Query editor, model view, canvas     | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M6        | **Control, CLI, MCP, web, release**                                | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |

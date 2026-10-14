@@ -407,10 +407,8 @@ fn errors_carry_the_failing_span() {
     let e = error(&db, q);
     assert_eq!(&q[e.span.start..e.span.end], "(\"abc\" * 2)", "{e}");
     assert!(e.message.contains("'abc'"), "{e}");
-    let q = "EVALUATE ROW(\"x\", 9223372036854775807 + 1)";
-    let e = error(&db, q);
-    assert_eq!(&q[e.span.start..e.span.end], "9223372036854775807 + 1");
-    assert!(e.message.contains("too large"), "{e}");
+    // Whole numbers wrap silently, as in Power BI (parity case 0037).
+    assert_eq!(one(&db, "9223372036854775807 + 1"), "-9223372036854776000");
     let q = "EVALUATE ROW(\"x\", 1 = \"1\")";
     let e = error(&db, q);
     assert!(e.message.contains("compared"), "{e}");

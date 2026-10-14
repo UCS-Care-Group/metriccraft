@@ -4,13 +4,16 @@
 //! - **Named formats**: General Number, Currency, Fixed, Standard, Percent, Scientific, Yes/No,
 //!   True/False, On/Off, General Date, Long/Medium/Short Date, Long/Medium/Short Time (any case).
 //! - **Custom numeric codes**: `0` `#` placeholders, `.` decimal, `,` grouping (between
-//!   placeholders) or ÷1000 scaling (trailing, before the decimal point), `%` (×100), `E+ E- e+
+//!   placeholders) or ÷1000 scaling (after the last integer placeholder; commas after the decimal
+//!   point do nothing, case 0042), `%` (×100), `E+ E- e+
 //!   e-` exponents, `"text"` and `\x` literals, up to four `;` sections (positive; negative —
 //!   shown without its minus sign; zero; the fourth, for null, is ignored: BLANK is always `""`).
 //!   An empty section falls back to the first.
 //! - **Custom date/time codes**: `d dd ddd dddd ddddd dddddd w ww m mm mmm mmmm q y yy yyyy h hh
-//!   n nn s ss ttttt c`, `AM/PM am/pm A/P a/p AMPM`; `m`/`mm` right after an hour or right before
-//!   a second is minutes; `/` and `:` are the Locale's separators. Letters are case-insensitive.
+//!   n nn s ss ttttt c`, `AM/PM am/pm A/P a/p AMPM`; `m`/`mm` right after an hour is minutes
+//!   (before a second it is still the month: `mm:ss`, case 0042); `w` and `ww` count from the
+//!   Locale's first day of the week; `/` and `:` are the Locale's separators. Letters are
+//!   case-insensitive.
 //!
 //! **Rounding** is half away from zero on the value's decimal digits: the shortest round-trip
 //! digits of a Decimal (so `2.675` → `2.68`, as written, not as the binary double), exact digits
@@ -24,20 +27,20 @@
 //! currency, date Short Date, date/time General Date, time Long Time.
 //!
 //! Parity uncertainties (case 0042 and later cases settle them):
-//! - General Number shows 15 significant digits and switches to `1E+15` form at ≥ 1e15 or < 1e-4
-//!   (VBA's rule); Power BI may show 17 digits or use value-to-text's thresholds.
+//! - General Number shows 15 significant digits and switches to `1E+15` form at ≥ 1e15 or < 1e-5
+//!   (case 0042: `0.00001`, `1.5E+20`); Power BI may show 17 digits.
 //! - infinity and NaN render as value-to-text does (`inf`, `-inf`, `-nan(ind)`) under **every**
 //!   numeric code — observed only for General Number (case 0002).
-//! - a negative that rounds to zero keeps its sign (`-0.00`), as VBA and Excel do.
-//! - fr-FR groups with U+202F (narrow no-break space, Windows 10 1803+); older Windows used
-//!   U+00A0. de-DE and fr-FR put U+00A0 between the number and `€`.
+//! - a negative that rounds to zero loses its sign (`0.00`, case 0042).
+//! - fr-FR groups with U+202F (narrow no-break space, case 0042). de-DE and fr-FR put a plain
+//!   space between the number and `€` (case 0042); fr-FR short months have no dot (`janv`).
 //! - en-US negative currency is `($1,234.50)` (Windows' pattern 0); en-GB `-£1,234.50`, de-DE and
 //!   fr-FR `-1.234,50 €`.
 //! - Medium Date is `dd-mmm-yy` and Medium Time `hh:nn AM/PM` in every Locale (VBA); Long Time is
 //!   `h:nn:ss AM/PM` in en-US, `hh:nn:ss` elsewhere. AMPM designators are `AM`/`PM` everywhere.
 //! - General Date omits a midnight time and shows only the time for serials in day 0 (VBA).
-//! - Text that reads as a number is formatted as one; other text comes back unchanged. TRUE is
-//!   1 under numeric codes.
+//! - Text comes back unchanged, even when it reads as a number (`FORMAT("1.5", "0.00")` is
+//!   `1.5`, case 0042). TRUE is 1 under numeric codes.
 //! - Date columns default to Short Date (TMDL from Power BI often shows Long Date); decimal
 //!   numbers to General.
 
@@ -75,6 +78,8 @@ pub struct Locale {
     pub months_short: [&'static str; 12],
     /// Sunday first.
     pub days: [&'static str; 7],
+    /// The first day of the week for `w` and `ww`: 0 Sunday, 1 Monday.
+    pub first_day: i64,
     pub days_short: [&'static str; 7],
     pub am: &'static str,
     pub pm: &'static str,
@@ -122,6 +127,7 @@ pub static EN_US: Locale = Locale {
     months_short: EN_MONTHS_SHORT,
     days: EN_DAYS,
     days_short: EN_DAYS_SHORT,
+    first_day: 0,
     am: "AM",
     pm: "PM",
 };
@@ -140,6 +146,7 @@ pub static EN_GB: Locale = Locale {
     months_short: EN_MONTHS_SHORT,
     days: EN_DAYS,
     days_short: EN_DAYS_SHORT,
+    first_day: 1,
     am: "AM",
     pm: "PM",
 };
@@ -150,7 +157,7 @@ pub static DE_DE: Locale = Locale {
     thousands: '.',
     date_separator: '.',
     time_separator: ':',
-    currency: "#,##0.00\"\u{A0}€\";-#,##0.00\"\u{A0}€\"",
+    currency: "#,##0.00\" €\";-#,##0.00\" €\"",
     short_date: "dd/mm/yyyy",
     long_date: "dddd, d\". \"mmmm yyyy",
     long_time: "hh:nn:ss",
@@ -181,6 +188,7 @@ pub static DE_DE: Locale = Locale {
         "Samstag",
     ],
     days_short: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"],
+    first_day: 1,
     am: "AM",
     pm: "PM",
 };
@@ -191,7 +199,7 @@ pub static FR_FR: Locale = Locale {
     thousands: '\u{202F}',
     date_separator: '/',
     time_separator: ':',
-    currency: "#,##0.00\"\u{A0}€\";-#,##0.00\"\u{A0}€\"",
+    currency: "#,##0.00\" €\";-#,##0.00\" €\"",
     short_date: "dd/mm/yyyy",
     long_date: "dddd d mmmm yyyy",
     long_time: "hh:nn:ss",
@@ -210,13 +218,13 @@ pub static FR_FR: Locale = Locale {
         "décembre",
     ],
     months_short: [
-        "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.",
-        "déc.",
+        "janv", "févr", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc",
     ],
     days: [
         "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi",
     ],
     days_short: ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."],
+    first_day: 1,
     am: "AM",
     pm: "PM",
 };
@@ -372,24 +380,8 @@ impl Input {
                 exact: false,
                 serial: *d,
             }),
-            Value::Text(s) => match parse_number(s) {
-                Some(d) => Input::of(&Value::Decimal(d)),
-                None => Input::Text(s.to_string()),
-            },
+            Value::Text(s) => Input::Text(s.to_string()),
         }
-    }
-}
-
-/// Text read as a number: plain decimal notation only.
-fn parse_number(s: &str) -> Option<f64> {
-    let t = s.trim();
-    let ok = t.chars().any(|c| c.is_ascii_digit())
-        && t.chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'));
-    if ok {
-        t.parse().ok().filter(|d: &f64| d.is_finite())
-    } else {
-        None
     }
 }
 
@@ -601,7 +593,7 @@ impl Named {
 }
 
 /// General Number: no grouping, 15 significant digits (exact for whole and fixed decimal
-/// numbers), `1.5E+20` form at ≥ 1e15 or < 1e-4.
+/// numbers), `1.5E+20` form at ≥ 1e15 or < 1e-5.
 fn general_number(n: &Number, locale: &Locale) -> String {
     if !n.finite() {
         return number_text(n.serial);
@@ -614,7 +606,7 @@ fn general_number(n: &Number, locale: &Locale) -> String {
     if n.neg && !dec.is_zero() {
         out.push('-');
     }
-    let scientific = !n.exact && !dec.is_zero() && (dec.exp >= 16 || dec.exp <= -4);
+    let scientific = !n.exact && !dec.is_zero() && (dec.exp >= 16 || dec.exp <= -5);
     if scientific {
         let mut digits = dec.digits.iter().map(|&d| digit_char(d));
         out.extend(digits.next());
@@ -764,18 +756,18 @@ fn number_code(n: &Number, section: &[Piece], minus: bool, locale: &Locale) -> S
     };
     let is_digit = |t: &NTok| matches!(t, NTok::Digit { .. });
 
-    // Commas: grouping between integer placeholders, ÷1000 scaling after the last placeholder.
-    let number = tokens.get(..frac_end).unwrap_or_default();
-    let first_digit = number.iter().position(is_digit);
-    let last_digit = number.iter().rposition(is_digit);
+    // Commas in the integer part: grouping between placeholders, ÷1000 scaling after the last
+    // one. After the decimal point they do nothing (`0.0,,`, case 0042).
+    let first_digit = int.iter().position(is_digit);
+    let last_digit = int.iter().rposition(is_digit);
     let (mut group, mut scale) = (false, 0i64);
-    for (i, t) in number.iter().enumerate() {
+    for (i, t) in int.iter().enumerate() {
         if *t != NTok::Comma || first_digit.is_none_or(|f| f > i) {
             continue;
         }
         if last_digit.is_none_or(|l| l < i) {
             scale += 1;
-        } else if i < int_end {
+        } else {
             group = true;
         }
     }
@@ -796,9 +788,6 @@ fn number_code(n: &Number, section: &[Piece], minus: bool, locale: &Locale) -> S
     let any_digits = tokens.iter().any(is_digit);
 
     let mut out = String::new();
-    if minus {
-        out.push('-');
-    }
     // Scientific: the mantissa has as many integer digits as placeholders (at least one).
     let mut exponent = 0i64;
     if exp_at.is_some() {
@@ -816,6 +805,10 @@ fn number_code(n: &Number, section: &[Piece], minus: bool, locale: &Locale) -> S
         dec.round_frac(frac_places);
     }
 
+    // A negative that rounds to zero loses its sign (case 0042).
+    if minus && !dec.is_zero() {
+        out.push('-');
+    }
     render_int(int, &dec.int_digits(), group, any_digits, locale, &mut out);
     if point {
         out.push(locale.decimal);
@@ -1041,7 +1034,7 @@ fn date_tokens(section: &[Piece]) -> Vec<DTok> {
         out.push(tok);
         i += used;
     }
-    // `m`/`mm` right after an hour or right before a second is minutes.
+    // `m`/`mm` right after an hour is minutes; before a second it is still the month (case 0042).
     let field_near = |toks: &[DTok], from: usize, back: bool| -> Option<DTok> {
         let mut j = from;
         loop {
@@ -1054,12 +1047,10 @@ fn date_tokens(section: &[Piece]) -> Vec<DTok> {
     };
     let snapshot = out.clone();
     for (i, t) in out.iter_mut().enumerate() {
-        if let DTok::Month(n @ (1 | 2)) = *t {
-            let after_hour = matches!(field_near(&snapshot, i, true), Some(DTok::Hour(_)));
-            let before_second = matches!(field_near(&snapshot, i, false), Some(DTok::Second(_)));
-            if after_hour || before_second {
-                *t = DTok::Minute(n);
-            }
+        if let DTok::Month(n @ (1 | 2)) = *t
+            && matches!(field_near(&snapshot, i, true), Some(DTok::Hour(_)))
+        {
+            *t = DTok::Minute(n);
         }
     }
     out
@@ -1119,10 +1110,15 @@ impl Parts {
         before + self.day + i64::from(leap && self.month > 2)
     }
 
-    /// Week of the year, weeks starting Sunday, the week of 1 January is 1.
-    fn week(&self) -> i64 {
+    /// The day of the week counting from `first` (0 Sunday, 1 Monday) as 1.
+    fn weekday_from(&self, first: i64) -> i64 {
+        (self.weekday() - 1 - first).rem_euclid(7) + 1
+    }
+
+    /// Week of the year, weeks starting on `first`, the week of 1 January is 1.
+    fn week(&self, first: i64) -> i64 {
         let doy = self.day_of_year();
-        let jan1 = (self.weekday() - 1 - (doy - 1)).rem_euclid(7); // 0 = Sunday
+        let jan1 = (self.weekday_from(first) - 1 - (doy - 1)).rem_euclid(7);
         (doy - 1 + jan1) / 7 + 1
     }
 }
@@ -1209,8 +1205,8 @@ fn render_date(tokens: &[DTok], p: &Parts, locale: &Locale, depth: u8, out: &mut
             DTok::LongTime if depth == 0 => render_pattern(locale.long_time, p, locale, 1, out),
             DTok::General if depth == 0 => render_general(p, locale, 1, out),
             DTok::Day(_) | DTok::LongTime | DTok::General => {}
-            DTok::Weekday => num(out, p.weekday(), 1),
-            DTok::Week => num(out, p.week(), 1),
+            DTok::Weekday => num(out, p.weekday_from(locale.first_day), 1),
+            DTok::Week => num(out, p.week(locale.first_day), 1),
             DTok::Month(1) => num(out, p.month, 1),
             DTok::Month(2) => num(out, p.month, 2),
             DTok::Month(3) => out.push_str(name(&locale.months_short, p.month)),
@@ -1265,7 +1261,7 @@ mod tests {
         assert_eq!(f(Blank, "0.00"), "");
         assert_eq!(f(Blank, "Currency"), "");
         assert_eq!(f(Value::text("abc"), "0.00"), "abc");
-        assert_eq!(f(Value::text("1.5"), "0.00"), "1.50");
+        assert_eq!(f(Value::text("1.5"), "0.00"), "1.5");
     }
 
     #[test]
@@ -1288,7 +1284,8 @@ mod tests {
         assert_eq!(f(Decimal(0.1 + 0.2), "General Number"), "0.3");
         assert_eq!(f(Decimal(1.0 / 3.0), "General Number"), "0.333333333333333");
         assert_eq!(f(Decimal(1.5e20), "General Number"), "1.5E+20");
-        assert_eq!(f(Decimal(0.00001), "General Number"), "1E-05");
+        assert_eq!(f(Decimal(0.00001), "General Number"), "0.00001");
+        assert_eq!(f(Decimal(0.000001), "General Number"), "1E-06");
         assert_eq!(f(Decimal(0.0001), "General Number"), "0.0001");
         assert_eq!(f(Currency(12_345), "General Number"), "1.2345");
         assert_eq!(fl(Decimal(1234.5), "General Number", "de-DE"), "1234,5");
@@ -1302,10 +1299,10 @@ mod tests {
         assert_eq!(f(Decimal(-1234.5), "Currency"), "-£1,234.50");
         assert_eq!(fl(Decimal(1234.5), "Currency", "en-US"), "$1,234.50");
         assert_eq!(fl(Decimal(-1234.5), "currency", "en-US"), "($1,234.50)");
-        assert_eq!(fl(Decimal(1234.5), "Currency", "de-DE"), "1.234,50\u{A0}€");
+        assert_eq!(fl(Decimal(1234.5), "Currency", "de-DE"), "1.234,50 €");
         assert_eq!(
             fl(Decimal(1234.5), "Currency", "fr-FR"),
-            "1\u{202F}234,50\u{A0}€"
+            "1\u{202F}234,50 €"
         );
         assert_eq!(f(Decimal(1234.567), "Fixed"), "1234.57");
         assert_eq!(f(Decimal(1234.567), "Standard"), "1,234.57");
@@ -1329,7 +1326,8 @@ mod tests {
         assert_eq!(f(Decimal(9.995), "0.00"), "10.00");
         assert_eq!(f(Decimal(0.4), "0"), "0");
         assert_eq!(f(Decimal(0.004), "0.00"), "0.00");
-        assert_eq!(f(Decimal(-0.001), "0.00"), "-0.00");
+        assert_eq!(f(Decimal(-0.001), "0.00"), "0.00");
+        assert_eq!(f(Decimal(-0.006), "0.00"), "-0.01");
         assert_eq!(f(Currency(5_000), "0"), "1");
         assert_eq!(f(Integer(i64::MIN), "#,##0"), "-9,223,372,036,854,775,808");
     }
@@ -1344,7 +1342,8 @@ mod tests {
         assert_eq!(f(Decimal(1.5), "0.0#"), "1.5");
         assert_eq!(f(Decimal(1.25), "0.0#"), "1.25");
         assert_eq!(f(Integer(1234567), "#,##0,"), "1,235");
-        assert_eq!(f(Integer(1234567), "0.0,,"), "1.2");
+        assert_eq!(f(Integer(1234567), "0.0,,"), "1234567.0");
+        assert_eq!(f(Integer(1234567), "0,,.0"), "1.2");
         assert_eq!(f(Decimal(0.5), "0%"), "50%");
         assert_eq!(f(Integer(42), "\"N=\"0"), "N=42");
         assert_eq!(f(Integer(42), "0\\k"), "42k");
@@ -1471,15 +1470,17 @@ mod tests {
         assert_eq!(f(d.clone(), "h:nn AM/PM"), "3:04 PM");
         assert_eq!(f(d.clone(), "h:nn am/pm"), "3:04 pm");
         assert_eq!(f(d.clone(), "h a/p"), "3 p");
-        assert_eq!(f(d.clone(), "mm:ss"), "04:05");
+        assert_eq!(f(d.clone(), "mm:ss"), "10:05");
         assert_eq!(f(d.clone(), "MMMM"), "October");
         assert_eq!(f(d.clone(), "\"Q\"q yyyy"), "Q4 2026");
-        assert_eq!(f(d.clone(), "y w ww"), "287 4 42");
+        // `w` counts from the Locale's first day: Monday in en-GB (case 0042), Sunday in en-US.
+        assert_eq!(f(d.clone(), "y w ww"), "287 3 42");
+        assert_eq!(fl(d.clone(), "y w ww", "en-US"), "287 4 42");
         assert_eq!(f(d.clone(), "ddddd"), "14/10/2026");
         assert_eq!(f(d.clone(), "dddddd"), "14 October 2026");
         assert_eq!(f(d.clone(), "c"), "14/10/2026 15:04:05");
         assert_eq!(f(d.clone(), "ttttt"), "15:04:05");
-        assert_eq!(fl(d.clone(), "mmm", "fr-FR"), "oct.");
+        assert_eq!(fl(d.clone(), "mmm", "fr-FR"), "oct");
         assert_eq!(fl(d, "ddd", "de-DE"), "Mi");
         assert_eq!(f(DateTime(46_309.0), "h AM/PM"), "12 AM");
         assert_eq!(f(DateTime(46_309.5), "h AM/PM"), "12 PM");

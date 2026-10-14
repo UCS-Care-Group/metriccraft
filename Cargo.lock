@@ -816,6 +816,7 @@ dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "opendash-core",
  "opendash-m",
  "parquet",
  "quick-xml",

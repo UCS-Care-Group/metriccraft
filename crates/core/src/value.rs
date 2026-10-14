@@ -109,9 +109,13 @@ impl std::error::Error for ValueError {}
 
 type Result<T> = std::result::Result<T, ValueError>;
 
-/// Text as DAX compares it: case folded (invariant lowercase).
+/// Text as DAX compares it: case folded, no accent folding. Lower, upper, lower so `ß`, `ẞ`,
+/// `SS` and `ss` are one (parity case 0038); ASCII just lowercases.
 pub fn fold(s: &str) -> String {
-    s.to_lowercase()
+    if s.is_ascii() {
+        return s.to_ascii_lowercase();
+    }
+    s.to_lowercase().to_uppercase().to_lowercase()
 }
 
 /// A number in arithmetic, after promotion.
@@ -155,14 +159,14 @@ enum Arith {
 
 /// `x op y` after promotion.
 fn arith(op: Arith, x: Num, y: Num) -> Result<Num> {
-    let int = |r: Option<i64>| r.ok_or(ValueError::Overflow(DataType::Integer));
     let cur = |r: Option<i64>| r.ok_or(ValueError::Overflow(DataType::Currency));
     Ok(match (x, y) {
-        (Num::Int(a), Num::Int(b)) => Num::Int(int(match op {
-            Arith::Add => a.checked_add(b),
-            Arith::Sub => a.checked_sub(b),
-            Arith::Mul => a.checked_mul(b),
-        })?),
+        // Whole numbers wrap on overflow, as in Power BI (parity case 0037).
+        (Num::Int(a), Num::Int(b)) => Num::Int(match op {
+            Arith::Add => a.wrapping_add(b),
+            Arith::Sub => a.wrapping_sub(b),
+            Arith::Mul => a.wrapping_mul(b),
+        }),
         (Num::Dec(_), _) | (_, Num::Dec(_)) => {
             let (a, b) = (x.to_f64(), y.to_f64());
             Num::Dec(match op {
@@ -323,10 +327,7 @@ impl Value {
         let (x, date) = self.number()?;
         Ok(match x {
             None => Value::Blank,
-            Some(Num::Int(i)) => Value::Integer(
-                i.checked_neg()
-                    .ok_or(ValueError::Overflow(DataType::Integer))?,
-            ),
+            Some(Num::Int(i)) => Value::Integer(i.wrapping_neg()),
             Some(Num::Cur(c)) => Value::Currency(
                 c.checked_neg()
                     .ok_or(ValueError::Overflow(DataType::Currency))?,
@@ -520,7 +521,8 @@ impl Value {
     }
 
     /// The value as Power BI copies it out of a query result (ADR 0004): BLANK empty,
-    /// `true`/`false`, numbers shortest round-trip, `Infinity`.
+    /// `true`/`false`, numbers shortest round-trip through a double without an exponent below
+    /// 10²¹ (parity case 0037), `Infinity`, dates as `Fri, 01 Mar 2024 00:00:00` (0041).
     pub fn copy_text(&self) -> String {
         match self {
             Value::Blank => String::new(),
@@ -528,7 +530,9 @@ impl Value {
             Value::Decimal(d) if d.is_nan() => "NaN".into(),
             Value::Decimal(d) if d.is_infinite() && *d > 0.0 => "Infinity".into(),
             Value::Decimal(d) if d.is_infinite() => "-Infinity".into(),
-            Value::Decimal(d) => shortest(*d),
+            Value::Decimal(d) => copy_number(*d),
+            Value::Integer(i) => copy_number(*i as f64),
+            Value::DateTime(d) => copy_date(*d),
             other => other.to_text(),
         }
     }
@@ -569,6 +573,25 @@ fn shortest(d: f64) -> String {
     }
 }
 
+/// A finite number as Power BI copies it: [`shortest`], but whole digits up to 10²¹
+/// (`9223372036854776000`, not `9.223372036854776E+18`).
+fn copy_number(d: f64) -> String {
+    if !(1e15..1e21).contains(&d.abs()) {
+        return shortest(d);
+    }
+    let e = format!("{d:e}");
+    let Some((mantissa, exp)) = e.split_once('e') else {
+        return e;
+    };
+    let (sign, mantissa) = match mantissa.strip_prefix('-') {
+        Some(m) => ("-", m),
+        None => ("", mantissa),
+    };
+    let digits = mantissa.replace('.', "");
+    let width = exp.parse::<usize>().unwrap_or(0) + 1;
+    format!("{sign}{digits:0<width$}")
+}
+
 fn currency_text(c: i64) -> String {
     let sign = if c < 0 { "-" } else { "" };
     let a = c.unsigned_abs();
@@ -584,20 +607,46 @@ fn currency_text(c: i64) -> String {
 
 /// A DateTime as `dd/MM/yyyy HH:mm:ss` (a guess; see the module doc).
 fn date_text(d: f64) -> String {
-    // Beyond ±10⁷ days (≈ 27,000 years) it isn't a date; show the number.
+    match date_parts(d) {
+        Some((_, y, m, dd, tod)) => format!(
+            "{dd:02}/{m:02}/{y:04} {:02}:{:02}:{:02}",
+            tod / 3600,
+            tod / 60 % 60,
+            tod % 60
+        ),
+        None => number_text(d),
+    }
+}
+
+/// A DateTime as Power BI copies it: `Fri, 01 Mar 2024 00:00:00` (parity case 0041).
+fn copy_date(d: f64) -> String {
+    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    match date_parts(d) {
+        Some((days, y, m, dd, tod)) => format!(
+            "{}, {dd:02} {} {y:04} {:02}:{:02}:{:02}",
+            DAYS.get(days.rem_euclid(7) as usize).unwrap_or(&""),
+            MONTHS.get((m as usize).wrapping_sub(1)).unwrap_or(&""),
+            tod / 3600,
+            tod / 60 % 60,
+            tod % 60
+        ),
+        None => number_text(d),
+    }
+}
+
+/// Days since 1970-01-01, year, month, day and seconds into the day; `None` beyond ±10⁷ days
+/// (≈ 27,000 years), which isn't a date.
+fn date_parts(d: f64) -> Option<(i64, i64, i64, i64, i64)> {
     if !d.is_finite() || d.abs() > 1e7 {
-        return number_text(d);
+        return None;
     }
     let secs = (d * 86_400.0).round() as i64;
     let days = secs.div_euclid(86_400) - UNIX_EPOCH_DAYS;
-    let tod = secs.rem_euclid(86_400);
     let (y, m, dd) = civil(days);
-    format!(
-        "{dd:02}/{m:02}/{y:04} {:02}:{:02}:{:02}",
-        tod / 3600,
-        tod / 60 % 60,
-        tod % 60
-    )
+    Some((days, y, m, dd, secs.rem_euclid(86_400)))
 }
 
 /// (year, month, day) for days since 1970-01-01 (H. Hinnant's algorithm).
@@ -651,15 +700,13 @@ mod tests {
     }
 
     #[test]
-    fn overflow_is_an_error() {
+    fn overflow() {
+        // Whole numbers wrap, as in Power BI (parity case 0037).
         let max = Integer(i64::MAX);
-        assert_eq!(
-            max.add(&Integer(1)),
-            Err(ValueError::Overflow(DataType::Integer))
-        );
-        assert!(Integer(i64::MIN).subtract(&Integer(1)).is_err());
-        assert!(max.multiply(&Integer(2)).is_err());
-        assert!(Integer(i64::MIN).negate().is_err());
+        assert_eq!(max.add(&Integer(1)), Ok(Integer(i64::MIN)));
+        assert_eq!(Integer(i64::MIN).subtract(&Integer(1)), Ok(max.clone()));
+        assert_eq!(max.multiply(&Integer(2)), Ok(Integer(-2)));
+        assert_eq!(Integer(i64::MIN).negate(), Ok(Integer(i64::MIN)));
         // Promoting a huge Integer to Currency overflows too.
         assert_eq!(
             max.add(&Currency(1)),
@@ -672,7 +719,7 @@ mod tests {
             Decimal(f64::MAX).multiply(&Integer(2)),
             Ok(Decimal(f64::INFINITY))
         );
-        let e = max.add(&Integer(1)).unwrap_err().to_string();
+        let e = max.add(&Currency(1)).unwrap_err().to_string();
         assert!(e.contains("too large"), "{e}");
     }
 
@@ -797,6 +844,16 @@ mod tests {
         assert_eq!(copy(Decimal(29.0 / 12.0)), "2.4166666666666665");
         assert_eq!(copy(Currency(72_500)), "7.25");
         assert_eq!(copy(Integer(4)), "4");
+        assert_eq!(copy(Integer(i64::MIN)), "-9223372036854776000");
+        assert_eq!(copy(Decimal(9223372036854775808.0)), "9223372036854776000");
+        assert_eq!(copy(Decimal(1.5e20)), "150000000000000000000");
+        assert_eq!(copy(Decimal(1.5e21)), "1.5E+21");
+        // 1970-01-01 was a Thursday; DateTime counts from 1899-12-30.
+        assert_eq!(copy(DateTime(45352.0)), "Fri, 01 Mar 2024 00:00:00");
+        assert_eq!(
+            copy(DateTime(1.5208333333333333)),
+            "Sun, 31 Dec 1899 12:30:00"
+        );
     }
 
     #[test]

@@ -2,10 +2,9 @@
 //! by case are one value, spelled as the first row that has it (CONTEXT.md, Column). Power Query
 //! (Preview, merges within a load) stays case-sensitive: only the load folds.
 //!
-//! **The fold** is `str::to_lowercase`: Unicode's default (locale-invariant) lowercase mapping,
-//! no accent folding. So `"É"`/`"é"` are one value, `"e"`/`"é"` are two; `"ẞ"`/`"ß"` are one,
-//! but `"SS"`/`"ß"` are two (lowercasing never expands `ß`; full case folding would); a final
-//! capital sigma lowercases to `ς` (`"ΟΔΟΣ"` is `"οδος"`).
+//! **The fold** is DAX's ([`opendash_core::fold`]): locale-invariant lower, upper, lower, no
+//! accent folding. So `"É"`/`"é"` are one value, `"e"`/`"é"` are two; `"ß"`, `"ẞ"`, `"SS"` and
+//! `"ss"` are one (parity case 0038); `"ΟΔΟΣ"` and `"οδος"` are one.
 //!
 //! **Cost.** One pass over each dictionary's values hashing their lowercase (8 bytes each,
 //! sorted to find duplicates); with none, the column is returned as it was (same buffers). Only
@@ -182,7 +181,7 @@ fn fold<K: ArrowDictionaryKeyType>(
     Ok(Some(Arc::new(folded)))
 }
 
-/// `s` lowercased (`str::to_lowercase`), borrowing `s` when it has nothing to lower.
+/// `s` folded ([`opendash_core::fold`]), borrowing `s` when it has nothing to lower.
 fn lower<'a>(s: &'a str, buf: &'a mut String) -> &'a str {
     if s.is_ascii() {
         if !s.bytes().any(|b| b.is_ascii_uppercase()) {
@@ -193,7 +192,7 @@ fn lower<'a>(s: &'a str, buf: &'a mut String) -> &'a str {
         buf.make_ascii_lowercase();
         return buf;
     }
-    *buf = s.to_lowercase();
+    *buf = opendash_core::fold(s);
     buf
 }
 
@@ -286,9 +285,9 @@ mod tests {
     fn unicode_lowercase_without_accent_folding() {
         let (rows, _) = fold_names(&[Some("É"), Some("é"), Some("e"), Some("E")]);
         assert_eq!(rows, some(&["É", "É", "e", "e"]), "accents still differ");
-        // `to_lowercase` never expands ß, so "SS" stays apart; capital ẞ lowers to ß.
+        // ß, ẞ, SS and ss are one, as in Power BI (parity case 0038).
         let (rows, _) = fold_names(&[Some("ß"), Some("SS"), Some("ẞ"), Some("ss")]);
-        assert_eq!(rows, some(&["ß", "SS", "ß", "SS"]));
+        assert_eq!(rows, some(&["ß", "ß", "ß", "ß"]));
         let (rows, _) = fold_names(&[Some("ΟΔΟΣ"), Some("οδος"), Some("Straße"), Some("STRAßE")]);
         assert_eq!(rows, some(&["ΟΔΟΣ", "ΟΔΟΣ", "Straße", "Straße"]));
     }
