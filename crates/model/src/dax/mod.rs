@@ -8,6 +8,9 @@
 //!   Tables it reaches through active Relationships (many → one), propagated one → many as a
 //!   key semijoin: the *expanded table* rule, single direction (spec D-2).
 //! - **Row context**: a stack of (Table, row) frames; `T[C]` reads the innermost frame on `T`.
+//!   `CALCULATE` and Measure references apply context transition ([`calculate`]): each frame
+//!   becomes equality filters on its columns. A row-set filter (a table filter such as
+//!   `FILTER(T, …)`) also restricts the one side of `T`'s active Relationships (expanded tables).
 //! - **Errors** ([`DaxError`]) carry the span of the failing sub-expression.
 //! - **Bounds**: evaluation depth [`MAX_EVAL_DEPTH`], Measure chains [`MAX_MEASURE_CHAIN`],
 //!   Relationship paths [`MAX_RELATIONSHIP_DEPTH`]; intermediate tables count against the memory
@@ -16,6 +19,7 @@
 //!
 //! **Adding a DAX function** is a one-place change in [`functions`]: see its module doc.
 
+pub mod calculate;
 pub mod eval;
 pub mod functions;
 pub mod storage;

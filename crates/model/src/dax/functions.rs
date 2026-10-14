@@ -21,6 +21,7 @@ pub mod aggregate;
 use opendash_core::Value;
 use opendash_dax::{Expr, ExprKind, Span};
 
+use super::calculate;
 use super::eval::{Evaluator, Rows, RowsColumn, TableVal, Val};
 use super::{DaxError, FilterContext, Result};
 use crate::same_name;
@@ -85,6 +86,15 @@ pub fn lookup(lower: &str) -> Option<Function> {
         "distinctcount" => aggregate::distinctcount,
         "min" => aggregate::min,
         "max" => aggregate::max,
+        "calculate" => calculate::calculate,
+        "calculatetable" => calculate::calculatetable,
+        "filter" => calculate::filter,
+        "all" => calculate::all,
+        "allexcept" => calculate::allexcept,
+        "removefilters" => calculate::removefilters,
+        "related" => calculate::related,
+        #[cfg(test)]
+        "testsum" => calculate::test_sum,
         _ => return None,
     })
 }

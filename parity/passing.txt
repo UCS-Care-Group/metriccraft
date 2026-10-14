@@ -1,10 +1,12 @@
 0001-blank-aggregates/SumAll
+0001-blank-aggregates/SumWest
 0001-blank-aggregates/CountAmount
 0001-blank-aggregates/CountAAmount
 0001-blank-aggregates/Rows
 0001-blank-aggregates/AvgAmount
 0001-blank-aggregates/MinAmount
 0001-blank-aggregates/MaxAmount
+0001-blank-aggregates/AvgWest
 0001-blank-aggregates/BlankPlusOne
 0001-blank-aggregates/BlankTimesTwo
 0001-blank-aggregates/BlankEqZero
