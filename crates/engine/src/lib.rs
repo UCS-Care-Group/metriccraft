@@ -14,6 +14,7 @@ mod recovery;
 mod relationship;
 mod rename;
 mod report;
+mod selection;
 
 pub use app::{App, Document, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run};
@@ -23,6 +24,7 @@ pub use recovery::{DEFAULT_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES, RecoveryInfo,
 pub use report::{
     BrokenField, MAX_COORD, MAX_PAGES, MAX_VISUALS, PAGE_HEIGHT, PAGE_WIDTH, Page, Report, resolve,
 };
+pub use selection::{DataSelection, MAX_SELECTED, Point};
 
 /// Errors from running commands.
 #[derive(Clone, Debug, PartialEq)]

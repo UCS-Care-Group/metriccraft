@@ -14,6 +14,7 @@ pub mod axis;
 pub mod card;
 pub mod chart;
 pub mod matrix;
+pub mod slicer;
 pub mod table;
 
 /// Padding inside a Visual's frame, logical pixels.

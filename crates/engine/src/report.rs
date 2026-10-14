@@ -19,8 +19,8 @@
 //!   Power BI. A chart takes a Legend or several Values, not both: adding a Legend keeps only the
 //!   first Value, adding a second Value removes the Legend. `visual.changeType` keeps the Fields
 //!   whose wells the new type has (up to each well's limit) and drops the rest.
-//! - **Slicer selections** are saved with their Page, by slicer Visual id; M4.5 adds the
-//!   commands that change them. Deleting the slicer drops its selection.
+//! - **Slicer selections** are saved with their Page, by slicer Visual id; `slicer.select`
+//!   changes them (`selection.rs`). Deleting the slicer drops its selection.
 //! - **Unknown content** of the report files (members we don't read) rides with its Page or
 //!   Visual in the Document, so undoing a delete brings it back, and is written again on save.
 //!
@@ -311,7 +311,11 @@ pub(crate) const FORMAT_PARAMS: &str = "page: text — the Page's id or name\n\
      others are logical\n\
      value: the option's value";
 
-fn page_mut<'a>(doc: &'a mut Document, params: &Value, id: &str) -> Result<&'a mut Page> {
+pub(crate) fn page_mut<'a>(
+    doc: &'a mut Document,
+    params: &Value,
+    id: &str,
+) -> Result<&'a mut Page> {
     let key = text(params, "page", id)?;
     let i = doc
         .report

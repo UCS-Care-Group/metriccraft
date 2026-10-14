@@ -9,6 +9,7 @@ use crate::recovery;
 use crate::relationship;
 use crate::rename;
 use crate::report::{self, has_pages, has_visuals};
+use crate::selection;
 use crate::{App, Document, Result};
 
 /// What a command acts on.
@@ -637,6 +638,34 @@ pub static COMMANDS: &[Command] = &[
         params: report::FORMAT_PARAMS,
         enabled: has_visuals,
         run: Run::Edit(report::format),
+    },
+    // Selection (M4.5): slicer items are saved and undoable; data points are session-only.
+    Command {
+        id: "slicer.select",
+        label: "Select slicer items",
+        ribbon: "",
+        shortcut: None,
+        params: selection::SLICER_SELECT_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(selection::slicer_select),
+    },
+    Command {
+        id: "selection.select",
+        label: "Select data point",
+        ribbon: "",
+        shortcut: None,
+        params: selection::SELECT_PARAMS,
+        enabled: has_visuals,
+        run: Run::App(selection::select),
+    },
+    Command {
+        id: "selection.clear",
+        label: "Clear selection",
+        ribbon: "",
+        shortcut: None,
+        params: selection::CLEAR_PARAMS,
+        enabled: |_| true,
+        run: Run::App(selection::clear),
     },
     Command {
         id: "options.autodetectRelationships",

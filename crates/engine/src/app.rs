@@ -38,7 +38,7 @@ pub const UNDO_LIMIT: usize = 100;
 
 /// The running app: the document, its undo history and the command set.
 pub struct App {
-    doc: Document,
+    pub(crate) doc: Document,
     commands: &'static [Command],
     // ponytail: whole-Document snapshots — cheap because table columns are shared (ADR 0005).
     // Switch to inverse operations if cloning a Document shows up in benchmarks.
@@ -62,6 +62,9 @@ pub struct App {
     pub(crate) clean: Option<u64>,
     /// Autosave recovery (`recovery.rs`): the interval option and this app's recovery copy.
     pub(crate) autosave: crate::recovery::Autosave,
+    /// Session-only report state (`selection.rs`): data-point Selections, the visual-query
+    /// cache and the last drawn Scenes. Not part of the Document: not saved, not undone.
+    pub(crate) session: crate::selection::Session,
 }
 
 impl Default for App {
@@ -89,6 +92,7 @@ impl App {
             version: 0,
             clean: Some(0),
             autosave: crate::recovery::Autosave::default(),
+            session: crate::selection::Session::default(),
         }
     }
 
@@ -99,6 +103,7 @@ impl App {
         self.undo.clear();
         self.redo.clear();
         self.last_load = None;
+        self.session.forget_selections();
         self.changed();
         self.clean = Some(self.version);
     }

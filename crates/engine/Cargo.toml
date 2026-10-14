@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+opendash-core = { path = "../core" }
 opendash-data = { path = "../data" }
 opendash-model = { path = "../model" }
 opendash-file = { path = "../file" }
@@ -20,7 +21,6 @@ arrow-schema.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-opendash-core = { path = "../core" }
 arrow-array.workspace = true
 arrow-cast.workspace = true
 

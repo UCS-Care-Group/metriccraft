@@ -1,0 +1,22 @@
+scene 200 150
+rect 0 0 200 150 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Region"
+clip 0 26 200 124
+rect 0 26 200 19 #0:0
+rect 8 29.5 12 12 fill #1f2430 stroke #5c6370 1 #0:0
+path #ffffff 1.5 10.5,35.5 13,38 17.5,33 #0:0
+text 26 38.81 11 Regular #1f2430 Start "(Blank)" #0:0
+rect 0 45 200 19 #0:1
+rect 8 48.5 12 12 fill #ffffff stroke #5c6370 1 #0:1
+text 26 57.81 11 Regular #1f2430 Start "East" #0:1
+rect 0 64 200 19 #0:2
+rect 8 67.5 12 12 fill #1f2430 stroke #5c6370 1 #0:2
+path #ffffff 1.5 10.5,73.5 13,76 17.5,71 #0:2
+text 26 76.81 11 Regular #1f2430 Start "North" #0:2
+rect 0 83 200 19 #0:3
+rect 8 86.5 12 12 fill #ffffff stroke #5c6370 1 #0:3
+text 26 95.81 11 Regular #1f2430 Start "South with a very long region name t…" #0:3
+rect 0 102 200 19 #0:4
+rect 8 105.5 12 12 fill #ffffff stroke #5c6370 1 #0:4
+text 26 114.81 11 Regular #1f2430 Start "West" #0:4
+unclip
