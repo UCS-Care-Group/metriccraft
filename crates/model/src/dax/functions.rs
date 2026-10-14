@@ -15,6 +15,9 @@
 
 use std::rc::Rc;
 
+#[path = "aggregate.rs"]
+pub mod aggregate;
+
 use opendash_core::Value;
 use opendash_dax::{Expr, ExprKind, Span};
 
@@ -75,6 +78,13 @@ pub fn lookup(lower: &str) -> Option<Function> {
         "false" => false_,
         "row" => row,
         "countrows" => countrows,
+        "sum" => aggregate::sum,
+        "average" => aggregate::average,
+        "count" => aggregate::count,
+        "counta" => aggregate::counta,
+        "distinctcount" => aggregate::distinctcount,
+        "min" => aggregate::min,
+        "max" => aggregate::max,
         _ => return None,
     })
 }

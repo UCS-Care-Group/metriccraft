@@ -14,7 +14,7 @@ use arrow_array::types::{
     Date32Type, Decimal32Type, Decimal64Type, Float32Type, Float64Type, Int8Type, Int16Type,
     Int32Type, Int64Type,
 };
-use arrow_array::{Array, ArrayRef, BooleanArray, PrimitiveArray, StringArray};
+use arrow_array::{Array, ArrayRef, ArrowPrimitiveType, BooleanArray, PrimitiveArray, StringArray};
 use arrow_schema::{DataType, TimeUnit};
 use opendash_core::{CURRENCY_SCALE, Value, fold};
 
@@ -559,4 +559,288 @@ pub fn semijoin(t: &DbTable, col: &Col, keys: &HashSet<Key>, cancel: Cancel<'_>)
         })?,
     }
     Ok(out)
+}
+
+/// What kind of values a column holds, as the aggregations treat it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Integer,
+    Decimal,
+    Currency,
+    DateTime,
+    Text,
+    Boolean,
+    /// Every value BLANK ([`Col::Null`]): no type to speak of.
+    Blank,
+}
+
+impl Kind {
+    /// Holds numbers or dates (what `SUM`, `AVERAGE` take).
+    pub fn is_numeric(self) -> bool {
+        matches!(
+            self,
+            Kind::Integer | Kind::Decimal | Kind::Currency | Kind::DateTime
+        )
+    }
+}
+
+/// A non-blank value of a numeric column, read without building a [`Value`]: a whole number,
+/// a float (dates as days since 1899-12-30, decimals of a scale other than 4), or Currency
+/// (×10⁴).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Number {
+    Int(i64),
+    Float(f64),
+    Currency(i64),
+}
+
+impl Col {
+    /// The kind of values this column holds.
+    pub fn kind(&self) -> Kind {
+        match self {
+            Col::Dict { .. } | Col::Text(_) => Kind::Text,
+            Col::I8(_) | Col::I16(_) | Col::I32(_) | Col::I64(_) => Kind::Integer,
+            Col::F32(_) | Col::F64(_) => Kind::Decimal,
+            Col::D32(_, 4) | Col::D64(_, 4) => Kind::Currency,
+            Col::D32(..) | Col::D64(..) => Kind::Decimal,
+            Col::Bool(_) => Kind::Boolean,
+            Col::Date(_) | Col::Ts(..) => Kind::DateTime,
+            Col::Null(_) => Kind::Blank,
+        }
+    }
+
+    /// The column's Arrow array (`None` for [`Col::Null`]); for a dictionary column, its codes.
+    fn array(&self) -> Option<&dyn Array> {
+        Some(match self {
+            Col::Dict { codes, .. } => match codes {
+                Codes::I8(a) => a,
+                Codes::I16(a) => a,
+                Codes::I32(a) => a,
+            },
+            Col::Text(a) => a,
+            Col::I8(a) => a,
+            Col::I16(a) => a,
+            Col::I32(a) => a,
+            Col::I64(a) => a,
+            Col::F32(a) => a,
+            Col::F64(a) => a,
+            Col::D32(a, _) => a,
+            Col::D64(a, _) => a,
+            Col::Bool(a) => a,
+            Col::Date(a) => a,
+            Col::Ts(a, _) => a,
+            Col::Null(_) => return None,
+        })
+    }
+}
+
+/// Scans the non-null values of `a` over the rows of `0..rows` in `mask`, calling `f` with each
+/// mapped through `map`.
+fn each_native<T: ArrowPrimitiveType>(
+    a: &PrimitiveArray<T>,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+    map: impl Fn(T::Native) -> Number,
+    f: &mut impl FnMut(Number) -> Result<()>,
+) -> Result<()> {
+    let values = a.values();
+    let nulls = a.nulls();
+    scan(rows.min(a.len()), mask, cancel, |r| {
+        if nulls.is_some_and(|n| n.is_null(r)) {
+            return Ok(());
+        }
+        match values.get(r) {
+            Some(v) => f(map(*v)),
+            None => Ok(()),
+        }
+    })
+}
+
+/// The storage scan for numeric aggregations: calls `f` with every non-blank value of a
+/// numeric column (see [`Kind::is_numeric`]) over the rows of `0..rows` in `mask`, in order.
+/// Other kinds of column visit nothing.
+pub fn each_number(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+    mut f: impl FnMut(Number) -> Result<()>,
+) -> Result<()> {
+    let f = &mut f;
+    let scaled = |raw: i64, scale: i8| raw as f64 / 10f64.powi(i32::from(scale));
+    match col {
+        Col::I8(a) => each_native(a, rows, mask, cancel, |v| Number::Int(v.into()), f),
+        Col::I16(a) => each_native(a, rows, mask, cancel, |v| Number::Int(v.into()), f),
+        Col::I32(a) => each_native(a, rows, mask, cancel, |v| Number::Int(v.into()), f),
+        Col::I64(a) => each_native(a, rows, mask, cancel, Number::Int, f),
+        Col::F32(a) => each_native(a, rows, mask, cancel, |v| Number::Float(v.into()), f),
+        Col::F64(a) => each_native(a, rows, mask, cancel, Number::Float, f),
+        Col::D32(a, 4) => each_native(a, rows, mask, cancel, |v| Number::Currency(v.into()), f),
+        Col::D64(a, 4) => each_native(a, rows, mask, cancel, Number::Currency, f),
+        Col::D32(a, s) => {
+            let s = *s;
+            each_native(
+                a,
+                rows,
+                mask,
+                cancel,
+                |v| Number::Float(scaled(v.into(), s)),
+                f,
+            )
+        }
+        Col::D64(a, s) => {
+            let s = *s;
+            each_native(a, rows, mask, cancel, |v| Number::Float(scaled(v, s)), f)
+        }
+        Col::Date(a) => each_native(
+            a,
+            rows,
+            mask,
+            cancel,
+            |d| Number::Float(f64::from(d) + UNIX_EPOCH_DAYS),
+            f,
+        ),
+        Col::Ts(a, per_day) => {
+            let per_day = *per_day;
+            each_native(
+                a,
+                rows,
+                mask,
+                cancel,
+                |t| Number::Float(t as f64 / per_day + UNIX_EPOCH_DAYS),
+                f,
+            )
+        }
+        Col::Dict { .. } | Col::Text(_) | Col::Bool(_) | Col::Null(_) => cancel.check(),
+    }
+}
+
+/// The non-blank values of `col` over the rows of `0..rows` in `mask`: a scan (none when the
+/// column has no nulls).
+pub fn count_values(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+) -> Result<usize> {
+    let Some(array) = col.array() else {
+        return cancel.check().map(|()| 0);
+    };
+    let rows = rows.min(array.len());
+    let mut n = 0usize;
+    match col {
+        Col::Dict { .. } => scan(rows, mask, cancel, |r| {
+            if col.code(r).is_some() {
+                n += 1;
+            }
+            Ok(())
+        })?,
+        _ if array.null_count() == 0 => {
+            return match mask {
+                None => cancel.check().map(|()| rows),
+                Some(m) => cancel.check().map(|()| m.ones_in(0, rows).count()),
+            };
+        }
+        _ => scan(rows, mask, cancel, |r| {
+            if array.is_valid(r) {
+                n += 1;
+            }
+            Ok(())
+        })?,
+    }
+    Ok(n)
+}
+
+/// The distinct values of `col` over the rows of `0..rows` in `mask`, BLANK counting as one
+/// value: a scan. A dictionary column collects codes, then counts their values ignoring case
+/// (dictionaries are folded at load, so normally one code is one value).
+pub fn distinct_count(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+) -> Result<usize> {
+    let mut blank = false;
+    let n = match col {
+        Col::Dict { values, .. } => {
+            let mut seen = Bitset::new(values.len(), false);
+            scan(rows, mask, cancel, |r| {
+                match col.code(r) {
+                    Some(c) => seen.set(c),
+                    None => blank = true,
+                }
+                Ok(())
+            })?;
+            let distinct: HashSet<String> = seen
+                .ones_in(0, values.len())
+                .map(|c| fold(values.value(c)))
+                .collect();
+            distinct.len()
+        }
+        _ => {
+            let mut keys = HashSet::new();
+            scan(rows, mask, cancel, |r| {
+                match Key::of(&col.value(r), false) {
+                    Some(k) => {
+                        keys.insert(k);
+                    }
+                    None => blank = true,
+                }
+                Ok(())
+            })?;
+            keys.len()
+        }
+    };
+    Ok(n.saturating_add(usize::from(blank)))
+}
+
+/// The smallest (or, with `max`, largest) non-blank text of `col` over the rows of `0..rows`
+/// in `mask`, comparing ignoring case; of spellings equal but for case, the first in the
+/// dictionary (or, for plain text, the first row) wins. `None` when there
+/// is none. A dictionary column compares each code seen once.
+pub fn text_extreme(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+    max: bool,
+) -> Result<Option<Value>> {
+    let better = |candidate: &str, best: &str| {
+        let o = fold(candidate).cmp(&fold(best));
+        if max { o.is_gt() } else { o.is_lt() }
+    };
+    match col {
+        Col::Dict { values, .. } => {
+            let mut seen = Bitset::new(values.len(), false);
+            scan(rows, mask, cancel, |r| {
+                if let Some(c) = col.code(r) {
+                    seen.set(c);
+                }
+                Ok(())
+            })?;
+            let mut best: Option<&str> = None;
+            for c in seen.ones_in(0, values.len()) {
+                let s = values.value(c);
+                if best.is_none_or(|b| better(s, b)) {
+                    best = Some(s);
+                }
+            }
+            Ok(best.map(Value::text))
+        }
+        Col::Text(a) => {
+            let mut best: Option<&str> = None;
+            scan(rows.min(a.len()), mask, cancel, |r| {
+                if a.is_valid(r) {
+                    let s = a.value(r);
+                    if best.is_none_or(|b| better(s, b)) {
+                        best = Some(s);
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(best.map(Value::text))
+        }
+        _ => cancel.check().map(|()| None),
+    }
 }
