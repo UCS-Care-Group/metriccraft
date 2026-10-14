@@ -18,4 +18,11 @@ png = ["dep:tiny-skia"]
 
 [dependencies]
 ab_glyph = "0.2"
+opendash-core = { path = "../core" }
+opendash-data = { path = "../data" }
+opendash-dax = { path = "../dax" }
+opendash-model = { path = "../model" }
 tiny-skia = { version = "0.12", optional = true, default-features = false, features = ["std", "png-format"] }
+
+[dev-dependencies]
+arrow-array.workspace = true

@@ -940,6 +940,11 @@ name = "opendash-visuals"
 version = "0.0.0"
 dependencies = [
  "ab_glyph",
+ "arrow-array",
+ "opendash-core",
+ "opendash-data",
+ "opendash-dax",
+ "opendash-model",
  "tiny-skia",
 ]
 
