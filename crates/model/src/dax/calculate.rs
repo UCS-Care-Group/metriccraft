@@ -341,7 +341,7 @@ fn distinct(
 }
 
 /// `(Table, Column)` of a written `T[C]`.
-fn column_ref(ev: &Evaluator<'_, '_>, e: &Expr) -> Result<(usize, usize)> {
+pub(super) fn column_ref(ev: &Evaluator<'_, '_>, e: &Expr) -> Result<(usize, usize)> {
     let ExprKind::Column {
         table: Some(table),
         column,
@@ -381,7 +381,7 @@ fn table_ref(ev: &Evaluator<'_, '_>, e: &Expr, what: &str) -> Result<usize> {
 
 /// The Tables `table` expands to: itself and every Table it reaches through active
 /// Relationships, many → one.
-fn expanded(ev: &Evaluator<'_, '_>, table: usize, span: Span) -> Result<Vec<usize>> {
+pub(super) fn expanded(ev: &Evaluator<'_, '_>, table: usize, span: Span) -> Result<Vec<usize>> {
     let mut out = vec![table];
     let mut next = 0;
     while let Some(&t) = out.get(next) {
@@ -847,7 +847,7 @@ pub fn related(ev: &mut Evaluator<'_, '_>, call: &Call<'_>) -> Result<Val> {
 }
 
 /// The active Relationships (many → one) leading from `from` to `to`, shortest first found.
-fn path_to(
+pub(super) fn path_to(
     ev: &Evaluator<'_, '_>,
     from: usize,
     to: usize,
@@ -904,7 +904,7 @@ fn follow(ev: &mut Evaluator<'_, '_>, rel: usize, row: usize, span: Span) -> Res
 }
 
 /// Relationship `rel`'s one side as key → row, built once per query.
-fn related_index(
+pub(super) fn related_index(
     ev: &mut Evaluator<'_, '_>,
     rel: usize,
     span: Span,

@@ -17,6 +17,8 @@ use std::rc::Rc;
 
 #[path = "aggregate.rs"]
 pub mod aggregate;
+#[path = "summarize.rs"]
+pub mod summarize;
 
 use opendash_core::Value;
 use opendash_dax::{Expr, ExprKind, Span};
@@ -93,6 +95,7 @@ pub fn lookup(lower: &str) -> Option<Function> {
         "allexcept" => calculate::allexcept,
         "removefilters" => calculate::removefilters,
         "related" => calculate::related,
+        "summarizecolumns" => summarize::summarizecolumns,
         #[cfg(test)]
         "testsum" => calculate::test_sum,
         _ => return None,
