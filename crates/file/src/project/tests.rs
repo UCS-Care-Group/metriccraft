@@ -109,6 +109,7 @@ fn sample() -> Project {
         ],
         unloaded: ["CON".to_string()].into(),
         model,
+        report: BTreeMap::new(),
     }
 }
 
@@ -248,7 +249,16 @@ fn unknown_content_survives_open_and_save() {
 
     let (p, pre) = round_trip(&files);
     assert!(!pre.is_empty());
-    assert_eq!(p, sample(), "unknown content doesn't change the model");
+    assert_eq!(
+        p.report.get("report/report.json").map(Vec::as_slice),
+        Some(&b"{\"pages\": []}\n"[..]),
+        "report parts are carried, opaque"
+    );
+    let model = Project {
+        report: BTreeMap::new(),
+        ..p.clone()
+    };
+    assert_eq!(model, sample(), "unknown content doesn't change the model");
     let saved = encode(&p, Some(&root()), &pre).unwrap();
     let sales = text(&saved, "model/tables/Sales.odm");
     for kept in [
@@ -272,6 +282,40 @@ fn unknown_content_survives_open_and_save() {
     // And it is stable: open → save again gives the same bytes.
     let (p2, pre2) = round_trip(&saved);
     assert_eq!(encode(&p2, Some(&root()), &pre2).unwrap(), saved);
+}
+
+#[test]
+fn report_parts_are_carried_opaque_and_listed() {
+    let mut project = sample();
+    for (path, text) in [
+        ("report/report.json", "{\n  \"pages\": [\"a\"]\n}\n"),
+        ("report/pages/a/page.json", "not even JSON"),
+    ] {
+        project.report.insert(path.into(), text.as_bytes().to_vec());
+    }
+    let files = encode(&project, Some(&root()), &Preserved::default()).unwrap();
+    assert!(text(&files, MANIFEST).contains("report/pages/a/page.json"));
+    let (back, pre) = round_trip(&files);
+    assert_eq!(back, project);
+    assert!(
+        !pre.parts.keys().any(|p| p.starts_with(REPORT)),
+        "report parts are the Project's, not unknown"
+    );
+    let packed = crate::unpack(&crate::pack(&files).unwrap()).unwrap();
+    assert_eq!(packed, files, "a Package carries them");
+
+    let mut bad = sample();
+    bad.report.insert("model/x.json".into(), Vec::new());
+    assert!(matches!(
+        encode(&bad, None, &Preserved::default()),
+        Err(Error::Save(_))
+    ));
+    bad.report.clear();
+    bad.report.insert("report/../x".into(), Vec::new());
+    assert!(matches!(
+        encode(&bad, None, &Preserved::default()),
+        Err(Error::Save(_))
+    ));
 }
 
 #[test]

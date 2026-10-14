@@ -8,6 +8,7 @@ use crate::query::{self, has_queries};
 use crate::recovery;
 use crate::relationship;
 use crate::rename;
+use crate::report::{self, has_pages, has_visuals};
 use crate::{App, Document, Result};
 
 /// What a command acts on.
@@ -502,6 +503,140 @@ pub static COMMANDS: &[Command] = &[
         params: "",
         enabled: has_tables,
         run: Run::App(relationship::autodetect),
+    },
+    // The report (spec R-1; `report.rs`): Pages and Visuals, all undoable.
+    Command {
+        id: "insert.newPage",
+        label: "New page",
+        ribbon: "Insert > Pages",
+        shortcut: None,
+        params: report::NEW_PAGE_PARAMS,
+        enabled: |_| true,
+        run: Run::Edit(report::new_page),
+    },
+    // The page tabs: right-click a Page.
+    Command {
+        id: "page.delete",
+        label: "Delete page",
+        ribbon: "",
+        shortcut: None,
+        params: report::PAGE_PARAMS,
+        enabled: has_pages,
+        run: Run::Edit(report::delete_page),
+    },
+    Command {
+        id: "page.rename",
+        label: "Rename page",
+        ribbon: "",
+        shortcut: None,
+        params: report::RENAME_PAGE_PARAMS,
+        enabled: has_pages,
+        run: Run::Edit(report::rename_page),
+    },
+    // Dragging a page tab.
+    Command {
+        id: "page.move",
+        label: "Move page",
+        ribbon: "",
+        shortcut: None,
+        params: report::MOVE_PAGE_PARAMS,
+        enabled: has_pages,
+        run: Run::Edit(report::move_page),
+    },
+    Command {
+        id: "insert.newVisual",
+        label: "New visual",
+        ribbon: "Insert > Visuals",
+        shortcut: None,
+        params: report::NEW_VISUAL_PARAMS,
+        enabled: |_| true,
+        run: Run::Edit(report::new_visual),
+    },
+    // On the canvas and in the Visualizations pane.
+    Command {
+        id: "visual.delete",
+        label: "Delete",
+        ribbon: "",
+        shortcut: None,
+        params: report::VISUAL_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::delete_visual),
+    },
+    Command {
+        id: "visual.move",
+        label: "Move",
+        ribbon: "",
+        shortcut: None,
+        params: report::MOVE_VISUAL_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::move_visual),
+    },
+    Command {
+        id: "visual.resize",
+        label: "Resize",
+        ribbon: "",
+        shortcut: None,
+        params: report::RESIZE_VISUAL_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::resize_visual),
+    },
+    // The Visualizations pane: a type picked with a Visual selected.
+    Command {
+        id: "visual.changeType",
+        label: "Change visual type",
+        ribbon: "",
+        shortcut: None,
+        params: report::CHANGE_TYPE_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::change_type),
+    },
+    // The field wells: drop a Field, or tick it in the Fields pane.
+    Command {
+        id: "visual.addField",
+        label: "Add field",
+        ribbon: "",
+        shortcut: None,
+        params: report::ADD_FIELD_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::add_field),
+    },
+    Command {
+        id: "visual.removeField",
+        label: "Remove field",
+        ribbon: "",
+        shortcut: None,
+        params: report::REMOVE_FIELD_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::remove_field),
+    },
+    Command {
+        id: "visual.moveField",
+        label: "Move field",
+        ribbon: "",
+        shortcut: None,
+        params: report::MOVE_FIELD_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::move_field),
+    },
+    // A Visual's More options > Sort axis / Sort by.
+    Command {
+        id: "visual.sort",
+        label: "Sort by",
+        ribbon: "",
+        shortcut: None,
+        params: report::SORT_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::sort),
+    },
+    // The Format pane.
+    Command {
+        id: "visual.format",
+        label: "Format",
+        ribbon: "",
+        shortcut: None,
+        params: report::FORMAT_PARAMS,
+        enabled: has_visuals,
+        run: Run::Edit(report::format),
     },
     Command {
         id: "options.autodetectRelationships",

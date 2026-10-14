@@ -19,6 +19,9 @@
 //! columns those merges add keep their names). The loaded data already matches the new step,
 //! so nothing goes Stale.
 //!
+//! **Report** (M4.2): both renames, and renaming a Measure, rewrite every Field (and sort) of
+//! every Visual that names the object, in the same edit (`report.rs`).
+//!
 //! Both renames carry the object's unknown file content (what the opened files held beyond
 //! the model, kept per object) to the new name, so the next save still writes it. It is copied,
 //! not moved: it lives outside undo, and an undone rename must find it under the old name.
@@ -113,6 +116,7 @@ fn rename_in(doc: &mut Document, old: &str, new: &str) {
         }
     }
     doc.model.rename_table(old, new);
+    doc.report.rename_table(old, new);
     for set in [&mut doc.stale, &mut doc.unloaded] {
         if set.remove(old) {
             set.insert(new.into());
@@ -157,6 +161,7 @@ pub(crate) fn rename_column(app: &mut App, params: &Value) -> Result {
         doc.model
             .rename_column(&table, &old, &new)
             .map_err(Error::Model)?;
+        doc.report.rename_column(&table, &old, &new);
         if calculated {
             // Not the Query's: no step, nothing merges it.
             for t in &mut doc.tables {

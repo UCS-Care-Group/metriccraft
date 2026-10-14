@@ -1,9 +1,11 @@
-//! Command-sequence fuzzer (spec N-1, F-2, D-4; plan M2.5): random, valid-ish command sequences
+//! Command-sequence fuzzer (spec N-1, F-2, D-4, R-1; plan M2.5, M4.2): random, valid-ish command sequences
 //! over a small Document of in-memory CSV Queries, checking after every command that
 //!
 //! - (a) nothing panics;
 //! - (b) a command that fails leaves the Document unchanged;
-//! - (d) the Document is consistent (see [`check`]), Measures and Calculated columns included;
+//! - (d) the Document is consistent (see [`check`]), Measures and Calculated columns included,
+//!   and the report: Pages and Visuals (see [`check_report`]);
+//! - (f) a rename never breaks a Field of the report (it rewrites them);
 //!
 //! and after each sequence that
 //!
@@ -25,9 +27,11 @@ mod fuzz {
     use opendash_data::culture::Culture;
     use opendash_data::source::{Bytes, File, Source, csv};
     use opendash_data::step::Step;
+    use opendash_engine::Page;
     use opendash_engine::{App, Document, UNDO_LIMIT};
     use opendash_file::{Preserved, Project};
     use opendash_model::{ModelTable, same_name};
+    use opendash_visuals::{FieldRef, Visual, VisualType, Well};
     use serde_json::{Value, json};
 
     /// Commands per sequence.
@@ -95,7 +99,52 @@ mod fuzz {
             doc.tables.push(table);
             doc.model.put(model);
         }
+        doc.report = report();
         doc
+    }
+
+    /// The starting report: two Pages with a few Visuals and Fields, so the report commands
+    /// have something to act on from the first step.
+    fn report() -> opendash_engine::Report {
+        let column = |t: &str, c: &str| FieldRef::Column {
+            table: t.into(),
+            column: c.into(),
+        };
+        let mut overview = Page::new("p1", "Overview");
+        let mut table = Visual::new("v1", VisualType::Table);
+        table.wells.insert(
+            Well::Values,
+            vec![column("Sales", "Region"), column("Sales", "Qty")],
+        );
+        let mut chart = Visual::new("v2", VisualType::ClusteredColumn);
+        chart
+            .wells
+            .insert(Well::Axis, vec![column("Sales", "Product")]);
+        chart
+            .wells
+            .insert(Well::Values, vec![column("Sales", "Qty")]);
+        chart.z = 1;
+        let mut slicer = Visual::new("v3", VisualType::Slicer);
+        slicer
+            .wells
+            .insert(Well::Field, vec![column("Regions", "Region")]);
+        slicer.z = 2;
+        overview.visuals = vec![table, chart, slicer];
+        overview
+            .selections
+            .insert("v3".into(), vec![json!("North")]);
+        let mut detail = Page::new("p2", "Detail");
+        let mut matrix = Visual::new("v4", VisualType::Matrix);
+        matrix
+            .wells
+            .insert(Well::Rows, vec![column("Products", "Product")]);
+        matrix
+            .wells
+            .insert(Well::Values, vec![column("Products", "Code")]);
+        detail.visuals = vec![matrix];
+        let mut report = opendash_engine::Report::default();
+        report.pages = vec![overview, detail];
+        report
     }
 
     /// Names a command may be given: mostly real, sometimes not.
@@ -205,6 +254,206 @@ mod fuzz {
         "[Total]",
     ];
 
+    const VISUAL_TYPES: [&str; 8] = [
+        "table",
+        "matrix",
+        "card",
+        "clusteredBar",
+        "clusteredColumn",
+        "line",
+        "slicer",
+        "pie",
+    ];
+
+    const WELLS: [&str; 7] = ["values", "rows", "columns", "axis", "legend", "field", "x"];
+
+    type FormatValue = fn(&mut Rng) -> Value;
+
+    const FORMAT: [(&str, FormatValue); 8] = [
+        ("title", |r| {
+            if r.chance(30) {
+                Value::Null
+            } else {
+                json!("T")
+            }
+        }),
+        ("showTitle", |r| json!(r.chance(50))),
+        ("dataLabels", |r| json!(r.chance(50))),
+        ("legend", |r| json!(r.chance(50))),
+        ("legendPosition", |r| {
+            json!(["top", "right", "up"][r.below(3)])
+        }),
+        ("rowSubtotals", |r| json!(r.chance(50))),
+        ("slicerStyle", |r| json!(["list", "dropdown"][r.below(2)])),
+        ("nope", |_| json!(1)),
+    ];
+
+    /// Report params: a Page (id, name or not), a Visual of it, a Field.
+    struct Report<'a> {
+        app: &'a App,
+    }
+
+    impl Report<'_> {
+        fn page(&self, rng: &mut Rng) -> String {
+            let pages = &self.app.document().report.pages;
+            match (rng.below(12), rng.pick(pages)) {
+                (0, _) | (_, None) => "Nope".into(),
+                (1 | 2, Some(p)) => p.name.clone(),
+                (_, Some(p)) => p.id.clone(),
+            }
+        }
+
+        fn visual(&self, rng: &mut Rng, page: &str) -> String {
+            let report = &self.app.document().report;
+            let visuals = report.page(page).map_or(&[][..], |p| p.visuals.as_slice());
+            match (rng.below(12), rng.pick(visuals)) {
+                (0, _) | (_, None) => "nope".into(),
+                (_, Some(v)) => v.id.clone(),
+            }
+        }
+
+        fn field(&self, rng: &mut Rng, n: &Names) -> Value {
+            if rng.chance(25) {
+                json!({"measure": EXPRESSION_NAMES[rng.below(EXPRESSION_NAMES.len())]})
+            } else {
+                let t = n.table(rng);
+                json!({"table": t, "column": n.column(rng, &t)})
+            }
+        }
+
+        /// A Field already in the Visual, mostly.
+        fn its_field(&self, rng: &mut Rng, n: &Names, page: &str, visual: &str) -> Value {
+            let report = &self.app.document().report;
+            let v = report.page(page).and_then(|p| p.visual(visual));
+            let fields: Vec<&FieldRef> =
+                v.map_or(Vec::new(), |v| v.wells.values().flatten().collect());
+            match rng.pick(&fields) {
+                Some(FieldRef::Column { table, column }) if rng.chance(85) => {
+                    json!({"table": table, "column": column})
+                }
+                Some(FieldRef::Measure { name }) if rng.chance(85) => json!({"measure": name}),
+                _ => self.field(rng, n),
+            }
+        }
+    }
+
+    /// One random report command and its params.
+    fn report_command(rng: &mut Rng, app: &App, n: &Names) -> (&'static str, Value) {
+        let r = Report { app };
+        let page = r.page(rng);
+        let visual = r.visual(rng, &page);
+        let at = |rng: &mut Rng| json!(rng.below(4));
+        // Mostly a well the Visual's type has.
+        let v = app
+            .document()
+            .report
+            .page(&page)
+            .and_then(|p| p.visual(&visual));
+        let well = |rng: &mut Rng| match v {
+            Some(v) if rng.chance(75) => rng.pick(v.kind.wells()).map_or("values", |w| w.id()),
+            _ => WELLS[rng.below(WELLS.len())],
+        };
+        // Mostly a well that has Fields, and a position in it.
+        let filled: Vec<(Well, usize)> = v.map_or(Vec::new(), |v| {
+            v.wells.iter().map(|(w, f)| (*w, f.len())).collect()
+        });
+        let from = |rng: &mut Rng| match rng.pick(&filled) {
+            Some((w, len)) if rng.chance(80) => (w.id(), json!(rng.below(*len))),
+            _ => (well(rng), at(rng)),
+        };
+        match rng.below(16) {
+            0 => {
+                let name = if rng.chance(50) {
+                    Value::Null
+                } else {
+                    json!(format!("P{}", rng.below(4)))
+                };
+                ("insert.newPage", json!({"name": name}))
+            }
+            1 => ("page.delete", json!({"page": page})),
+            2 => (
+                "page.rename",
+                json!({"page": page, "name": format!("P{}", rng.below(4))}),
+            ),
+            3 => ("page.move", json!({"page": page, "index": at(rng)})),
+            4 | 5 => {
+                let mut p = json!({"type": VISUAL_TYPES[rng.below(VISUAL_TYPES.len())]});
+                if rng.chance(70) {
+                    p["page"] = json!(page);
+                }
+                if rng.chance(30) {
+                    p["x"] = json!(rng.below(2000));
+                    p["w"] = json!(rng.below(800));
+                }
+                ("insert.newVisual", p)
+            }
+            6 => ("visual.delete", json!({"page": page, "visual": visual})),
+            7 => (
+                "visual.move",
+                json!({"page": page, "visual": visual, "x": rng.below(1500), "y": rng.below(900)}),
+            ),
+            8 => (
+                "visual.resize",
+                json!({"page": page, "visual": visual, "w": rng.below(900), "h": rng.below(900)}),
+            ),
+            9 => (
+                "visual.changeType",
+                json!({"page": page, "visual": visual,
+                    "type": VISUAL_TYPES[rng.below(VISUAL_TYPES.len())]}),
+            ),
+            10 | 11 => {
+                let mut p = json!({"page": page, "visual": visual, "well": well(rng),
+                    "field": r.field(rng, n)});
+                if rng.chance(20) {
+                    p["index"] = at(rng);
+                }
+                ("visual.addField", p)
+            }
+            12 => {
+                let (w, i) = from(rng);
+                let mut p = json!({"page": page, "visual": visual, "well": w});
+                if rng.chance(50) {
+                    p["index"] = i;
+                } else {
+                    p["field"] = r.its_field(rng, n, &page, &visual);
+                }
+                ("visual.removeField", p)
+            }
+            13 => {
+                let (w, i) = from(rng);
+                let mut p = json!({"page": page, "visual": visual, "well": w, "index": i});
+                if rng.chance(60) {
+                    p["toWell"] = json!(well(rng));
+                }
+                if rng.chance(40) {
+                    p["toIndex"] = at(rng);
+                }
+                ("visual.moveField", p)
+            }
+            14 => {
+                let field = if rng.chance(20) {
+                    Value::Null
+                } else {
+                    r.its_field(rng, n, &page, &visual)
+                };
+                let direction = ["ascending", "descending", "sideways"][rng.below(3)];
+                (
+                    "visual.sort",
+                    json!({"page": page, "visual": visual, "field": field,
+                        "direction": direction}),
+                )
+            }
+            _ => {
+                let (option, value) = FORMAT[rng.below(FORMAT.len())];
+                (
+                    "visual.format",
+                    json!({"page": page, "visual": visual, "option": option,
+                        "value": value(rng)}),
+                )
+            }
+        }
+    }
+
     /// One random command and its params.
     fn command(rng: &mut Rng, app: &App) -> (&'static str, Value) {
         let n = Names { app };
@@ -221,6 +470,9 @@ mod fuzz {
                    "toTable": b, "toColumn": n.column(rng, &b)})
         };
         let dax = |rng: &mut Rng| EXPRESSIONS[rng.below(EXPRESSIONS.len())];
+        if rng.chance(35) {
+            return report_command(rng, app, &n);
+        }
         match rng.below(37) {
             0 => ("transform.useFirstRowAsHeaders", json!({"query": q})),
             1 => (
@@ -393,8 +645,57 @@ mod fuzz {
         }
     }
 
+    /// (d), the report: unique ids and Page names, Visuals sorted by id, each Visual's Fields in
+    /// wells its type has, within their limits, Measures only in Values, a chart with a Legend
+    /// or several Values (not both), a sort by one of its Fields, no empty wells.
+    fn check_report(doc: &Document) -> Result<(), String> {
+        let pages = &doc.report.pages;
+        for (i, p) in pages.iter().enumerate() {
+            if pages
+                .iter()
+                .skip(i + 1)
+                .any(|q| q.id == p.id || same_name(&q.name, &p.name))
+            {
+                return Err(format!("page `{}` / `{}` twice", p.id, p.name));
+            }
+            if !p.visuals.windows(2).all(|w| w[0].id < w[1].id) {
+                return Err(format!("page `{}`: visuals not sorted by unique id", p.id));
+            }
+            for v in &p.visuals {
+                let at = format!("visual `{}` ({})", v.id, v.kind.id());
+                for (w, fields) in &v.wells {
+                    if !v.kind.wells().contains(w) || fields.is_empty() {
+                        return Err(format!("{at}: well {w:?} {fields:?}"));
+                    }
+                    if fields.len() > v.kind.max_fields(*w) {
+                        return Err(format!("{at}: too many in {w:?}"));
+                    }
+                    let measure = |f: &FieldRef| matches!(f, FieldRef::Measure { .. });
+                    if *w != Well::Values && fields.iter().any(measure) {
+                        return Err(format!("{at}: a measure in {w:?}"));
+                    }
+                }
+                let chart = matches!(
+                    v.kind,
+                    VisualType::ClusteredBar | VisualType::ClusteredColumn | VisualType::Line
+                );
+                if chart && v.wells.contains_key(&Well::Legend) && v.fields(Well::Values).len() > 1
+                {
+                    return Err(format!("{at}: a legend and several values"));
+                }
+                if let Some(s) = &v.sort
+                    && !v.wells.values().flatten().any(|f| *f == s.field)
+                {
+                    return Err(format!("{at}: sorted by a field not in it"));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// (d): the Document's parts agree with each other. Returns what doesn't.
     fn check(doc: &Document) -> Result<(), String> {
+        check_report(doc)?;
         let queries: Vec<&str> = doc.queries.iter().map(|q| q.name.as_str()).collect();
         for (i, a) in queries.iter().enumerate() {
             if queries.iter().skip(i + 1).any(|b| same_name(a, b)) {
@@ -576,6 +877,8 @@ mod fuzz {
             queries: saved_queries(doc),
             unloaded: doc.unloaded.clone(),
             model: doc.model.clone(),
+            // The report is checked through the app below (its JSON is the engine's).
+            report: BTreeMap::new(),
         };
         let files = opendash_file::encode(&project, None, &Preserved::default())
             .map_err(|e| format!("encode: {e}"))?;
@@ -615,7 +918,20 @@ mod fuzz {
                 names(doc)
             ));
         }
-        check(opened).map_err(|e| format!("opened: {e}"))
+        if opened.report != doc.report {
+            return Err(format!(
+                "the opened report {}",
+                first_difference(&opened.report, &doc.report)
+            ));
+        }
+        if app
+            .package_bytes()
+            .map_err(|e| format!("package again: {e}"))?
+            != bytes
+        {
+            return Err("saving the opened Package changes the bytes".into());
+        }
+        check(app.document()).map_err(|e| format!("opened: {e}"))
     }
 
     /// Per command id: (runs, successes).
@@ -632,6 +948,7 @@ mod fuzz {
         for _ in 0..STEPS {
             let (id, params) = command(&mut rng, &app);
             let before = app.document().clone();
+            let broken = before.broken_fields().len();
             let result = app.run(id, &params);
             let entry = stats.entry(id).or_default();
             entry.0 += 1;
@@ -653,6 +970,15 @@ mod fuzz {
             }
             if let Err(e) = check(app.document()) {
                 fail(format!("after {id}: {e}"));
+            }
+            let rename = [
+                "query.rename",
+                "modeling.renameTable",
+                "modeling.renameColumn",
+                "modeling.renameMeasure",
+            ];
+            if rename.contains(&id) && app.document().broken_fields().len() > broken {
+                fail(format!("{id} broke a Field of the report"));
             }
             if let Err(e) = fresh_tables_match_their_queries(&app) {
                 fail(format!("after {id}: {e}"));
@@ -720,6 +1046,15 @@ mod fuzz {
             "modeling.newColumn",
             "modeling.editExpression",
             "modeling.delete",
+            "insert.newPage",
+            "insert.newVisual",
+            "visual.addField",
+            "visual.changeType",
+            "visual.moveField",
+            "visual.removeField",
+            "visual.sort",
+            "visual.format",
+            "page.delete",
         ] {
             assert!(
                 stats.get(id).is_some_and(|(_, ok)| *ok > 0),

@@ -1,7 +1,7 @@
 //! The File menu (ADR 0003): New, Open, Save and Save As, over `opendash_file`.
 //!
 //! The Document maps to an `opendash_file::Project` (Queries, Enable load, Model, Project
-//! culture); what the files held beyond it (unknown content) and where they live stay in
+//! culture, and the report as JSON parts, `report/json.rs`); what the files held beyond it (unknown content) and where they live stay in
 //! [`FileState`], beside the Document, so undo never touches them.
 //!
 //! Opening (and New) replaces the Document and clears undo and redo: not undoable, as in Power
@@ -98,6 +98,8 @@ pub(crate) struct FileState {
     pub(crate) cache: BTreeMap<String, Saved>,
     /// Source-path remaps from the Project folder's `.local/` (see the module docs).
     remaps: Remaps,
+    /// Files under `report/` the report doesn't read, kept verbatim (`report/json.rs`).
+    report_unknown: crate::report::Kept,
 }
 
 /// One table's cache in the Project folder: which data, and its metadata bytes.
@@ -197,9 +199,9 @@ impl App {
         }
     }
 
-    fn project(&self) -> Project {
+    fn project(&self) -> Result<Project> {
         let doc = self.document();
-        Project {
+        Ok(Project {
             culture: self
                 .file
                 .culture
@@ -212,11 +214,12 @@ impl App {
             },
             unloaded: doc.unloaded.clone(),
             model: doc.model.clone(),
-        }
+            report: crate::report::encode(&doc.report, &self.file.report_unknown)?,
+        })
     }
 
     pub(crate) fn files(&self, root: Option<&Path>) -> Result<FileSet> {
-        opendash_file::encode(&self.project(), root, &self.file.preserved).map_err(Error::File)
+        opendash_file::encode(&self.project()?, root, &self.file.preserved).map_err(Error::File)
     }
 
     /// The definitions, plus the Data cache if `data`.
@@ -300,7 +303,11 @@ impl App {
             _ => Vec::new(),
         };
         local::remap_queries(&remaps, &mut project.queries, false);
-        let mut doc = Document::default();
+        let (report, report_unknown) = crate::report::decode(&project.report)?;
+        let mut doc = Document {
+            report,
+            ..Document::default()
+        };
         let mut saved = BTreeMap::new();
         let mut used = 0usize;
         let mut fresh = BTreeSet::new();
@@ -382,6 +389,7 @@ impl App {
             preserved,
             cache: saved,
             remaps,
+            report_unknown,
         };
         let mut notes = problems;
         if !cache_problems.is_empty() {
