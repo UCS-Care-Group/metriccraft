@@ -6,18 +6,20 @@
 //! - `VAR`s are evaluated where they are defined (eagerly), so an unused `VAR` that fails fails
 //!   the expression; DAX may evaluate them lazily.
 //! - `&&` and `||` evaluate both sides.
-//! - A Measure reference inside a row context needs context transition (M3.4): an error for now.
+//! - A Measure reference is an implicit `CALCULATE`: inside a row context it applies context
+//!   transition ([`super::calculate::transition`]), and its expression sees no row context.
 //! - A table of one column and at most one row is a scalar where one is needed (empty: BLANK).
 //! - `{ … }` names its columns `Value` (one column) or `Value1`, `Value2`, ….
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use opendash_core::Value;
 use opendash_dax::{BinOp, Define, Expr, ExprKind, Query, Span, UnaryOp};
 
 use super::functions::{self, Call};
-use super::storage::{self, Bitset, Cancel, and};
+use super::storage::{self, Bitset, Cancel, Filter, Key, and};
 use super::{
     Database, DaxError, ErrorKind, FilterContext, MAX_EVAL_DEPTH, MAX_MEASURE_CHAIN,
     MAX_RELATIONSHIP_DEPTH, Options, Result, ResultTable,
@@ -97,6 +99,8 @@ pub struct Evaluator<'a, 'q> {
     query_vars: usize,
     rows: Vec<RowFrame>,
     depth: usize,
+    /// `RELATED`'s one-side lookups, by Relationship, built on first use.
+    pub(super) related_index: HashMap<usize, Rc<HashMap<Key, usize>>>,
 }
 
 impl<'a, 'q> Evaluator<'a, 'q> {
@@ -111,6 +115,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             query_vars: 0,
             rows: Vec::new(),
             depth: 0,
+            related_index: HashMap::new(),
         }
     }
 
@@ -262,6 +267,11 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         }
         self.memory_left -= bytes;
         Ok(())
+    }
+
+    /// The row context, outermost first.
+    pub fn row_frames(&self) -> &[RowFrame] {
+        &self.rows
     }
 
     /// Runs `f` with `frame` as the innermost row context.
@@ -505,13 +515,19 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         let Some(expr) = self.measures.get(m).map(|x| x.expr) else {
             return Err(DaxError::new(span, "unknown Measure"));
         };
-        // TODO(M3.4): context transition turns the row context into filters here.
-        if !self.rows.is_empty()
-            || self.measure_stack.contains(&m)
-            || self.measure_stack.len() >= MAX_MEASURE_CHAIN
-        {
+        if self.measure_stack.contains(&m) || self.measure_stack.len() >= MAX_MEASURE_CHAIN {
             return Err(self.measure_error(m, span));
         }
+        // A Measure reference is an implicit CALCULATE: context transition, then its expression
+        // without the row context.
+        let transitioned;
+        let fc = if self.rows.is_empty() {
+            fc
+        } else {
+            transitioned = super::calculate::transition(self, fc, span)?;
+            &transitioned
+        };
+        let rows = std::mem::take(&mut self.rows);
         self.measure_stack.push(m);
         // A Measure sees the query's VARs, not the caller's.
         let local = self.vars.split_off(self.query_vars.min(self.vars.len()));
@@ -519,6 +535,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         self.vars.truncate(self.query_vars);
         self.vars.extend(local);
         self.measure_stack.pop();
+        self.rows = rows;
         r.map(Val::Scalar)
     }
 
@@ -527,15 +544,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     #[inline(never)]
     fn measure_error(&self, m: usize, span: Span) -> DaxError {
         let name = self.measures.get(m).map_or("", |x| x.name.as_str());
-        if !self.rows.is_empty() {
-            DaxError::new(
-                span,
-                format!(
-                    "[{name}] is used inside a row context: context transition isn't supported \
-                     (yet)"
-                ),
-            )
-        } else if self.measure_stack.contains(&m) {
+        if self.measure_stack.contains(&m) {
             DaxError::new(span, format!("the Measure [{name}] refers to itself"))
         } else {
             DaxError::limit(
@@ -705,8 +714,10 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         })
     }
 
-    /// The rows of model Table `table` visible under `fc` (`None`: all): its own filters, and
-    /// through active Relationships (many → one) the filters on the Tables it reaches.
+    /// The rows of model Table `table` visible under `fc` (`None`: all): its own filters,
+    /// through active Relationships (many → one) the filters on the Tables it reaches, and the
+    /// row-set filters of Tables that reach it (a table filter filters its *expanded* Table:
+    /// the one side keeps the rows the filter's rows reach).
     pub fn mask(&self, table: usize, fc: &FilterContext, span: Span) -> Result<Option<Bitset>> {
         let mut path = Vec::new();
         self.mask_on_path(table, fc, span, &mut path)
@@ -731,9 +742,19 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         path.push(table);
         let mut mask = None;
         let mut result = Ok(());
-        for f in fc.filters.iter().filter(|f| f.table() == table) {
-            match f.rows(t, self.cancel) {
-                Ok(rows) => mask = and(mask, rows),
+        for f in &fc.filters {
+            let step = match f.as_ref() {
+                _ if f.table() == table => f.rows(t, self.cancel).map(Some),
+                // The Tables on the path apply their own row sets.
+                Filter::Rows { table: from, rows } if !path.contains(from) => {
+                    let mut seen = vec![*from];
+                    self.project_up(*from, rows, table, span, &mut seen)
+                }
+                Filter::Rows { .. } | Filter::Column { .. } => Ok(None),
+            };
+            match step {
+                Ok(Some(rows)) => mask = and(mask, rows),
+                Ok(None) => {}
                 Err(e) => {
                     result = Err(e);
                     break;
@@ -773,6 +794,79 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         path.pop();
         result.map(|()| mask)
     }
+
+    /// The rows of `target` that rows `rows` of Table `from` reach through active Relationships
+    /// (many → one); `None` when `target` isn't reached. `seen`: the Tables on the way.
+    fn project_up(
+        &self,
+        from: usize,
+        rows: &Bitset,
+        target: usize,
+        span: Span,
+        seen: &mut Vec<usize>,
+    ) -> Result<Option<Bitset>> {
+        if seen.len() > MAX_RELATIONSHIP_DEPTH {
+            return Err(DaxError::limit(
+                span,
+                format!("filters cross more than {MAX_RELATIONSHIP_DEPTH} Relationships"),
+            ));
+        }
+        let Some(t) = self.db.tables.get(from) else {
+            return Ok(None);
+        };
+        let mut out = None;
+        for r in &self.db.relationships {
+            if !r.active || r.from_table != from || seen.contains(&r.to_table) {
+                continue;
+            }
+            if r.to_table != target && !self.reaches(r.to_table, target, seen) {
+                continue;
+            }
+            let (Some(to), Some(key)) =
+                (self.db.tables.get(r.to_table), t.columns.get(r.from_column))
+            else {
+                continue;
+            };
+            let Some(one_key) = to.columns.get(r.to_column) else {
+                continue;
+            };
+            let keys = storage::key_set(t, &key.data, rows, self.cancel)?;
+            let reached = storage::semijoin(to, &one_key.data, &keys, self.cancel)?;
+            if r.to_table == target {
+                out = and(out, reached);
+                continue;
+            }
+            seen.push(r.to_table);
+            let further = self.project_up(r.to_table, &reached, target, span, seen);
+            seen.pop();
+            if let Some(m) = further? {
+                out = and(out, m);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether `target` is reachable from `from` over active Relationships (many → one)
+    /// without passing the Tables in `avoid`.
+    fn reaches(&self, from: usize, target: usize, avoid: &[usize]) -> bool {
+        let mut seen = vec![from];
+        let mut next = 0;
+        while let Some(&t) = seen.get(next) {
+            next += 1;
+            for r in &self.db.relationships {
+                if !r.active || r.from_table != t {
+                    continue;
+                }
+                if r.to_table == target {
+                    return true;
+                }
+                if !seen.contains(&r.to_table) && !avoid.contains(&r.to_table) {
+                    seen.push(r.to_table);
+                }
+            }
+        }
+        false
+    }
 }
 
 #[cold]
@@ -789,7 +883,7 @@ fn too_deep(span: Span) -> DaxError {
 
 #[cold]
 #[inline(never)]
-fn value_error(span: Span, e: &opendash_core::ValueError) -> DaxError {
+pub(super) fn value_error(span: Span, e: &opendash_core::ValueError) -> DaxError {
     DaxError::new(span, e.to_string())
 }
 

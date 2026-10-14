@@ -346,9 +346,11 @@ fn measures_and_vars() {
         "DEFINE MEASURE Sales[Amount] = 1 EVALUATE ROW(\"x\", 1)",
     );
     assert!(e.message.contains("Column"), "{e}");
-    // A Measure in a row context needs context transition (M3.4).
-    let e = error(&db, "DEFINE MEASURE Sales[M] = 1 EVALUATE {1} ORDER BY [M]");
-    assert!(e.message.contains("context transition"), "{e}");
+    // A Measure in a row context applies context transition (M3.4; calculate_tests.rs).
+    assert_eq!(
+        cells(&db, "DEFINE MEASURE Sales[M] = 1 EVALUATE {1} ORDER BY [M]"),
+        [["1"]]
+    );
 }
 
 #[test]
@@ -555,10 +557,12 @@ fn fuzzed_queries_never_panic() {
             "EVALUATE ROW(\"a\", VAR x = 9223372036854775807 RETURN x + -x * 2, \"b\", \"N\" & 1 / 0 = \"n\")",
             "EVALUATE Sales ORDER BY Sales[Region], [Amount] DESC",
             "DEFINE MEASURE Product[M] = [M] + 1 EVALUATE ROW(\"m\", [M], \"p\", COUNTROWS(Product) ^ 0.5)",
+            "DEFINE MEASURE Sales[N] = COUNTROWS(Sales) EVALUATE ROW(\"a\", CALCULATE(COUNTROWS(Product), FILTER(Sales, [N] > 0 && RELATED(Product[Colour]) = \"red\")), \"b\", CALCULATE([N], ALLEXCEPT(Sales, Product[Colour]), Sales[Region] = \"north\" || Sales[Amount] > 2))",
+            "EVALUATE FILTER(ALL(Sales[Region], Sales[ProductKey]), CALCULATE(COUNTROWS(Sales), ALL(Sales), FILTER(ALL(Product), Product[Key] = 1)) > 0)",
         ]
         .map(String::from),
     );
-    let alphabet: Vec<char> = "'\"()[]{},=<>+-*/&|^.e09_ \nVAR RETURN NOT IN EVALUATE DEFINE MEASURE Sales[Amount] COUNTROWS BLANK ROW"
+    let alphabet: Vec<char> = "'\"()[]{},=<>+-*/&|^.e09_ \nVAR RETURN NOT IN EVALUATE DEFINE MEASURE Sales[Amount] COUNTROWS BLANK ROW CALCULATE FILTER ALL ALLEXCEPT RELATED Product[Colour]"
         .chars()
         .collect();
     let mut rng = fuzz::Fuzz::new("dax-eval", 0xD1CE_5EED_0123_4567);
