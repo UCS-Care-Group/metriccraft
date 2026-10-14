@@ -1,5 +1,6 @@
-context/transcripts/*
-!context/transcripts/.gitkeep
+# Local agent layer (memory, logs, hooks): private, never committed
+/context/
+/.claude/
 .memsearch/
 
 # Clean-room observations of Power BI (screenshots) — never committed
@@ -16,4 +17,3 @@ context/transcripts/*
 .env
 .env.*
 !.env.example
-.claude/worktrees/
