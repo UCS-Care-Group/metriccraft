@@ -65,6 +65,56 @@ from the integer codes, `DISTINCTCOUNT` of whole numbers or dates is a range bit
 hash set when the range is sparse), whole-number value filters compare integers, and a float
 `SUM` is a plain loop (the same additions in the same order).
 
+## Page refresh (M4.7; spec N-3)
+
+`crates/engine/benches/page.rs` loads each `import/parquet_<n>` file once and builds the
+reference page: a card (Sum of SalesAmount), a clustered bar (Country, 20 values), a line
+(OrderDate, ~2,555 days), a table (Product, 5,000 values, 500-row window), a matrix
+(Region → Country × Channel, with subtotals) and a Category slicer. Median of 5:
+
+| Case               | What                                                                         |
+|--------------------|------------------------------------------------------------------------------|
+| `page/refresh_<n>` | a slicer change (`slicer.select`), then every Visual re-queried and laid out |
+| `page/layout_<n>`  | the same page again with nothing changed (every query a cache hit)           |
+
+A refresh is 11 group-by queries (`summarize`): one per Visual, the matrix's levels and the
+Totals, all over the ~1/12 of the rows the slicer leaves.
+
+**Before** (b8deb84, 2026-10-14, load average ~40; one refresh): `page/refresh_1m` 108 s
+(84 s on a quieter run). Where it went, per query at 1M rows: the line chart 106 s, the table
+0.9 s, each matrix level 25–360 ms. Every group's expression ran its own scan under an equality
+filter (2,555 date groups × a 1M-row `Key` comparison each: date filters compared a `Key` per
+row), and listing the groups built a `Value` and a folded text key per row (7–35 ms per query).
+10M was not run (extrapolated: over 15 minutes).
+
+**After** (2026-10-14, load average 9; three runs each, ranges):
+
+| Case           | 1M           | 10M          |
+|----------------|--------------|--------------|
+| `page/refresh` | 12.7–13.7 ms | 65.9–69.7 ms |
+| `page/layout`  | 1.9–2.0 ms   | 1.9–2.0 ms   |
+
+N-3 (< 100 ms on 10M rows) is met on tardis2 under that load. What changed:
+
+- **One-pass group-by** (`crates/model/src/dax/summarize_fast.rs`): when every expression is a
+  plain aggregation of one Table (directly or through Measures) and the group-by columns are on
+  it or one Relationship away, one scan of the visible rows works out each row's group from
+  dictionary codes and whole numbers and accumulates every expression per group. Results are
+  identical to the per-group path (a differential test checks it); anything else falls back.
+- **Threads** (not wasm): the scan's first phase (visible rows, group keys, each aggregation's
+  values gathered into flat buffers) runs on up to 4 threads per 64Ki-row batch; the second
+  (groups in first-seen order, the additions) stays on one thread in row order, so float sums
+  are bit-identical. The scan is memory-bandwidth bound: 10M refresh at load ~10 was
+  115–128 ms on 1 thread, 67–95 ms on 2, 62–72 ms on 4, 71–84 ms on 8.
+- **Mask memo**: the Visuals of a Page share one filter context, so each Table's visible rows
+  are worked out once per slicer change, not once per query (a 10M-row mask is ~6 ms).
+- Date value filters compare integers a word at a time, like whole numbers (the per-group
+  path's fallback).
+
+Not yet: the second phase (~1.5–3 ns per visible row and query) is the floor of a refresh; it
+could skip the group-slot lookup when keys are dense. A group-by column of a big dictionary
+folds the whole dictionary per query. Baselines not re-recorded (host load > 2).
+
 ## Reference dataset
 
 `cargo xtask dataset [--rows N] [--out DIR] [--csv]` writes `sales_10m.parquet` (and with

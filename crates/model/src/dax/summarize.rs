@@ -22,8 +22,12 @@
 //! - A one-side Table has no virtual blank row here, so many-side rows whose key has no match
 //!   get no group; Power BI's blank row would show them.
 //!
-//! Performance: each group's expressions run their own scans (groups × rows); a one-pass
-//! group-by scan for plain aggregations is a later optimisation (N-3, M4).
+//! Performance (M4.7, spec N-3): when every expression is a plain aggregation of one Table
+//! (`SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `DISTINCTCOUNT`, `COUNTROWS`, directly or
+//! through Measures) and the group-by columns are on that Table or one Relationship away, the
+//! one-pass group-by (`summarize_fast.rs`) scans its visible rows once, on several threads
+//! outside wasm, with the same results; anything else takes the per-group path below, where
+//! each group's expressions run their own scans (groups × rows).
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -208,6 +212,62 @@ pub fn summarize_rows(
         })
         .collect();
     columns.extend(measures.iter().map(|(n, _)| RowsColumn::new(n)));
+    let exprs: Vec<&Expr> = measures.iter().map(|(_, e)| *e).collect();
+    let mark = ev.charged();
+    let fast = if force_slow() {
+        None
+    } else {
+        fast::rows(ev, group_by, &exprs, fc, span)?
+    };
+    // The one-pass path's temporaries are dropped: only its result stays charged.
+    ev.release(mark);
+    if let Some(rows) = fast {
+        let width = columns.len();
+        let row_bytes = width.saturating_mul(VALUE_BYTES).saturating_add(ROW_BYTES);
+        let text = rows.iter().flatten().fold(0usize, |a, v| match v {
+            Value::Text(s) => a.saturating_add(s.len()),
+            _ => a,
+        });
+        ev.charge(
+            rows.len().saturating_mul(row_bytes).saturating_add(text),
+            span,
+        )?;
+        #[cfg(test)]
+        FAST_HITS.with(|h| h.set(h.get() + 1));
+        return Ok(Rows { columns, rows });
+    }
+    slow_rows(ev, group_by, measures, fc, span, columns)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: run the per-group path even where the one-pass path would.
+    pub(crate) static FORCE_SLOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests: how many times the one-pass path gave the result.
+    pub(crate) static FAST_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn force_slow() -> bool {
+    FORCE_SLOW.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn force_slow() -> bool {
+    false
+}
+
+/// [`summarize_rows`] the per-group way: each group's expressions evaluated under its equality
+/// filters (the one-pass path's fallback, and its reference in tests).
+fn slow_rows(
+    ev: &mut Evaluator<'_, '_>,
+    group_by: &[(usize, usize)],
+    measures: &[(&str, &Expr)],
+    fc: &FilterContext,
+    span: Span,
+    columns: Vec<RowsColumn>,
+) -> Result<Rows> {
+    let db = ev.db;
     let width = columns.len();
     let groups = groups(ev, group_by, fc, width, span)?;
     if measures.is_empty() {
@@ -363,6 +423,13 @@ fn too_many(span: Span) -> DaxError {
     }
 }
 
+#[path = "summarize_fast.rs"]
+mod fast;
+
 #[cfg(test)]
 #[path = "summarize_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "summarize_fast_tests.rs"]
+mod fast_tests;

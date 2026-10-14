@@ -136,6 +136,69 @@ pub struct Database {
     /// Bytes held by the loaded data (distinct buffers): the memory cap minus this is what
     /// intermediate tables may use.
     pub loaded_bytes: usize,
+    /// Recent visible-row masks, for the one-pass group-by ([`MaskMemo`]).
+    pub(crate) masks: MaskMemo,
+}
+
+/// The visible rows of a few recent (Table, filter context)s (M4.7): the Visuals of a Page
+/// share one filter context (the engine builds it once per Selection), so a slicer change
+/// works out each Table's mask once rather than once per Visual and level. Keyed by the
+/// filters' identity; an entry holds its filters, so their addresses can't be reused.
+///
+/// ponytail: at most [`MASK_MEMO`] masks of `rows / 8` bytes each, outside the memory cap
+/// (an evaluator's own masks aren't charged either); a clone starts empty.
+#[derive(Default)]
+pub(crate) struct MaskMemo(std::sync::Mutex<Vec<MaskEntry>>);
+
+type MaskEntry = (usize, Vec<std::sync::Arc<Filter>>, Option<Bitset>);
+
+/// Masks [`MaskMemo`] keeps.
+const MASK_MEMO: usize = 4;
+
+impl MaskMemo {
+    /// The mask of `table` under `filters`, if remembered.
+    pub(crate) fn get(
+        &self,
+        table: usize,
+        filters: &[std::sync::Arc<Filter>],
+    ) -> Option<Option<Bitset>> {
+        let memo = self.0.lock().ok()?;
+        memo.iter()
+            .find(|(t, f, _)| {
+                *t == table
+                    && f.len() == filters.len()
+                    && f.iter()
+                        .zip(filters)
+                        .all(|(a, b)| std::sync::Arc::ptr_eq(a, b))
+            })
+            .map(|(_, _, m)| m.clone())
+    }
+
+    /// Remembers `mask` for `table` under `filters`, forgetting the oldest beyond
+    /// [`MASK_MEMO`].
+    pub(crate) fn put(
+        &self,
+        table: usize,
+        filters: &[std::sync::Arc<Filter>],
+        mask: &Option<Bitset>,
+    ) {
+        if let Ok(mut memo) = self.0.lock() {
+            memo.insert(0, (table, filters.to_vec(), mask.clone()));
+            memo.truncate(MASK_MEMO);
+        }
+    }
+}
+
+impl Clone for MaskMemo {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl fmt::Debug for MaskMemo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("MaskMemo")
+    }
 }
 
 impl Database {
@@ -198,6 +261,7 @@ impl Database {
             tables,
             relationships,
             loaded_bytes,
+            masks: MaskMemo::default(),
         }
     }
 

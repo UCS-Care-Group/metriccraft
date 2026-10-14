@@ -296,6 +296,17 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         Ok(())
     }
 
+    /// What [`Self::charge`] has counted so far, for [`Self::release`].
+    pub(crate) fn charged(&self) -> usize {
+        self.used
+    }
+
+    /// Refunds what was charged since [`Self::charged`] gave `mark` (the temporaries are
+    /// dropped).
+    pub(crate) fn release(&mut self, mark: usize) {
+        self.used = self.used.min(mark);
+    }
+
     /// Bytes intermediate data may still use.
     pub fn memory_left(&self) -> usize {
         self.budget
@@ -557,6 +568,18 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             }
         }
         None
+    }
+
+    /// The expression of the Measure `T[name]` (or `[name]`) names outside a row context: what
+    /// [`Self::column`] would evaluate (the one-pass group-by reads it, M4.7).
+    pub(crate) fn measure_expr(&self, table: Option<&str>, name: &str) -> Option<&'q Expr> {
+        let m = self.find_measure(table, name)?;
+        self.measures.get(m).map(|x| x.expr)
+    }
+
+    /// Whether a variable named `name` is in scope (it shadows a Table of that name).
+    pub(crate) fn has_var(&self, name: &str) -> bool {
+        self.vars.iter().any(|(n, _)| same_name(n, name))
     }
 
     fn find_measure(&self, table: Option<&str>, name: &str) -> Option<usize> {
@@ -838,6 +861,23 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             });
         }
         self.mask_of(table, 0, fc, span, 0, &mut walk)
+    }
+
+    /// [`Self::mask`], remembered in the Database for the next query under the same filters
+    /// ([`super::MaskMemo`]): for the one-pass group-by, whose filter context is a Page's.
+    pub(crate) fn mask_memo(
+        &self,
+        table: usize,
+        fc: &FilterContext,
+        span: Span,
+    ) -> Result<Option<Bitset>> {
+        if let Some(m) = self.db.masks.get(table, &fc.filters) {
+            self.cancel.check()?;
+            return Ok(m);
+        }
+        let m = self.mask(table, fc, span)?;
+        self.db.masks.put(table, &fc.filters, &m);
+        Ok(m)
     }
 
     fn mask_of(
