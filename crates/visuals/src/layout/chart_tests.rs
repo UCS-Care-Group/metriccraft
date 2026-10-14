@@ -587,7 +587,7 @@ fn line_continuous_dates_snapshot() {
 }
 
 #[test]
-fn line_whole_number_axis_and_unsorted_keys() {
+fn line_whole_number_axis_and_unsorted_keys_snapshot() {
     let r = result(
         VisualType::Line,
         ColumnType::Whole,

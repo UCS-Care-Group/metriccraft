@@ -23,6 +23,7 @@ pub use load::{LoadReport, Loaded};
 pub use recovery::{DEFAULT_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES, RecoveryInfo, recovery_dir};
 pub use report::{
     BrokenField, MAX_COORD, MAX_PAGES, MAX_VISUALS, PAGE_HEIGHT, PAGE_WIDTH, Page, Report, resolve,
+    seed_ids,
 };
 pub use selection::{DataSelection, MAX_SELECTED, Point};
 

@@ -36,8 +36,9 @@ pub fn paint(scene: &Scene, scale: f32, background: Color) -> Result<Pixmap, Str
     let t = Transform::from_scale(scale, scale);
     // Clip rectangles in logical pixels, intersected; the mask for the innermost.
     let mut clips: Vec<Option<Rect>> = Vec::new();
-    let mut mask: Option<Mask> = None;
+    let mut clip = Clip::new(w, h, scale);
     for cmd in &scene.cmds {
+        let mask = clip.mask(!clips.is_empty());
         match cmd {
             Cmd::PushClip { x, y, w: cw, h: ch } => {
                 let outer = clips.last().copied().flatten();
@@ -48,14 +49,13 @@ pub fn paint(scene: &Scene, scale: f32, background: Color) -> Result<Pixmap, Str
                     _ => None,
                 };
                 clips.push(inner);
-                mask = clip_mask(inner, w, h, t);
+                clip.set(inner, t);
             }
             Cmd::PopClip => {
                 clips.pop();
-                mask = match clips.last() {
-                    Some(r) => clip_mask(*r, w, h, t),
-                    None => None,
-                };
+                if let Some(r) = clips.last() {
+                    clip.set(*r, t);
+                }
             }
             // An empty clip hides everything until it's popped.
             _ if clips.last().is_some_and(Option::is_none) => {}
@@ -73,10 +73,10 @@ pub fn paint(scene: &Scene, scale: f32, background: Color) -> Result<Pixmap, Str
                 };
                 let path = PathBuilder::from_rect(r);
                 if let Some(f) = fill {
-                    pm.fill_path(&path, &paint_of(*f), FillRule::Winding, t, mask.as_ref());
+                    pm.fill_path(&path, &paint_of(*f), FillRule::Winding, t, mask);
                 }
                 if let Some((c, sw)) = stroke {
-                    stroke_path(&mut pm, &path, *c, *sw, t, mask.as_ref());
+                    stroke_path(&mut pm, &path, *c, *sw, t, mask);
                 }
             }
             Cmd::Line {
@@ -91,7 +91,7 @@ pub fn paint(scene: &Scene, scale: f32, background: Color) -> Result<Pixmap, Str
                 pb.move_to(*x1, *y1);
                 pb.line_to(*x2, *y2);
                 if let Some(path) = pb.finish() {
-                    stroke_path(&mut pm, &path, *color, *width, t, mask.as_ref());
+                    stroke_path(&mut pm, &path, *color, *width, t, mask);
                 }
             }
             Cmd::Path {
@@ -109,7 +109,7 @@ pub fn paint(scene: &Scene, scale: f32, background: Color) -> Result<Pixmap, Str
                     }
                 }
                 if let Some(path) = pb.finish() {
-                    stroke_path(&mut pm, &path, *color, *width, t, mask.as_ref());
+                    stroke_path(&mut pm, &path, *color, *width, t, mask);
                 }
             }
             Cmd::Text {
@@ -123,13 +123,7 @@ pub fn paint(scene: &Scene, scale: f32, background: Color) -> Result<Pixmap, Str
                 ..
             } => {
                 if let Some(path) = text_path(s, *x, *y, *size, *weight, *align) {
-                    pm.fill_path(
-                        &path,
-                        &paint_of(*color),
-                        FillRule::Winding,
-                        t,
-                        mask.as_ref(),
-                    );
+                    pm.fill_path(&path, &paint_of(*color), FillRule::Winding, t, mask);
                 }
             }
         }
@@ -166,13 +160,67 @@ fn stroke_path(
     pm.stroke_path(path, &paint_of(c), &stroke, t, mask);
 }
 
-/// The mask for clip rectangle `r` (logical pixels; `None`: empty).
-fn clip_mask(r: Option<Rect>, w: u32, h: u32, t: Transform) -> Option<Mask> {
-    let mut m = Mask::new(w, h)?;
-    if let Some(r) = r {
-        m.fill_path(&PathBuilder::from_rect(r), FillRule::Winding, true, t);
+/// The clip mask: one canvas-sized mask, allocated at the first clip and reused. Nested clips
+/// intersect into one rectangle, so setting a clip only clears the previous rectangle's pixels
+/// and fills the new one: the cost is the rectangles' area, not the canvas's, however many
+/// Visuals a Page has.
+struct Clip {
+    mask: Option<Mask>,
+    w: u32,
+    h: u32,
+    scale: f32,
+    /// Device pixels the mask may have set: rows `y0..y1`, columns `x0..x1`.
+    dirty: Option<(u32, u32, u32, u32)>,
+}
+
+impl Clip {
+    fn new(w: u32, h: u32, scale: f32) -> Clip {
+        Clip {
+            mask: None,
+            w,
+            h,
+            scale,
+            dirty: None,
+        }
     }
-    Some(m)
+
+    /// The mask to paint through while `clipped`.
+    fn mask(&self, clipped: bool) -> Option<&Mask> {
+        self.mask.as_ref().filter(|_| clipped)
+    }
+
+    /// Makes the mask clip rectangle `r` (logical pixels; `None`: empty).
+    fn set(&mut self, r: Option<Rect>, t: Transform) {
+        if self.mask.is_none() {
+            self.mask = Mask::new(self.w, self.h);
+        }
+        let Some(m) = self.mask.as_mut() else {
+            return;
+        };
+        if let Some((x0, y0, x1, y1)) = self.dirty.take() {
+            let data = m.data_mut();
+            for y in y0..y1 {
+                let row = (y as usize).saturating_mul(self.w as usize);
+                let span = row.saturating_add(x0 as usize)..row.saturating_add(x1 as usize);
+                if let Some(px) = data.get_mut(span) {
+                    px.fill(0);
+                }
+            }
+        }
+        if let Some(r) = r {
+            m.fill_path(&PathBuilder::from_rect(r), FillRule::Winding, true, t);
+            // The rectangle in device pixels, one more each side for anti-aliasing.
+            let px = |v: f32, max: u32| (v * self.scale).clamp(0.0, max as f32) as u32;
+            let (x0, y0) = (px(r.left() - 1.0, self.w), px(r.top() - 1.0, self.h));
+            let (x1, y1) = (px(r.right() + 1.0, self.w), px(r.bottom() + 1.0, self.h));
+            self.dirty = Some((
+                x0,
+                y0,
+                x1.saturating_add(1).min(self.w),
+                y1.saturating_add(1).min(self.h),
+            ));
+        }
+    }
 }
 
 /// The outlines of `s` as one path, anchored at `x` per `align`, baseline `y`.
@@ -299,6 +347,51 @@ mod tests {
                 .unwrap()
                 .starts_with(b"\x89PNG")
         );
+    }
+
+    /// A Page of 1,000 Visuals, each clipped with a nested clip inside, on the largest canvas:
+    /// the clip mask is reused, not a canvas-sized mask built (and cleared) per push and pop
+    /// (which took 2,000 × 64 MB of memset here).
+    #[test]
+    fn many_clips_render_fast() {
+        let mut s = Scene::new(16_384.0, 4_096.0);
+        for i in 0..1_000u16 {
+            let (x, y) = (f32::from(i % 40) * 32.0, f32::from(i / 40) * 28.0);
+            let rect = |fill: u32| Cmd::Rect {
+                x,
+                y,
+                w: 40.0,
+                h: 40.0,
+                fill: Some(Color::hex(fill)),
+                stroke: None,
+                tag: None,
+            };
+            s.push(Cmd::PushClip {
+                x,
+                y,
+                w: 30.0,
+                h: 26.0,
+            });
+            s.push(rect(0x0000ff));
+            s.push(Cmd::PushClip {
+                x: x + 2.0,
+                y: y + 2.0,
+                w: 26.0,
+                h: 22.0,
+            });
+            s.push(rect(0xff0000));
+            s.push(Cmd::PopClip);
+            s.push(Cmd::PopClip);
+        }
+        let start = std::time::Instant::now();
+        let pm = paint(&s, 1.0, Color::hex(0xffffff)).unwrap();
+        let took = start.elapsed();
+        eprintln!("1,000 clipped visuals painted in {took:?}");
+        assert!(took.as_secs_f32() < 5.0, "{took:?}");
+        // Inner clip red, the outer ring blue, outside both white.
+        assert_eq!(rgba(&pm, 10, 10), [255, 0, 0, 255]);
+        assert_eq!(rgba(&pm, 0, 0), [0, 0, 255, 255]);
+        assert_eq!(rgba(&pm, 31, 1), [255, 255, 255, 255]);
     }
 
     #[test]

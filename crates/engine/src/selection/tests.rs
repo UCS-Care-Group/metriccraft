@@ -682,3 +682,135 @@ fn page_snapshot_after_a_bar_click() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots");
     opendash_visuals::snapshot::check(&dir, "page_bar_click", &composed).unwrap();
 }
+
+/// A data-point Selection goes, whole, when its Visual's group-by Fields or type change (a
+/// rename included), when its Visual or Page is deleted (undo doesn't bring it back), or when a
+/// Column it names isn't loaded.
+#[test]
+fn stale_data_point_selections_are_dropped() {
+    let (mut app, ids) = setup();
+    let p = ids.page.clone();
+    let bar = |app: &mut App| {
+        click_bar(app, &ids, "Pen", false);
+        assert!(app.selection(&p).is_some());
+    };
+    // Rename the Column the point names: the Fields are rewritten, the point isn't.
+    bar(&mut app);
+    run(
+        &mut app,
+        "modeling.renameColumn",
+        json!({"table": "Sales", "column": "Product", "name": "Item"}),
+    );
+    assert!(app.selection(&p).is_none());
+    draw(&mut app, &p);
+    assert_eq!(card(&app, &ids), "14", "nothing filters");
+    run(&mut app, "edit.undo", Value::Null);
+    assert!(app.selection(&p).is_none());
+    // Its group-by Fields or type change; a Value doesn't count.
+    let edits = [
+        (
+            "visual.addField",
+            json!({"well": "legend", "field": col("Region")}),
+        ),
+        ("visual.changeType", json!({"type": "clusteredColumn"})),
+        ("visual.removeField", json!({"well": "axis", "index": 0})),
+    ];
+    for (id, extra) in edits {
+        bar(&mut app);
+        let mut params = json!({"page": p, "visual": ids.bar});
+        for (k, v) in extra.as_object().unwrap() {
+            params[k] = v.clone();
+        }
+        run(&mut app, id, params);
+        assert!(app.selection(&p).is_none(), "{id}");
+        run(&mut app, "edit.undo", Value::Null);
+    }
+    bar(&mut app);
+    run(
+        &mut app,
+        "visual.addField",
+        json!({"page": p, "visual": ids.bar, "well": "values", "field": col("Qty")}),
+    );
+    assert!(
+        app.selection(&p).is_some(),
+        "a Value isn't a group-by Field"
+    );
+    // Deleting the Visual drops it and its drawing; undo brings neither back.
+    run(
+        &mut app,
+        "visual.delete",
+        json!({"page": p, "visual": ids.bar}),
+    );
+    assert!(app.selection(&p).is_none());
+    assert!(app.visual_result(&p, &ids.bar).is_none());
+    run(&mut app, "edit.undo", Value::Null);
+    assert!(app.selection(&p).is_none());
+    assert!(app.visual_result(&p, &ids.bar).is_none());
+    // Deleting the Page.
+    run(&mut app, "insert.newPage", json!({}));
+    bar(&mut app);
+    run(&mut app, "page.delete", json!({"page": p}));
+    assert!(app.session.points.is_empty());
+    assert!(!app.session.drawn.keys().any(|(page, _)| *page == p));
+}
+
+#[test]
+fn a_selection_of_a_column_not_loaded_is_dropped_when_drawn() {
+    let (mut app, ids) = setup();
+    click_bar(&mut app, &ids, "Pen", false);
+    // The Model still has the Column; the data doesn't.
+    app.edit_noting(|doc| {
+        doc.tables.clear();
+        Ok(None)
+    })
+    .unwrap();
+    assert!(app.selection(&ids.page).is_some());
+    draw(&mut app, &ids.page);
+    assert!(app.selection(&ids.page).is_none());
+}
+
+#[test]
+fn the_cancel_flag_stops_a_page_drawing() {
+    let (mut app, ids) = setup();
+    let cancel = app.cancel_flag();
+    cancel.store(true, Ordering::Relaxed);
+    let scenes = draw(&mut app, &ids.page);
+    let text = scene(&scenes, &ids.card).to_text();
+    assert!(text.contains("cancelled"), "{text}");
+    assert!(app.visual_result(&ids.page, &ids.card).is_none());
+    // Cleared when the drawing ends: the next one runs.
+    assert!(!cancel.load(Ordering::Relaxed));
+    draw(&mut app, &ids.page);
+    assert_eq!(card(&app, &ids), "14");
+}
+
+/// A Page holding more slicer items than a file or `slicer.select` allows (built some other
+/// way) still filters by at most `MAX_SELECTED` of them.
+#[test]
+fn slicer_items_are_capped() {
+    let (mut app, ids) = setup();
+    let slicer = ids.slicer.clone();
+    app.edit_noting(|doc| {
+        let page = doc.report.pages.first_mut().unwrap();
+        page.selections
+            .insert(slicer, vec![json!("North"); MAX_SELECTED + 50]);
+        Ok(None)
+    })
+    .unwrap();
+    let doc = app.document();
+    let page = doc.report.pages.first().unwrap();
+    let v = page.visual(&ids.slicer).unwrap();
+    assert_eq!(slicer_items(&doc.model, page, v).len(), MAX_SELECTED);
+    draw(&mut app, &ids.page);
+    assert_eq!(card(&app, &ids), "8");
+}
+
+/// A click runs as its command: it resets the last command's notice.
+#[test]
+fn clicks_run_as_commands() {
+    let (mut app, ids) = setup();
+    draw(&mut app, &ids.page);
+    app.note("left over");
+    app.click(&ids.page, &ids.bar, 1.0, 1.0, false).unwrap();
+    assert_eq!(app.notice(), None);
+}

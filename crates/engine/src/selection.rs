@@ -7,6 +7,9 @@
 //!   click, cleared by `selection.clear`; not saved, not undone, forgotten by File > Open / New.
 //!   One Visual per Page holds it. A data point is the Columns it is grouped by and their values
 //!   ([`Point`]): a row's keys, plus a Legend's or matrix column's keys; a total has fewer.
+//!   It is dropped, whole, when it goes stale: its Visual or Page is deleted (undo doesn't bring
+//!   it back), the Visual's type or group-by Fields change (a rename included), or one of its
+//!   Columns isn't loaded.
 //! - **Filters.** A Visual sees every slicer on its Page except itself, and the data-point
 //!   Selection unless it is its source; values from one source OR together, sources AND. The
 //!   source Visual isn't filtered by its own Selection: its unselected marks are dimmed.
@@ -16,6 +19,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use opendash_core::{CURRENCY_SCALE, Value as Datum};
 use opendash_data::step::ColumnType;
@@ -56,6 +60,31 @@ impl Point {
 pub struct DataSelection {
     pub visual: String,
     pub points: Vec<Point>,
+    /// The Visual's [`Signature`] when picked: the Selection holds while it does.
+    signature: Signature,
+}
+
+/// What a Visual's data points are made of: its type and the Columns it groups by.
+type Signature = (VisualType, Vec<FieldRef>);
+
+/// `v`'s [`Signature`]. A table's Values Columns all count (whether one groups depends on the
+/// Model), Measures don't.
+fn signature(v: &Visual) -> Signature {
+    let wells: &[Well] = match v.kind {
+        VisualType::Table => &[Well::Values],
+        VisualType::Matrix => &[Well::Rows, Well::Columns],
+        VisualType::ClusteredBar | VisualType::ClusteredColumn | VisualType::Line => {
+            &[Well::Axis, Well::Legend]
+        }
+        VisualType::Card | VisualType::Slicer => &[],
+    };
+    let fields = wells
+        .iter()
+        .flat_map(|w| v.fields(*w))
+        .filter(|f| matches!(f, FieldRef::Column { .. }))
+        .cloned()
+        .collect();
+    (v.kind, fields)
 }
 
 /// What a Visual's query is cached under: the canonical text of each filter source it sees,
@@ -89,6 +118,23 @@ impl Session {
     pub(crate) fn forget_selections(&mut self) {
         self.points.clear();
         self.drawn.clear();
+    }
+
+    /// After any change to the Document (an edit, undo, redo, load): drops the Selections that
+    /// went stale (see the module docs) and the drawings of Pages and Visuals that are gone.
+    pub(crate) fn prune(&mut self, doc: &Document) {
+        let pages: HashMap<&str, &Page> = doc
+            .report
+            .pages
+            .iter()
+            .map(|p| (p.id.as_str(), p))
+            .collect();
+        let visual = |page: &str, id: &str| pages.get(page).and_then(|p| p.visual(id));
+        self.points.retain(|page, sel| {
+            visual(page, &sel.visual).is_some_and(|v| signature(v) == sel.signature)
+        });
+        self.drawn
+            .retain(|(page, id), _| visual(page, id).is_some());
     }
 
     /// Moves to a new generation if the Model or the loaded data changed.
@@ -178,7 +224,12 @@ fn slicer_items(model: &Model, page: &Page, v: &Visual) -> Vec<Datum> {
     let (Some(items), Some((_, ty))) = (page.selections.get(&v.id), slicer_column(model, v)) else {
         return Vec::new();
     };
-    items.iter().filter_map(|i| datum(i, ty)).collect()
+    // At most what `slicer.select` and a file allow, whatever built the Page.
+    items
+        .iter()
+        .take(MAX_SELECTED)
+        .filter_map(|i| datum(i, ty))
+        .collect()
 }
 
 // ---- data points ----
@@ -228,17 +279,24 @@ fn locate(db: &Database, f: &FieldRef) -> Option<(usize, usize)> {
     Some((t, db.tables.get(t)?.column(column)?))
 }
 
+/// A point's keys as (table, column, value) in the Database.
+type Located<'a> = Vec<(usize, usize, &'a Datum)>;
+
 /// `fc` with the filter of `source` added (see the module docs).
 fn add_source(db: &Database, fc: FilterContext, source: &Source) -> FilterContext {
-    // Each point as (table, column, value) triples; points naming a Column not loaded are left out.
-    let points: Vec<Vec<(usize, usize, &Datum)>> = source
+    // Each point as (table, column, value) triples. A point naming a Column not loaded makes
+    // the source not filter: leaving just it out would narrow the OR to the others.
+    let points: Option<Vec<Located<'_>>> = source
         .iter()
-        .filter_map(|p| {
+        .map(|p| {
             p.0.iter()
                 .map(|(f, v)| locate(db, f).map(|(t, c)| (t, c, v)))
                 .collect()
         })
         .collect();
+    let Some(points) = points else {
+        return fc;
+    };
     let Some(first) = points.first() else {
         return fc;
     };
@@ -334,7 +392,8 @@ struct Prepared {
 }
 
 impl Prepared {
-    fn new(doc: &Document, session: &Session, page: &Page) -> Prepared {
+    /// Drops the Page's data-point Selection from `session` if it went stale.
+    fn new(doc: &Document, session: &mut Session, page: &Page) -> Prepared {
         let slicers = page
             .visuals
             .iter()
@@ -349,14 +408,21 @@ impl Prepared {
                 (!source.is_empty()).then(|| (v.id.clone(), source))
             })
             .collect();
-        let points = session
-            .points
-            .get(&page.id)
-            .filter(|s| page.visual(&s.visual).is_some())
-            .cloned();
+        let db = Database::new(&doc.model, &doc.tables);
+        let fresh = session.points.get(&page.id).map(|s| {
+            page.visual(&s.visual)
+                .is_some_and(|v| signature(v) == s.signature)
+                && s.points
+                    .iter()
+                    .all(|p| p.0.iter().all(|(f, _)| locate(&db, f).is_some()))
+        });
+        if fresh == Some(false) {
+            session.points.remove(&page.id);
+        }
+        let points = session.points.get(&page.id).cloned();
         Prepared {
             page: page.id.clone(),
-            db: Database::new(&doc.model, &doc.tables),
+            db,
             slicers,
             points,
             built: HashMap::new(),
@@ -384,6 +450,7 @@ impl Prepared {
         session: &mut Session,
         model: &Model,
         memory_cap: usize,
+        cancel: Option<&AtomicBool>,
         v: &Visual,
     ) -> std::result::Result<Arc<QueryResult>, DaxError> {
         let sources = self.sources(&v.id);
@@ -403,10 +470,7 @@ impl Prepared {
             db: &self.db,
             model,
             filters: &fc,
-            options: Options {
-                cancel: None,
-                memory_cap,
-            },
+            options: Options { cancel, memory_cap },
         };
         session
             .cache
@@ -432,8 +496,25 @@ impl App {
     /// own logical pixels, under the Page's Selection. Queries come from the cache when the
     /// filters a Visual sees haven't changed; a failing query draws as the Visual's error.
     /// Keeps the Scenes for [`App::click`].
+    ///
+    /// Setting [`App::cancel_flag`] (from another thread) stops it: the queries still running
+    /// or to come fail as cancelled and draw as errors. It clears the flag when done, so a
+    /// cancel stops the drawing in progress, or else the next one.
     pub fn page_scene(&mut self, page: &str, cx: &Context<'_>) -> Result<Vec<(String, Scene)>> {
         let memory_cap = self.memory_cap();
+        let cancel = Arc::clone(&self.cancel);
+        let out = self.draw_page(page, cx, memory_cap, &cancel);
+        cancel.store(false, Ordering::Relaxed);
+        out
+    }
+
+    fn draw_page(
+        &mut self,
+        page: &str,
+        cx: &Context<'_>,
+        memory_cap: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<(String, Scene)>> {
         let App { doc, session, .. } = self;
         let page = doc
             .report
@@ -443,7 +524,8 @@ impl App {
         let mut prep = Prepared::new(doc, session, page);
         let mut out = Vec::new();
         for v in page.draw_order() {
-            let (scene, result) = match prep.query(session, &doc.model, memory_cap, v) {
+            let (scene, result) = match prep.query(session, &doc.model, memory_cap, Some(cancel), v)
+            {
                 Ok(r) => {
                     let items = if v.kind == VisualType::Slicer {
                         slicer_items(&doc.model, page, v)
@@ -498,7 +580,8 @@ impl App {
     /// [`App::page_scene`]; `add` is Ctrl. On a slicer item it selects that item (`add`
     /// toggles it; clicking the only selected item clears), as `slicer.select` — undoable. On a
     /// data point it selects it (`add` toggles it in the Selection; clicking the only selected
-    /// point clears), as `selection.select`; on anything else the Page's Selection is cleared.
+    /// point clears), as `selection.select`; on anything else the Page's Selection is cleared,
+    /// as `selection.clear`. Each runs as that command ([`App::run`]).
     pub fn click(&mut self, page: &str, visual: &str, x: f32, y: f32, add: bool) -> Result {
         const ID: &str = "selection.select";
         let p = self
@@ -541,23 +624,33 @@ impl App {
                 json!([item])
             };
             let params = json!({"page": page_id, "visual": visual, "items": items, "add": add});
-            return self.edit_noting(|doc| slicer_select(doc, &params).map(|()| None));
+            return self.run("slicer.select", &params);
         }
-        match tag.zip(result).and_then(|(t, r)| point_of(&r, t)) {
-            Some(point) => pick(&mut self.session, &page_id, visual, point, add),
-            None => {
-                self.session.points.remove(&page_id);
+        // The point by its place in the result: `selection.select` queries again (a cache hit
+        // under the same filters) and takes the same point.
+        match tag.filter(|t| result.as_ref().is_some_and(|r| point_of(r, *t).is_some())) {
+            Some(t) => {
+                let point = json!({"row": t.point, "series": t.series});
+                let params = json!({"page": page_id, "visual": visual, "point": point, "add": add});
+                self.run("selection.select", &params)
             }
+            None => self.run("selection.clear", &json!({"page": page_id})),
         }
-        Ok(())
+    }
+
+    /// The flag that stops a running [`App::page_scene`]: set it from another thread (the UI's
+    /// Cancel, the CLI's Ctrl-C) to stop a long Page refresh.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
     }
 }
 
-/// Picks `point` of `visual` on Page `page` (see [`App::click`]).
-fn pick(session: &mut Session, page: &str, visual: &str, point: Point, add: bool) {
+/// Picks `point` of Visual `visual` on Page `page` (see [`App::click`]).
+fn pick(session: &mut Session, page: &str, visual: &Visual, point: Point, add: bool) {
     let key = point.key();
+    let sig = signature(visual);
     match session.points.get_mut(page) {
-        Some(sel) if sel.visual == visual => {
+        Some(sel) if sel.visual == visual.id && sel.signature == sig => {
             let at = sel.points.iter().position(|p| p.key() == key);
             match (add, at) {
                 (true, Some(i)) => {
@@ -576,8 +669,9 @@ fn pick(session: &mut Session, page: &str, visual: &str, point: Point, add: bool
             session.points.insert(
                 page.to_string(),
                 DataSelection {
-                    visual: visual.to_string(),
+                    visual: visual.id.clone(),
                     points: vec![point],
+                    signature: sig,
                 },
             );
         }
@@ -717,15 +811,14 @@ pub(crate) fn select(app: &mut App, params: &Value) -> Result {
             session.sync(doc);
             let mut prep = Prepared::new(doc, session, page);
             let result = prep
-                .query(session, &doc.model, memory_cap, v)
+                .query(session, &doc.model, memory_cap, None, v)
                 .map_err(|e| invalid(ID, format!("the visual's query failed: {}", e.message)))?;
             point_of(&result, Tag { series, point: row }).ok_or_else(|| {
                 invalid(ID, format!("row {row} of the visual is not a data point"))
             })?
         }
     };
-    let page_id = page.id.clone();
-    pick(&mut app.session, &page_id, &visual, point, add);
+    pick(&mut app.session, &page.id, v, point, add);
     Ok(())
 }
 

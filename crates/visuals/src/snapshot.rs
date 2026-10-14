@@ -4,7 +4,9 @@
 //! - `ODASH_SNAPSHOT_UPDATE=1` rewrites the committed text instead of comparing.
 //! - `ODASH_SNAPSHOT_PNG=<dir>` also renders each checked Scene to `<dir>/<name>.png`.
 //!
-//! `cargo xtask snapshot [--update]` sets both for every crate's snapshot tests.
+//! `cargo xtask snapshot [--update]` sets both for every crate's snapshot tests: those whose
+//! name has `snapshot` in it (its filter). [`check`] fails in a test named otherwise, so none is
+//! left out.
 
 use std::path::Path;
 
@@ -13,6 +15,16 @@ use crate::draw::Scene;
 /// Compares `scene` with `<dir>/<name>.txt`. A missing file is recorded and reported as a
 /// failure, so a new snapshot is always looked at once.
 pub fn check(dir: &Path, name: &str, scene: &Scene) -> Result<(), String> {
+    // The test harness names each test's thread after the test.
+    if let Some(test) = std::thread::current().name()
+        && test != "main"
+        && !test.contains("snapshot")
+    {
+        return Err(format!(
+            "test `{test}` checks snapshot {name}: put `snapshot` in its name so \
+             `cargo xtask snapshot` runs it"
+        ));
+    }
     let text = scene.to_text();
     let file = dir.join(format!("{name}.txt"));
     #[cfg(feature = "png")]
@@ -77,6 +89,30 @@ mod tests {
     use super::*;
     use crate::draw::{Align, Cmd, Weight};
     use crate::theme::Theme;
+
+    /// `cargo xtask snapshot` filters tests by `snapshot` in their name: a check in a test
+    /// named otherwise fails, so it can't be left out of `--update`.
+    #[test]
+    fn checks_only_in_tests_named_snapshot() {
+        let dir = std::env::temp_dir().join(format!("odash-snapshot-guard-{}", std::process::id()));
+        let run = |name: &str| {
+            let dir = dir.clone();
+            std::thread::Builder::new()
+                .name(name.into())
+                .spawn(move || check(&dir, "snapshot_guard", &Scene::new(10.0, 10.0)))
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        let e = run("layout::chart_tests::line_years").unwrap_err();
+        assert!(e.contains("put `snapshot` in its name"), "{e}");
+        // Named for xtask: it gets as far as recording the new snapshot (an error unless
+        // `--update` is on).
+        if let Err(e) = run("layout::chart_tests::line_years_snapshot") {
+            assert!(e.starts_with("new snapshot snapshot_guard"), "{e}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// A sample of every command kind, for eyeballing the renderer.
     #[test]

@@ -643,3 +643,47 @@ fn fuzzed_wells_never_panic() {
     }
     rng.finish();
 }
+
+/// Values are capped like the axes, and the result's cells (rows × column tuples × values)
+/// count against the memory cap: a hostile Visual is an error, never an OOM.
+#[test]
+fn values_are_capped_and_cells_charged() {
+    let f = fixture();
+    let many = vec![m("Total"); MAX_VALUE_FIELDS + 1];
+    for (kind, axis) in [
+        (VisualType::Matrix, Well::Rows),
+        (VisualType::ClusteredColumn, Well::Axis),
+        (VisualType::Line, Well::Axis),
+        (VisualType::Table, Well::Values),
+    ] {
+        let v = visual(
+            kind,
+            &[(axis, vec![c("Region")]), (Well::Values, many.clone())],
+        );
+        let e = query_at(&f, &v, &FilterContext::default(), 0).unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Limit, "{kind:?}: {e}");
+    }
+    let matrix = |values: usize| {
+        visual(
+            VisualType::Matrix,
+            &[
+                (Well::Rows, vec![c("Big.Id")]),
+                (Well::Values, vec![c("Big.V"); values]),
+            ],
+        )
+    };
+    let all = FilterContext::default();
+    let input = |cap: usize| QueryInput {
+        db: &f.db,
+        model: &f.model,
+        filters: &all,
+        options: Options {
+            cancel: None,
+            memory_cap: cap,
+        },
+    };
+    let cap = 2 << 20;
+    assert!(run_query(&matrix(1), &input(cap), 0).is_ok());
+    let e = run_query(&matrix(MAX_VALUE_FIELDS), &input(cap), 0).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Memory, "{e}");
+}

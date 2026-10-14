@@ -65,6 +65,8 @@ pub struct App {
     /// Session-only report state (`selection.rs`): data-point Selections, the visual-query
     /// cache and the last drawn Scenes. Not part of the Document: not saved, not undone.
     pub(crate) session: crate::selection::Session,
+    /// Stops a running Page drawing (`App::cancel_flag`).
+    pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for App {
@@ -93,6 +95,7 @@ impl App {
             clean: Some(0),
             autosave: crate::recovery::Autosave::default(),
             session: crate::selection::Session::default(),
+            cancel: std::sync::Arc::default(),
         }
     }
 
@@ -108,9 +111,10 @@ impl App {
         self.clean = Some(self.version);
     }
 
-    /// The Document changed (see `version`).
+    /// The Document changed (see `version`): stale session state goes too.
     fn changed(&mut self) {
         self.version = self.version.wrapping_add(1);
+        self.session.prune(&self.doc);
     }
 
     /// Whether the Document has changed since it was opened or last saved (a recovered one is

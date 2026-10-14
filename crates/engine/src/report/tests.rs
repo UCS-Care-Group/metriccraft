@@ -7,6 +7,8 @@ use opendash_data::source::{Bytes, File, Source, csv};
 use opendash_model::ModelTable;
 use serde_json::json;
 
+use opendash_visuals::query::{MAX_AXIS_FIELDS, MAX_VALUE_FIELDS};
+
 use super::*;
 use crate::Error;
 
@@ -1242,6 +1244,31 @@ fn malformed_report_files_are_errors_naming_the_file() {
             &page_path,
             Box::new(|v| v["selections"] = json!({"a": "North"})),
         ),
+        // Hostile sizes: a slicer selection beyond `slicer.select`'s cap, a well beyond its
+        // limit (each would be re-done on every draw).
+        (
+            &page_path,
+            Box::new(|v| {
+                let items = vec![json!("North"); crate::MAX_SELECTED + 1];
+                v["selections"] = json!({ "a": items });
+            }),
+        ),
+        (
+            &visual_path,
+            Box::new(|v| {
+                let values = vec![json!({"measure": "Total"}); MAX_VALUE_FIELDS + 1];
+                v["wells"]["values"] = json!(values);
+                v["sort"] = json!(null);
+            }),
+        ),
+        (
+            &visual_path,
+            Box::new(|v| {
+                let rows = vec![json!({"table": "Sales", "column": "Region"}); MAX_AXIS_FIELDS + 1];
+                v["wells"]["rows"] = json!(rows);
+                v["sort"] = json!(null);
+            }),
+        ),
         (&visual_path, Box::new(|v| v["type"] = json!(3))),
         (&visual_path, Box::new(|v| v["x"] = json!(-1))),
         (&visual_path, Box::new(|v| v["z"] = json!("top"))),
@@ -1349,4 +1376,97 @@ fn reading_is_tolerant_of_page_lists() {
     opened.open_package_bytes(&bytes).unwrap();
     assert_eq!(opened.document().report, app.document().report);
     assert!(report_files(&opened).contains_key("report/pages/orphan/visuals/a.json"));
+}
+
+#[test]
+fn a_full_well_refuses_another_field() {
+    let mut app = app();
+    let m = new_visual(&mut app, "matrix");
+    for _ in 0..MAX_VALUE_FIELDS {
+        add_field(&mut app, &m, "values", json!({"measure": "Total"}));
+    }
+    let p = page(&app).id.clone();
+    let msg = refused(
+        &mut app,
+        "visual.addField",
+        json!({"page": p, "visual": m, "well": "values", "field": {"measure": "Count"}}),
+    );
+    assert!(msg.contains("at most"), "{msg}");
+    assert_eq!(fields(&app, &m, Well::Values).len(), MAX_VALUE_FIELDS);
+}
+
+/// A slicer's saved items are values of its Column: changing the Column, or the type, drops
+/// them in the same undoable edit (else every other Visual is filtered by Product = "North").
+#[test]
+fn a_slicer_field_or_type_change_drops_its_selection() {
+    let mut app = app();
+    let s = new_visual(&mut app, "slicer");
+    add_field(
+        &mut app,
+        &s,
+        "field",
+        json!({"table": "Sales", "column": "Region"}),
+    );
+    let p = page(&app).id.clone();
+    run(
+        &mut app,
+        "slicer.select",
+        json!({"page": p, "visual": s, "items": ["North"]}),
+    );
+    let selected = |app: &App| page(app).selections.contains_key(&s);
+    // Replacing the Field.
+    add_field(
+        &mut app,
+        &s,
+        "field",
+        json!({"table": "Sales", "column": "Product"}),
+    );
+    assert!(!selected(&app));
+    run(&mut app, "edit.undo", Value::Null);
+    assert!(selected(&app), "undo brings it back with the old Field");
+    // Moving it within its well keeps it; removing it drops it.
+    run(
+        &mut app,
+        "visual.moveField",
+        json!({"page": p, "visual": s, "well": "field", "index": 0}),
+    );
+    assert!(selected(&app));
+    run(
+        &mut app,
+        "visual.removeField",
+        json!({"page": p, "visual": s, "well": "field", "index": 0}),
+    );
+    assert!(!selected(&app));
+    run(&mut app, "edit.undo", Value::Null);
+    // Slicer -> table -> slicer doesn't bring it back.
+    for kind in ["table", "slicer"] {
+        run(
+            &mut app,
+            "visual.changeType",
+            json!({"page": p, "visual": s, "type": kind}),
+        );
+        assert!(!selected(&app), "{kind}");
+    }
+    run(&mut app, "edit.undo", Value::Null);
+    run(&mut app, "edit.undo", Value::Null);
+    assert!(selected(&app));
+    // Other edits keep it.
+    run(
+        &mut app,
+        "visual.format",
+        json!({"page": p, "visual": s, "option": "showTitle", "value": false}),
+    );
+    assert!(selected(&app));
+}
+
+#[test]
+fn fresh_reports_make_different_ids() {
+    let (a, b) = (Report::default(), Report::default());
+    assert_ne!(a.new_id(), b.new_id());
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..1_000 {
+        assert!(seen.insert(a.new_id()));
+    }
+    seed_ids(b"host entropy");
+    assert_ne!(a.new_id(), b.new_id());
 }

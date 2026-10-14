@@ -24,8 +24,8 @@
 //! back, except inside the folder of a Page that has since been deleted.
 //!
 //! **Reading** is strict about what it knows: a malformed file (not JSON, a wrong type, a Field
-//! that is neither shape, a well its type doesn't have, more Fields than a well takes) is an
-//! error naming the file. A Page folder that `report.json` doesn't list is added after the
+//! that is neither shape, a well its type doesn't have, more Fields than a well takes, a slicer
+//! selection of more than `MAX_SELECTED` items) is an error naming the file. A Page folder that `report.json` doesn't list is added after the
 //! listed ones; a listed id with no folder is skipped.
 
 use std::collections::BTreeMap;
@@ -39,6 +39,7 @@ use super::{
     MAX_COORD, MAX_PAGES, MAX_VISUALS, PAGE_HEIGHT, PAGE_WIDTH, Page, Report, is_chart,
     legend_position_id, slicer_style_id,
 };
+use crate::selection::MAX_SELECTED;
 use crate::{Error, Result};
 
 pub(crate) const REPORT_JSON: &str = "report/report.json";
@@ -372,13 +373,27 @@ fn page(path: &str, id: &str, bytes: &[u8]) -> Result<Page> {
     let mut p = Page::new(id, name);
     p.width = take_int(&mut m, path, "width", PAGE_WIDTH, 1, MAX_COORD)?;
     p.height = take_int(&mut m, path, "height", PAGE_HEIGHT, 1, MAX_COORD)?;
-    for (visual, values) in take_object(&mut m, path, "selections")? {
+    let selections = take_object(&mut m, path, "selections")?;
+    if selections.len() > MAX_VISUALS {
+        return Err(part_err(
+            path,
+            format!("more than {MAX_VISUALS} selections"),
+        ));
+    }
+    for (visual, values) in selections {
         let Value::Array(values) = values else {
             return Err(part_err(
                 path,
                 format!("selection `{visual}` must be a list of values"),
             ));
         };
+        // As `slicer.select` takes: every draw filters, keys and lists each item.
+        if values.len() > MAX_SELECTED {
+            return Err(part_err(
+                path,
+                format!("selection `{visual}` has more than {MAX_SELECTED} items"),
+            ));
+        }
         p.selections.insert(visual, values);
     }
     p.extra = m;

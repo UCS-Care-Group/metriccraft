@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::query::{MAX_AXIS_FIELDS, MAX_VALUE_FIELDS};
+
 /// The R-2 visual types. Ids are what report files and commands use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum VisualType {
@@ -71,12 +73,15 @@ impl VisualType {
         }
     }
 
-    /// Most Fields `well` takes (`usize::MAX`: no limit).
+    /// Most Fields `well` takes: one for a one-Field well, else [`MAX_AXIS_FIELDS`] for a
+    /// grouping well and [`MAX_VALUE_FIELDS`] for Values (bounds what a file or command makes a
+    /// query do).
     pub fn max_fields(self, well: Well) -> usize {
         match (self, well) {
             (VisualType::Card, Well::Values) | (VisualType::Slicer, Well::Field) => 1,
             (_, Well::Legend) => 1,
-            _ => usize::MAX,
+            (_, Well::Values) => MAX_VALUE_FIELDS,
+            _ => MAX_AXIS_FIELDS,
         }
     }
 }
@@ -236,5 +241,10 @@ mod tests {
         }
         assert_eq!(VisualType::from_id("pie"), None);
         assert_eq!(VisualType::Card.max_fields(Well::Values), 1);
+        assert_eq!(
+            VisualType::Matrix.max_fields(Well::Values),
+            MAX_VALUE_FIELDS
+        );
+        assert_eq!(VisualType::Matrix.max_fields(Well::Rows), MAX_AXIS_FIELDS);
     }
 }

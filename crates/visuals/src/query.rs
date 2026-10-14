@@ -68,6 +68,9 @@ pub const SERIES_CAP: usize = 60;
 pub const SLICER_CAP: usize = 1_000;
 /// Fields per axis (a hostile file's 10,000 Rows would mean 10,000 summarize passes).
 pub const MAX_AXIS_FIELDS: usize = 16;
+/// Fields in Values (a table's columns; a matrix's or chart's values): each is a summarize
+/// pass's measure and a cell per row and column.
+pub const MAX_VALUE_FIELDS: usize = 64;
 /// Results a [`QueryCache`] holds before it starts over.
 pub const CACHE_CAP: usize = 256;
 
@@ -236,6 +239,12 @@ fn plan(visual: &Visual, input: &QueryInput<'_>) -> Result<Plan> {
         fields.iter().map(|f| group(input, f, well)).collect()
     };
     let values = |fields: &[FieldRef]| -> Result<Vec<ValueExpr>> {
+        if fields.len() > MAX_VALUE_FIELDS {
+            return Err(DaxError::limit(
+                Span::default(),
+                format!("a Visual's values take at most {MAX_VALUE_FIELDS} Fields"),
+            ));
+        }
         fields.iter().map(|f| value(input, f)).collect()
     };
     let format = &visual.format;
@@ -257,7 +266,7 @@ fn plan(visual: &Visual, input: &QueryInput<'_>) -> Result<Plan> {
     match visual.kind {
         VisualType::Table => {
             let fields = visual.fields(Well::Values);
-            let cap = MAX_AXIS_FIELDS.saturating_mul(4);
+            let cap = MAX_VALUE_FIELDS;
             if fields.len() > cap {
                 return Err(DaxError::limit(
                     Span::default(),
@@ -577,11 +586,14 @@ impl Run<'_, '_, '_, '_> {
     /// Indexes `rows` (from [`Self::summarize`] at level `(r, c)`) by their keys.
     fn index(&mut self, r: usize, c: usize, rows: Vec<Vec<Value>>) -> Result<()> {
         let width = r.saturating_add(c);
-        let bytes = rows.len().saturating_mul(
-            width
-                .saturating_add(1)
-                .saturating_mul(2 * std::mem::size_of::<Value>()),
-        );
+        // Keys twice (the row, its Key tuple) and the values once, per row.
+        let per_row = width
+            .saturating_mul(2)
+            .saturating_add(self.plan.values.len())
+            .saturating_add(1);
+        let bytes = rows
+            .len()
+            .saturating_mul(per_row.saturating_mul(std::mem::size_of::<Value>()));
         self.ev.charge(bytes, Span::default())?;
         let mut map = LevelMap::with_capacity(rows.len());
         for mut row in rows {
@@ -863,6 +875,16 @@ fn execute(
             cells,
         }
     };
+    // The cells about to be built: rows (and the total) × column tuples × values.
+    let cells = window
+        .len()
+        .saturating_add(1)
+        .saturating_mul(col_desc.len())
+        .saturating_mul(v);
+    run.ev.charge(
+        cells.saturating_mul(std::mem::size_of::<Value>()),
+        Span::default(),
+    )?;
     let mut rows = Vec::with_capacity(window.len());
     for (i, &(r, ti)) in window.iter().enumerate() {
         if i % 64 == 0 {

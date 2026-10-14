@@ -20,7 +20,8 @@
 //!   first Value, adding a second Value removes the Legend. `visual.changeType` keeps the Fields
 //!   whose wells the new type has (up to each well's limit) and drops the rest.
 //! - **Slicer selections** are saved with their Page, by slicer Visual id; `slicer.select`
-//!   changes them (`selection.rs`). Deleting the slicer drops its selection.
+//!   changes them (`selection.rs`). Deleting the slicer, changing its Field or its type drops
+//!   its selection (in the same undoable edit).
 //! - **Unknown content** of the report files (members we don't read) rides with its Page or
 //!   Visual in the Document, so undoing a delete brings it back, and is written again on save.
 //!
@@ -172,14 +173,36 @@ impl Report {
     }
 
     /// A fresh id (see the module docs).
+    ///
+    /// Hashes, with std's `RandomState` keys: the host's entropy ([`seed_ids`]), a per-process
+    /// count, the report's content (Page and Visual ids and names) and a retry count.
+    /// `RandomState` is seeded from the OS on native targets, which makes ids random there. On
+    /// wasm32-unknown-unknown std has no entropy source (its keys are fixed constants, counted
+    /// up per call), so every web session would make the same ids: the web host seeds them
+    /// (`crypto.getRandomValues`) through [`seed_ids`], and until it does, ids still differ
+    /// between Projects whose content differs.
+    // ponytail: no `getrandom` (it needs a JS bridge the web build doesn't have yet); the web
+    // app calls `seed_ids` once it has one.
     fn new_id(&self) -> String {
-        use std::hash::{BuildHasher, Hasher};
-        // Seeded per process by std (no clock: there is none on the web), then counted.
+        use std::hash::{BuildHasher, Hash, Hasher};
+        use std::sync::atomic::Ordering::Relaxed;
         let state = std::collections::hash_map::RandomState::new();
+        let seed = ID_SEED.load(Relaxed);
+        let count = ID_COUNT.fetch_add(1, Relaxed);
+        let mut content = state.build_hasher();
+        for p in &self.pages {
+            (&p.id, &p.name).hash(&mut content);
+            for v in &p.visuals {
+                v.id.hash(&mut content);
+            }
+        }
+        let content = content.finish();
         let mut n = 0u64;
         loop {
             let mut h = state.build_hasher();
-            h.write_u64(n);
+            for x in [seed, count, content, n] {
+                h.write_u64(x);
+            }
             let id = format!("{:08x}", h.finish() & 0xFFFF_FFFF);
             if !self.taken(&id) {
                 return id;
@@ -187,6 +210,22 @@ impl Report {
             n = n.wrapping_add(1);
         }
     }
+}
+
+/// Entropy from the host, mixed into every new Page and Visual id (see `Report::new_id`).
+static ID_SEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Ids made by this process.
+static ID_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Mixes `entropy` (random bytes from the host) into the ids of new Pages and Visuals. Native
+/// builds don't need it (std seeds from the OS); the web build has no entropy of its own and
+/// calls this at start with bytes from `crypto.getRandomValues`, so two web sessions editing
+/// the same Project don't make the same ids.
+pub fn seed_ids(entropy: &[u8]) {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write(entropy);
+    ID_SEED.fetch_xor(h.finish(), std::sync::atomic::Ordering::Relaxed);
 }
 
 /// A Field of a Visual that names no Column or Measure of the Model.
@@ -563,9 +602,34 @@ pub(crate) fn resize_visual(doc: &mut Document, params: &Value) -> Result {
 pub(crate) fn change_type(doc: &mut Document, params: &Value) -> Result {
     const ID: &str = "visual.changeType";
     let kind = visual_type(params, ID)?;
-    let v = visual_mut(page_mut(doc, params, ID)?, params, ID)?;
-    v.kind = kind;
-    tidy(v);
+    edit_visual(doc, params, ID, |v| {
+        v.kind = kind;
+        tidy(v);
+        Ok(())
+    })
+}
+
+/// Runs `edit` on the Visual `params` names. A slicer whose Field changes, or that stops being a
+/// slicer, loses its saved selection in the same edit: its items were values of the old Column.
+fn edit_visual(
+    doc: &mut Document,
+    params: &Value,
+    id: &str,
+    edit: impl FnOnce(&mut Visual) -> Result,
+) -> Result {
+    let slicer_field = |v: &Visual| {
+        (v.kind == VisualType::Slicer)
+            .then(|| v.fields(Well::Field).first().cloned())
+            .flatten()
+    };
+    let page = page_mut(doc, params, id)?;
+    let v = visual_mut(page, params, id)?;
+    let before = slicer_field(v);
+    edit(v)?;
+    if before.is_some() && slicer_field(v) != before {
+        let key = v.id.clone();
+        page.selections.remove(&key);
+    }
     Ok(())
 }
 
@@ -621,6 +685,12 @@ fn add(v: &mut Visual, well: Well, f: FieldRef, at: Option<usize>, id: &str) -> 
             format!("that field is already in the {} well", well.id()),
         ));
     }
+    if max > 1 && fields.len() >= max {
+        return Err(invalid(
+            id,
+            format!("the {} well takes at most {max} fields", well.id()),
+        ));
+    }
     if max <= 1 {
         // Dropping on a one-field well replaces its Field.
         fields.clear();
@@ -660,8 +730,7 @@ pub(crate) fn add_field(doc: &mut Document, params: &Value) -> Result {
         None | Some(Value::Null) => None,
         Some(_) => Some(index(params, "index", ID, None, usize::MAX)?),
     };
-    let v = visual_mut(page_mut(doc, params, ID)?, params, ID)?;
-    add(v, w, f, at, ID)
+    edit_visual(doc, params, ID, |v| add(v, w, f, at, ID))
 }
 
 fn describe(f: &FieldRef) -> String {
@@ -679,24 +748,25 @@ pub(crate) fn remove_field(doc: &mut Document, params: &Value) -> Result {
         None | Some(Value::Null) => None,
         Some(_) => Some(field(params, "field", ID)?),
     };
-    let v = visual_mut(page_mut(doc, params, ID)?, params, ID)?;
-    let fields = v
-        .wells
-        .get_mut(&w)
-        .ok_or_else(|| invalid(ID, format!("the {} well of this visual is empty", w.id())))?;
-    let at = match by_field {
-        Some(f) => fields
-            .iter()
-            .position(|x| *x == f)
-            .ok_or_else(|| invalid(ID, format!("{} is not in this well", describe(&f))))?,
-        None => index(params, "index", ID, None, fields.len().saturating_sub(1))?,
-    };
-    if at >= fields.len() {
-        return Err(invalid(ID, "`index` is past the well's fields".into()));
-    }
-    fields.remove(at);
-    tidy(v);
-    Ok(())
+    edit_visual(doc, params, ID, |v| {
+        let fields = v
+            .wells
+            .get_mut(&w)
+            .ok_or_else(|| invalid(ID, format!("the {} well of this visual is empty", w.id())))?;
+        let at = match by_field {
+            Some(f) => fields
+                .iter()
+                .position(|x| *x == f)
+                .ok_or_else(|| invalid(ID, format!("{} is not in this well", describe(&f))))?,
+            None => index(params, "index", ID, None, fields.len().saturating_sub(1))?,
+        };
+        if at >= fields.len() {
+            return Err(invalid(ID, "`index` is past the well's fields".into()));
+        }
+        fields.remove(at);
+        tidy(v);
+        Ok(())
+    })
 }
 
 /// `visual.moveField`: within a well or to another, by `visual.addField`'s rules.
@@ -707,29 +777,30 @@ pub(crate) fn move_field(doc: &mut Document, params: &Value) -> Result {
         None | Some(Value::Null) => from,
         Some(_) => well(params, "toWell", ID)?,
     };
-    let v = visual_mut(page_mut(doc, params, ID)?, params, ID)?;
-    let fields = v.wells.get_mut(&from).ok_or_else(|| {
-        invalid(
-            ID,
-            format!("the {} well of this visual is empty", from.id()),
-        )
-    })?;
-    let at = index(params, "index", ID, None, fields.len().saturating_sub(1))?;
-    if at >= fields.len() {
-        return Err(invalid(ID, "`index` is past the well's fields".into()));
-    }
-    let f = fields.remove(at);
-    // A sort by the moved Field survives the move.
-    let sort = v.sort.take();
-    if fields.is_empty() {
-        v.wells.remove(&from);
-    }
-    let len = v.wells.get(&to).map_or(0, Vec::len);
-    let to_index = index(params, "toIndex", ID, Some(len), len)?;
-    add(v, to, f, Some(to_index), ID)?;
-    v.sort = sort;
-    tidy(v);
-    Ok(())
+    edit_visual(doc, params, ID, |v| {
+        let fields = v.wells.get_mut(&from).ok_or_else(|| {
+            invalid(
+                ID,
+                format!("the {} well of this visual is empty", from.id()),
+            )
+        })?;
+        let at = index(params, "index", ID, None, fields.len().saturating_sub(1))?;
+        if at >= fields.len() {
+            return Err(invalid(ID, "`index` is past the well's fields".into()));
+        }
+        let f = fields.remove(at);
+        // A sort by the moved Field survives the move.
+        let sort = v.sort.take();
+        if fields.is_empty() {
+            v.wells.remove(&from);
+        }
+        let len = v.wells.get(&to).map_or(0, Vec::len);
+        let to_index = index(params, "toIndex", ID, Some(len), len)?;
+        add(v, to, f, Some(to_index), ID)?;
+        v.sort = sort;
+        tidy(v);
+        Ok(())
+    })
 }
 
 /// `visual.sort`.
