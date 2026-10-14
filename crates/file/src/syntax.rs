@@ -25,6 +25,10 @@
 //!   indent plus 2; the block ends at the first non-blank line indented less. Content is kept
 //!   byte-exact (trailing spaces included). Blank lines inside are kept, trailing blank lines are
 //!   not (they separate the block from what follows).
+//! - Expression blocks (M3.6): a node whose header ends with `=` (`measure 'Total' =`) is
+//!   followed by verbatim DAX indented one level deeper than its items, kept as its first item,
+//!   a block with the key [`EXPRESSION`] (empty when there are no such lines), and printed
+//!   without a `key:` line. The same block rules apply.
 //! - `//` comment lines are rejected (outside blocks): the printer could not reproduce them, and
 //!   silently dropping them would lose what the author wrote.
 //! - CRLF line endings are accepted and normalised to LF; a lone CR is an error. A leading UTF-8
@@ -42,6 +46,9 @@ pub const MAX_INPUT: usize = 16 << 20;
 pub const MAX_LINE: usize = 4 << 20;
 /// Deepest accepted nesting (top level is depth 0).
 pub const MAX_DEPTH: usize = 32;
+/// The key of an expression block: the verbatim text after a node whose header ends with `=`.
+/// Not a word, so no `key:` block can have it.
+pub const EXPRESSION: &str = "=";
 
 /// One line-level element of a document, in source order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -335,8 +342,14 @@ impl Parser<'_> {
             if depth >= MAX_DEPTH {
                 return Err(self.err(indent, format!("nested more than {MAX_DEPTH} levels deep")));
             }
-            self.at += 1;
-            let items = self.items(depth + 1)?;
+            let mut items = Vec::new();
+            if header.ends_with('=') {
+                // `measure 'Total' =`: the DAX follows, one level deeper than the properties.
+                items.push(Item::Block(EXPRESSION.into(), self.block(indent + 4)));
+            } else {
+                self.at += 1;
+            }
+            items.extend(self.items(depth + 1)?);
             return Ok(Item::Node(Node {
                 kind: word,
                 header: header.to_string(),
@@ -441,7 +454,9 @@ fn print_items(out: &mut String, items: &[Item], depth: usize) {
             Item::Prop(k, v) => out.push_str(&format!("{pad}{k}: {}\n", print_value(v))),
             Item::Flag(f) => out.push_str(&format!("{pad}{f}\n")),
             Item::Block(k, text) => {
-                out.push_str(&format!("{pad}{k}:\n"));
+                if k != EXPRESSION {
+                    out.push_str(&format!("{pad}{k}:\n"));
+                }
                 let lines: Vec<&str> = text.split('\n').collect();
                 let keep = lines
                     .iter()

@@ -18,6 +18,7 @@
 
 pub mod eval;
 pub mod functions;
+pub mod model_eval;
 pub mod storage;
 #[cfg(test)]
 mod tests;

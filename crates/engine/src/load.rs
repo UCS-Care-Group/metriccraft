@@ -21,6 +21,8 @@
 //! - Every loaded Table's model is updated after the load (`opendash_model::ModelTable::load`):
 //!   column properties carried over by name, type overrides re-applied, sort by checked. A
 //!   failure there fails the whole load.
+//! - Then every Calculated column of the Model is computed again (`expression.rs`), in
+//!   dependency order: the new data changes their values.
 //! - Then the Relationships (`opendash_model`, `relationship.rs`): those whose Table or Column is
 //!   gone are dropped; a one side that is no longer unique fails the whole load, naming the
 //!   Table and Column; with the Project's switch on, auto-detect adds Relationships for Tables
@@ -157,6 +159,7 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         doc.tables.push(table);
         doc.model.put(model);
         doc.provenance.insert(name.clone(), provenance);
+        crate::expression::recompute(doc, limit)?;
         let one = std::slice::from_ref(&name);
         relate(doc, one, one, &mut report)?;
         Ok(report)
@@ -268,6 +271,7 @@ fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Resu
         .filter(|n| !before.contains(n))
         .cloned()
         .collect();
+    crate::expression::recompute(doc, limit.saturating_sub(used))?;
     relate(doc, &loaded, &new, &mut report)?;
     let tables = &doc.tables;
     doc.provenance
@@ -317,10 +321,13 @@ pub(crate) fn preview(
 /// loaded — not Stale, and no Model data-type override (#33: a Table with one holds converted
 /// values, and Power Query, before the Model, never sees them). Others merge their own Preview.
 pub(crate) fn fresh(doc: &Document) -> Vec<&Table> {
+    // Calculated columns aren't Power Query's either.
     let overridden = |name: &str| {
-        doc.model
-            .table(name)
-            .is_some_and(|m| m.columns.iter().any(|c| c.overridden()))
+        doc.model.table(name).is_some_and(|m| {
+            m.columns
+                .iter()
+                .any(|c| c.overridden() || c.is_calculated())
+        })
     };
     // A folded Table (text differing only by case made one, M3.10) isn't what Power Query sees.
     doc.tables

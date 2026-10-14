@@ -5,7 +5,7 @@
 //! model/model.odm           model Model: culture, autodetectRelationships, ref query/table order
 //! model/relationships.odm   relationship Sales[Region] -> Regions[Region] (+ inactive); omitted
 //!                           when there are none
-//! model/tables/<t>.odm      table, its columns and their properties
+//! model/tables/<t>.odm      table, its columns and their properties, its measures
 //! queries/<q>.odq           query: load, culture (when not the Project's), m: block
 //! report/…                  reserved for the report (M4); not written yet
 //! .gitignore                .cache/, .local/, .staging/ — written on create, then the user's
@@ -17,6 +17,14 @@
 //!
 //! **Column types.** `dataType` is the Model's; `queryType` (the Query's at the last load) is
 //! written only when it differs, i.e. when the Model overrides it.
+//!
+//! **Measures and Calculated columns** (ADR 0003, M3.6). In a `table` block, a Calculated
+//! column is `column 'Margin' =` and a Measure `measure 'Total Sales' =`, each followed by its
+//! DAX verbatim one level deeper than its properties (an expression block, [`syntax`]); a
+//! Calculated column then has the usual Column properties (`queryType` is the type its values
+//! were last inferred as), a Measure optional `formatString`, `description` and `hidden`.
+//! Measures follow the Columns, sorted by name. DAX that doesn't parse is saved as written. On
+//! read, `name = text` on the header line is accepted too (the text then starts the DAX).
 //!
 //! **Source paths.** A file inside the Project's folder (`root`) is written relative to it, with
 //! `/`; any other path absolute. On read, relative paths are resolved against `root`.
@@ -43,7 +51,9 @@ use opendash_data::m::{self, MQuery};
 use opendash_data::source::{File, Source};
 use opendash_data::step::ColumnType;
 use opendash_data::{Query, Table, TableBuilder};
-use opendash_model::{Column, Model, ModelTable, Relationship, SummarizeBy};
+use opendash_model::{
+    Column, Measure, Model, ModelTable, Relationship, SummarizeBy, measure_order, same_name,
+};
 use serde_json::{Map, Value as Json};
 
 use crate::escape::file_stems;
@@ -135,10 +145,17 @@ static COLUMN: Schema = Schema {
         "description",
     ],
     flags: &["hidden"],
+    blocks: &[syntax::EXPRESSION],
+    ..LEAF
+};
+static MEASURE: Schema = Schema {
+    props: &["formatString", "description"],
+    flags: &["hidden"],
+    blocks: &[syntax::EXPRESSION],
     ..LEAF
 };
 static TABLE: Schema = Schema {
-    nodes: &[("column", &COLUMN)],
+    nodes: &[("column", &COLUMN), ("measure", &MEASURE)],
     props: &["description"],
     flags: &["hidden"],
     ..LEAF
@@ -207,8 +224,12 @@ fn merge(new: &mut Vec<Item>, old: &[Item], schema: &Schema) {
 
 /// A header in the form we print it: a lone name, a relationship, or `word name`.
 fn canonical(header: &str) -> Option<String> {
-    if let Some((name, "")) = read_name(header) {
-        return Some(quote_name(&name));
+    match read_name(header) {
+        Some((name, "")) => return Some(quote_name(&name)),
+        Some((name, rest)) if rest.trim_start().starts_with('=') => {
+            return Some(format!("{} =", quote_name(&name)));
+        }
+        _ => {}
     }
     if let Some((ft, fc, tt, tc)) = parse_relationship(header) {
         return Some(relationship_header(&ft, &fc, &tt, &tc));
@@ -331,8 +352,50 @@ fn query_node(q: &Query, project: &Project, root: Option<&Path>) -> Node {
     node
 }
 
+/// A node `kind 'name' =` with `expression` as its expression block.
+fn expression_node(kind: &str, name: &str, expression: &str) -> Node {
+    Node {
+        kind: kind.into(),
+        header: format!("{} =", quote_name(name)),
+        items: vec![Item::Block(syntax::EXPRESSION.into(), expression.into())],
+    }
+}
+
+/// A node's header as a name and, for `name =` (an expression node), the text after the `=`.
+pub(crate) fn expression_header(header: &str) -> Option<(String, Option<String>)> {
+    let (name, rest) = read_name(header)?;
+    if rest.is_empty() {
+        return Some((name, None));
+    }
+    let after = rest.trim_start().strip_prefix('=')?;
+    Some((name, Some(after.trim().to_string())))
+}
+
+fn measure_node(m: &Measure) -> Node {
+    let mut node = expression_node("measure", &m.name, &m.expression);
+    if !m.format_string.is_empty() {
+        node.items.push(Item::Prop(
+            "formatString".into(),
+            Value::Text(m.format_string.clone()),
+        ));
+    }
+    if !m.description.is_empty() {
+        node.items.push(Item::Prop(
+            "description".into(),
+            Value::Text(m.description.clone()),
+        ));
+    }
+    if m.hidden {
+        node.items.push(Item::Flag("hidden".into()));
+    }
+    node
+}
+
 fn column_node(c: &Column) -> Node {
-    let mut node = Node::named("column", &c.name);
+    let mut node = match &c.expression {
+        Some(e) => expression_node("column", &c.name, e),
+        None => Node::named("column", &c.name),
+    };
     let mut prop = |k: &str, v: Value| node.items.push(Item::Prop(k.into(), v));
     prop("dataType", bare(c.data_type.name()));
     if c.overridden() {
@@ -367,6 +430,10 @@ fn table_node(t: &ModelTable) -> Node {
     }
     node.items
         .extend(t.columns.iter().map(|c| Item::Node(column_node(c))));
+    let mut measures: Vec<&Measure> = t.measures.iter().collect();
+    measures.sort_by(|a, b| measure_order(a, b));
+    node.items
+        .extend(measures.into_iter().map(|m| Item::Node(measure_node(m))));
     node
 }
 
@@ -414,6 +481,9 @@ fn check_names(project: &Project) -> Result {
         bad("table", &t.name)?;
         for c in &t.columns {
             bad("column", &c.name)?;
+        }
+        for m in &t.measures {
+            bad("measure", &m.name)?;
         }
     }
     Ok(())
@@ -620,11 +690,35 @@ fn column_type(path: &str, ctx: &str, key: &str, v: &str) -> Result<ColumnType> 
     })
 }
 
+/// An expression node's name and DAX (`None`: not an expression node).
+fn expression_parts(path: &str, node: &Node) -> Result<(String, Option<String>)> {
+    let (name, inline) = expression_header(&node.header).ok_or_else(|| {
+        part_err(
+            path,
+            format!(
+                "`{} {}`: expected one name, quoted '…' if it has spaces or symbols, and for an \
+                 expression ` =`",
+                node.kind, node.header
+            ),
+        )
+    })?;
+    let Some(inline) = inline else {
+        return Ok((name, None));
+    };
+    let block = node.block(syntax::EXPRESSION).unwrap_or("");
+    let text = match (inline.is_empty(), block.is_empty()) {
+        (true, _) => block.to_string(),
+        (false, true) => inline,
+        (false, false) => format!("{inline}\n{block}"),
+    };
+    Ok((name, Some(text)))
+}
+
 fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
     let name = node_name(path, node)?;
     let mut columns: Vec<Column> = Vec::new();
     for c in node.children().filter(|c| c.kind == "column") {
-        let cname = node_name(path, c)?;
+        let (cname, expression) = expression_parts(path, c)?;
         let ctx = format!("column `{cname}`");
         if columns.iter().any(|x| x.name == cname) {
             return Err(part_err(path, format!("{ctx} appears twice")));
@@ -664,8 +758,41 @@ fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
             format_string: text("formatString"),
             summarize_by,
             sort_by: c.prop("sortByColumn").map(|v| v.as_str().to_string()),
+            expression,
         });
     }
+    let mut measures: Vec<Measure> = Vec::new();
+    for m in node.children().filter(|c| c.kind == "measure") {
+        let (mname, expression) = expression_parts(path, m)?;
+        let Some(expression) = expression else {
+            return Err(part_err(
+                path,
+                format!("measure `{mname}`: expected `measure '{mname}' =` and its DAX"),
+            ));
+        };
+        if let Some(c) = columns.iter().find(|c| same_name(&c.name, &mname)) {
+            return Err(part_err(
+                path,
+                format!("measure `{mname}` has the name of the column `{}`", c.name),
+            ));
+        }
+        if measures.iter().any(|x| same_name(&x.name, &mname)) {
+            return Err(part_err(path, format!("measure `{mname}` appears twice")));
+        }
+        let text = |k: &str| {
+            m.prop(k)
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default()
+        };
+        measures.push(Measure {
+            name: mname,
+            expression,
+            format_string: text("formatString"),
+            description: text("description"),
+            hidden: m.has_flag("hidden"),
+        });
+    }
+    measures.sort_by(measure_order);
     for c in &columns {
         if let Some(by) = &c.sort_by
             && !columns.iter().any(|x| &x.name == by)
@@ -687,6 +814,7 @@ fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
             .map(|v| v.as_str().to_string())
             .unwrap_or_default(),
         columns,
+        measures,
     })
 }
 
@@ -824,6 +952,21 @@ fn decode_tree(
 /// most one per pair of tables is active.
 fn check(project: &Project) -> Result {
     let model = &project.model;
+    let mut measures: Vec<(&str, &str)> = Vec::new();
+    for t in &model.tables {
+        for m in &t.measures {
+            if let Some((other, _)) = measures.iter().find(|(_, n)| same_name(n, &m.name)) {
+                return Err(part_err(
+                    TABLES,
+                    format!(
+                        "measure `{}` is in both `{other}` and `{}`: measure names are unique",
+                        m.name, t.name
+                    ),
+                ));
+            }
+            measures.push((&t.name, &m.name));
+        }
+    }
     for t in &model.tables {
         if !project.queries.iter().any(|q| q.name == t.name) {
             return Err(part_err(
@@ -862,12 +1005,14 @@ fn check(project: &Project) -> Result {
     Ok(())
 }
 
-/// An empty loaded table with `table`'s columns and Model types: what a Table is on open until
-/// it is refreshed, when it has no usable Data cache.
+/// An empty loaded table with `table`'s columns (not its Calculated columns, which the app
+/// computes) and Model types: what a Table is on open until it is refreshed, when it has no
+/// usable Data cache.
 pub fn empty_table(table: &ModelTable) -> opendash_data::Result<Table> {
     let fields: Vec<Field> = table
         .columns
         .iter()
+        .filter(|c| !c.is_calculated())
         .map(|c| Field::new(&c.name, c.data_type.data_type(), true))
         .collect();
     let schema = Arc::new(ArrowSchema::new(fields));

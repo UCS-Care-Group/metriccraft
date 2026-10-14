@@ -228,12 +228,13 @@ pub struct Meta {
     pub provenance: Provenance,
 }
 
-/// The `(column, dataType, queryType)` overrides of `model`.
+/// The `(column, dataType, queryType)` overrides of `model`'s loaded columns (Calculated
+/// columns are never cached).
 pub fn overrides(model: &ModelTable) -> Vec<(String, ColumnType, ColumnType)> {
     model
         .columns
         .iter()
-        .filter(|c| c.overridden())
+        .filter(|c| c.overridden() && !c.is_calculated())
         .map(|c| (c.name.clone(), c.data_type, c.query_type))
         .collect()
 }
@@ -267,15 +268,21 @@ impl Meta {
         })
     }
 
-    /// Whether this metadata fits `model` (same table, columns, types and overrides).
+    /// Whether this metadata fits `model` (same table, columns, types and overrides; Calculated
+    /// columns aren't cached).
     pub fn fits(&self, model: &ModelTable) -> bool {
+        let loaded: Vec<_> = model
+            .columns
+            .iter()
+            .filter(|c| !c.is_calculated())
+            .collect();
         self.table == model.name
             && self.overrides == overrides(model)
-            && self.columns.len() == model.columns.len()
+            && self.columns.len() == loaded.len()
             && self
                 .columns
                 .iter()
-                .zip(&model.columns)
+                .zip(loaded)
                 .all(|((n, t), c)| *n == c.name && *t == c.data_type)
     }
 

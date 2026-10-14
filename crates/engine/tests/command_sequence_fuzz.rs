@@ -3,7 +3,7 @@
 //!
 //! - (a) nothing panics;
 //! - (b) a command that fails leaves the Document unchanged;
-//! - (d) the Document is consistent (see [`check`]);
+//! - (d) the Document is consistent (see [`check`]), Measures and Calculated columns included;
 //!
 //! and after each sequence that
 //!
@@ -132,6 +132,25 @@ mod fuzz {
             self.real_or_not(rng, &refs)
         }
 
+        /// A Measure or Calculated column of Table `table`, or a name like one.
+        fn expression_object(&self, rng: &mut Rng, table: &str) -> String {
+            let mut names: Vec<String> = Vec::new();
+            if let Some(t) = self.app.document().model.table(table) {
+                names.extend(t.measures.iter().map(|m| m.name.clone()));
+                names.extend(
+                    t.columns
+                        .iter()
+                        .filter(|c| c.is_calculated())
+                        .map(|c| c.name.clone()),
+                );
+            }
+            if names.is_empty() || rng.chance(15) {
+                return EXPRESSION_NAMES[rng.below(EXPRESSION_NAMES.len())].into();
+            }
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            self.real_or_not(rng, &refs)
+        }
+
         fn real_or_not(&self, rng: &mut Rng, names: &[&str]) -> String {
             match (rng.below(20), rng.pick(names)) {
                 (0, _) | (_, None) => "Nope".into(),
@@ -166,6 +185,26 @@ mod fuzz {
         "money",
     ];
 
+    /// Names for new Measures and Calculated columns (some collide with Columns).
+    const EXPRESSION_NAMES: [&str; 7] = ["M1", "M2", "C1", "C2", "Total", "Qty", "m1"];
+
+    /// DAX for them: arithmetic over Columns, Measures and each other (so cycles and chains
+    /// come up), a Table function, and text that doesn't parse.
+    const EXPRESSIONS: [&str; 12] = [
+        "[Qty] * 2",
+        "COUNTROWS ( Sales ) // rows",
+        "[M1] + 1",
+        "[M2] * [M1]",
+        "Sales[Qty] + [C1]",
+        "[C2] - 1",
+        "[C1] & \"!\"",
+        "'Regions'[Rank] + 0",
+        "[Region] & [Manager]",
+        "SUM((",
+        "1 / 0",
+        "[Total]",
+    ];
+
     /// One random command and its params.
     fn command(rng: &mut Rng, app: &App) -> (&'static str, Value) {
         let n = Names { app };
@@ -181,7 +220,8 @@ mod fuzz {
             json!({"fromTable": a, "fromColumn": n.column(rng, &a),
                    "toTable": b, "toColumn": n.column(rng, &b)})
         };
-        match rng.below(31) {
+        let dax = |rng: &mut Rng| EXPRESSIONS[rng.below(EXPRESSIONS.len())];
+        match rng.below(37) {
             0 => ("transform.useFirstRowAsHeaders", json!({"query": q})),
             1 => (
                 "transform.changeType",
@@ -317,6 +357,32 @@ mod fuzz {
             27 => ("query.duplicate", json!({"query": q})),
             28 => ("home.closeApply", Value::Null),
             29 => ("home.refresh", Value::Null),
+            30 => (
+                "modeling.newMeasure",
+                json!({"table": t, "name": EXPRESSION_NAMES[rng.below(EXPRESSION_NAMES.len())],
+                    "expression": dax(rng)}),
+            ),
+            31 | 32 => (
+                "modeling.newColumn",
+                json!({"table": t, "name": EXPRESSION_NAMES[rng.below(EXPRESSION_NAMES.len())],
+                    "expression": dax(rng)}),
+            ),
+            33 => (
+                "modeling.editExpression",
+                json!({"table": t, "name": n.expression_object(rng, &t), "expression": dax(rng)}),
+            ),
+            34 => (
+                "modeling.delete",
+                json!({"table": t, "name": n.expression_object(rng, &t)}),
+            ),
+            35 => {
+                let m = n.expression_object(rng, &t);
+                let name = n.new_name(rng, &m);
+                (
+                    "modeling.renameMeasure",
+                    json!({"table": t, "measure": m, "name": name}),
+                )
+            }
             _ => {
                 if rng.chance(50) {
                     ("edit.undo", Value::Null)
@@ -375,12 +441,34 @@ mod fuzz {
             if data != model {
                 return Err(format!("`{}`: data {data:?} vs model {model:?}", t.name()));
             }
+            for (i, c) in m.columns.iter().enumerate() {
+                if c.is_calculated() && m.columns.iter().skip(i).any(|x| !x.is_calculated()) {
+                    return Err(format!(
+                        "`{}`[{}]: a Calculated column before a loaded one",
+                        m.name, c.name
+                    ));
+                }
+                if m.measures.iter().any(|x| same_name(&x.name, &c.name)) {
+                    return Err(format!("`{}`[{}] is also a Measure", m.name, c.name));
+                }
+            }
             for c in &m.columns {
                 if let Some(by) = &c.sort_by
                     && (by == &c.name || m.column(by).is_none())
                 {
                     return Err(format!("`{}`[{}] sorts by `{by}`", m.name, c.name));
                 }
+            }
+        }
+        let measures: Vec<&str> = doc
+            .model
+            .tables
+            .iter()
+            .flat_map(|t| t.measures.iter().map(|m| m.name.as_str()))
+            .collect();
+        for (i, a) in measures.iter().enumerate() {
+            if measures.iter().skip(i + 1).any(|b| same_name(a, b)) {
+                return Err(format!("two Measures named `{a}`"));
             }
         }
         for r in &doc.model.relationships {
@@ -414,12 +502,20 @@ mod fuzz {
                 .iter()
                 .map(|f| f.name().clone())
                 .collect();
+            // Its Calculated columns aren't the Query's.
+            let calculated = |c: &str| {
+                doc.model
+                    .table(t.name())
+                    .and_then(|m| m.column(c))
+                    .is_some_and(|c| c.is_calculated())
+            };
             let got: Vec<String> = t
                 .batch()
                 .schema()
                 .fields()
                 .iter()
                 .map(|f| f.name().clone())
+                .filter(|n| !calculated(n))
                 .collect();
             if want != got {
                 return Err(format!(
@@ -620,6 +716,10 @@ mod fuzz {
             "query.rename",
             "home.closeApply",
             "home.mergeQueries",
+            "modeling.newMeasure",
+            "modeling.newColumn",
+            "modeling.editExpression",
+            "modeling.delete",
         ] {
             assert!(
                 stats.get(id).is_some_and(|(_, ok)| *ok > 0),

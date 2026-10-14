@@ -100,11 +100,14 @@ impl Model {
         self.tables.retain(|t| t.name != name);
     }
 
-    /// Renames Table `old` to `new` and every Relationship end on it. The caller checks `new`
-    /// is free (Table and Query names are unique ignoring case). No model Table `old` (its
-    /// Query isn't loaded) renames nothing.
-    // TODO(M3.6): rewrite DAX references (measures, calculated columns) to the Table too.
+    /// Renames Table `old` to `new`, every Relationship end on it and every DAX reference to
+    /// it (Measures, Calculated columns; `expression.rs`). The caller checks `new` is free
+    /// (Table and Query names are unique ignoring case). No model Table `old` (its Query isn't
+    /// loaded) renames nothing.
     pub fn rename_table(&mut self, old: &str, new: &str) {
+        if self.table(old).is_some() {
+            self.rewrite_all(|_| crate::expression::Renamed::Table { old, new });
+        }
         if let Some(t) = self.table_mut(old) {
             t.name = new.into();
         }
@@ -117,11 +120,21 @@ impl Model {
         }
     }
 
-    /// Renames Column `old` of Table `table` to `new`, with every sort by and Relationship end
-    /// on it. Fails, changing nothing, if there is no such column or `new` is taken: column
-    /// names are unique in a Table ignoring case, as in Power BI.
-    // TODO(M3.6): rewrite DAX references (measures, calculated columns) to the Column too.
+    /// Renames Column `old` of Table `table` to `new`, with every sort by, Relationship end and
+    /// DAX reference on it (`expression.rs`). Fails, changing nothing, if there is no such
+    /// column or `new` is taken: column names are unique in a Table ignoring case, as in Power
+    /// BI, and never a Measure name of the Table.
     pub fn rename_column(&mut self, table: &str, old: &str, new: &str) -> Result {
+        if let Some(t) = self.table(table)
+            && let Some(m) = t.measures.iter().find(|m| same_name(&m.name, new))
+        {
+            return Err(t.error(old, format!("the table already has a Measure `{}`", m.name)));
+        }
+        let measure_named_old = self.measure(old).is_some();
+        let elsewhere = self
+            .tables
+            .iter()
+            .any(|t| t.name != table && t.columns.iter().any(|c| same_name(&c.name, old)));
         let t = self.table_mut(table).ok_or_else(|| Error {
             table: table.into(),
             column: String::new(),
@@ -156,6 +169,12 @@ impl Model {
                 }
             }
         }
+        self.rewrite_all(|home| crate::expression::Renamed::Column {
+            table,
+            old,
+            new,
+            unqualified: !measure_named_old && (home == table || !elsewhere),
+        });
         Ok(())
     }
 
@@ -178,15 +197,16 @@ pub fn same_name(a: &str, b: &str) -> bool {
     a == b || a.to_lowercase() == b.to_lowercase()
 }
 
-impl Model {}
-
-/// A Table's model properties. `columns` follow the loaded Table's column order.
+/// A Table's model properties. `columns` follow the loaded Table's column order: the Query's
+/// columns, then the Calculated columns.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ModelTable {
     pub name: String,
     pub hidden: bool,
     pub description: String,
     pub columns: Vec<Column>,
+    /// The Measures whose home this Table is, sorted by name (`expression::measure_order`).
+    pub measures: Vec<crate::Measure>,
 }
 
 /// A Column's data type and display properties.
@@ -204,6 +224,9 @@ pub struct Column {
     pub summarize_by: SummarizeBy,
     /// Another column of the same Table whose order this one sorts by.
     pub sort_by: Option<String>,
+    /// A Calculated column's DAX, kept as written (`None`: the column comes from the Query).
+    /// Its `query_type` is the type its values were last inferred as.
+    pub expression: Option<String>,
 }
 
 impl Column {
@@ -218,7 +241,13 @@ impl Column {
             format_string: String::new(),
             summarize_by: SummarizeBy::default_for(ty),
             sort_by: None,
+            expression: None,
         }
+    }
+
+    /// Whether this is a Calculated column.
+    pub fn is_calculated(&self) -> bool {
+        self.expression.is_some()
     }
 
     /// Whether the Model overrides the Query's type.
@@ -296,10 +325,35 @@ impl ModelTable {
     ) -> Result<(ModelTable, Table)> {
         let name = table.name().to_string();
         let schema = table.batch().schema();
+        // Calculated columns and Measures stay; the Query may not take their names.
+        let calculated: Vec<&Column> = previous
+            .map(|p| p.columns.iter().filter(|c| c.is_calculated()).collect())
+            .unwrap_or_default();
+        let measures = previous.map(|p| p.measures.as_slice()).unwrap_or_default();
+        for field in schema.fields() {
+            let clash = calculated
+                .iter()
+                .map(|c| (&c.name, "Calculated column"))
+                .chain(measures.iter().map(|m| (&m.name, "Measure")))
+                .find(|(n, _)| same_name(n, field.name()));
+            if let Some((other, what)) = clash {
+                return Err(Error {
+                    table: name,
+                    column: field.name().clone(),
+                    message: format!(
+                        "the Query now gives a column `{}`, the name of the {what} `{other}`: \
+                         rename one of them",
+                        field.name()
+                    ),
+                });
+            }
+        }
         let mut columns = Vec::with_capacity(schema.fields().len());
         for (i, field) in schema.fields().iter().enumerate() {
             let ty = ColumnType::of_data_type(field.data_type()).unwrap_or(ColumnType::Text);
-            let old = previous.and_then(|p| p.column(field.name()));
+            let old = previous
+                .and_then(|p| p.column(field.name()))
+                .filter(|c| !c.is_calculated());
             let column = match old {
                 None => Column::new(field.name(), ty),
                 Some(old) => {
@@ -318,6 +372,7 @@ impl ModelTable {
             };
             columns.push(column);
         }
+        columns.extend(calculated.into_iter().cloned());
         let names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         for c in &mut columns {
             if c.sort_by.as_ref().is_some_and(|by| !names.contains(by)) {
@@ -329,9 +384,16 @@ impl ModelTable {
             hidden: previous.is_some_and(|p| p.hidden),
             description: previous.map(|p| p.description.clone()).unwrap_or_default(),
             columns,
+            measures: measures.to_vec(),
         };
+        // ponytail: a sort by involving a Calculated column isn't re-checked here (its values
+        // come after the load); `set_sort_by` checks it when it is set.
+        let calculated = |n: &str| model.column(n).is_some_and(Column::is_calculated);
         for c in &model.columns {
-            if let Some(by) = &c.sort_by {
+            if let Some(by) = &c.sort_by
+                && !calculated(&c.name)
+                && !calculated(by)
+            {
                 model.check_sort(&table, &c.name, by)?;
             }
         }
@@ -340,6 +402,16 @@ impl ModelTable {
 
     pub fn column(&self, name: &str) -> Option<&Column> {
         self.columns.iter().find(|c| c.name == name)
+    }
+
+    /// The Measure `name` of this Table, ignoring case.
+    pub fn measure(&self, name: &str) -> Option<&crate::Measure> {
+        self.measures.iter().find(|m| same_name(&m.name, name))
+    }
+
+    /// Whether the Table has Calculated columns.
+    pub fn has_calculated(&self) -> bool {
+        self.columns.iter().any(Column::is_calculated)
     }
 
     /// The column `name`, or an error naming it.
@@ -441,7 +513,7 @@ impl ModelTable {
 }
 
 /// The summarization after a type change from `from` to `to` (see the module doc).
-fn summarize_after(s: SummarizeBy, from: ColumnType, to: ColumnType) -> SummarizeBy {
+pub(crate) fn summarize_after(s: SummarizeBy, from: ColumnType, to: ColumnType) -> SummarizeBy {
     if s == SummarizeBy::default_for(from) || !s.allowed_for(to) {
         SummarizeBy::default_for(to)
     } else {
@@ -685,6 +757,27 @@ mod tests {
         let bad = table(vec![("Code", text(&["1", "x"]))]);
         let e = load(Some(&m), bad).unwrap_err();
         assert!(e.message.contains("'x'"), "{e}");
+    }
+
+    #[test]
+    fn a_load_keeps_measures_and_calculated_columns_and_refuses_their_names() {
+        let (m, _) = load(None, sales()).unwrap();
+        let mut model = Model::default();
+        model.put(m);
+        model
+            .add_measure("Sales", crate::Measure::new("Total", "1"))
+            .unwrap();
+        model
+            .add_calculated_column("Sales", "Twice", "[Price] * 2")
+            .unwrap();
+        let m = model.table("Sales").unwrap().clone();
+        let (again, _) = load(Some(&m), sales()).unwrap();
+        assert_eq!(again, m, "Calculated columns stay last, Measures stay");
+        for clash in ["twice", "TOTAL"] {
+            let t = table(vec![("Month", text(&["Jan"])), (clash, text(&["x"]))]);
+            let e = load(Some(&m), t).unwrap_err();
+            assert_eq!(e.column, clash, "{e}");
+        }
     }
 
     #[test]

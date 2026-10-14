@@ -5,6 +5,7 @@
 
 mod app;
 mod cmd;
+mod expression;
 mod file;
 mod load;
 mod model;

@@ -97,6 +97,26 @@ fn many_top_level_nodes_and_measure_headers_round_trip() {
 }
 
 #[test]
+fn expression_blocks_follow_headers_ending_in_equals() {
+    let src = "table Sales\n  measure 'Total Sales' =\n      SUMX (\n\n          Sales, [Qty] )  \n    formatString: \"0\"\n    hidden\n  column Empty =\n    dataType: text\n";
+    let doc = round_trip(src);
+    let table = node(&doc[0]);
+    let measure = node(&table.items[0]);
+    assert_eq!(measure.header, "'Total Sales' =");
+    assert_eq!(
+        measure.items[0],
+        Item::Block(EXPRESSION.into(), "SUMX (\n\n    Sales, [Qty] )  ".into())
+    );
+    assert_eq!(measure.prop("formatString").map(Value::as_str), Some("0"));
+    assert!(measure.has_flag("hidden"));
+    let empty = node(&table.items[1]);
+    assert_eq!(empty.block(EXPRESSION), Some(""));
+    // A header with text after `=` is an ordinary node.
+    let doc = round_trip("measure Total = 1\n");
+    assert!(node(&doc[0]).items.is_empty());
+}
+
+#[test]
 fn verbatim_block_keeps_odd_indentation_blank_lines_and_trailing_spaces() {
     let src = "query Q\n  m:\n    let  \n\n       Source = 1,\t\n          \n   \n      X = Source // not a comment here\n    in\n      X\n  load: false\n";
     let doc = parse(src).unwrap_or_default();
@@ -260,6 +280,7 @@ fn fuzzed_input_never_panics_and_reprints_stably() {
         RELATIONSHIPS,
         QUERY,
         "t 'a''b'\n  k: \"x\\ny\"\n  m:\n      odd\n\n    back\n  f\n",
+        "table T\n  measure 'M x' =\n      SUM ( T[a] )\n\n        + 1\n    hidden\n  column C =\n    dataType: text\n",
     ];
     let alphabet: Vec<char> = " \n\r\t:'\"\\/[]-_aZ9é\u{feff}".chars().collect();
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);

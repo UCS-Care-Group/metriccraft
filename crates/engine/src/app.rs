@@ -23,6 +23,9 @@ pub struct Document {
     /// How each Table's data was loaded (its Query's M hash, Source fingerprints and time), by
     /// Table name: the Data cache's metadata (`opendash_file::cache`), undone with the data.
     pub provenance: BTreeMap<String, opendash_file::cache::Provenance>,
+    /// The Calculated columns whose DAX failed when last computed (they hold BLANKs), in Model
+    /// order: derived from the Model and the data (`expression.rs`), never saved.
+    pub formula_errors: Vec<opendash_model::Error>,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,
@@ -180,6 +183,12 @@ impl App {
     ) -> Result {
         let mut next = self.doc.clone();
         let notice = edit(&mut next)?;
+        // A Model change (a formula, a Relationship, a rename, a type) may change what the
+        // Calculated columns hold: they are computed again (`expression.rs`).
+        if next.model != self.doc.model {
+            let limit = self.memory_cap.saturating_sub(self.memory());
+            crate::expression::recompute(&mut next, limit)?;
+        }
         let prev = std::mem::replace(&mut self.doc, next);
         self.push_undo(prev);
         self.redo.clear();

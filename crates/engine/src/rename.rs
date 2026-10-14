@@ -27,7 +27,10 @@
 //! Services compares them. Renaming to the very same name changes nothing and records no undo
 //! step; a change of case alone is a rename.
 //!
-//! TODO(M3.6): rewrite DAX references (measures, calculated columns) on both renames.
+//! **DAX** (M3.6): both renames, and renaming a Measure (`modeling.renameMeasure`,
+//! `expression.rs`), rewrite every reference in the Model's Measures and Calculated columns
+//! through the AST, replacing only the referencing bytes (`opendash_model`, `expression.rs`).
+//! Renaming a Calculated column adds no Query step: it isn't the Query's.
 //!
 //! Parity uncertainties, to observe in the VM:
 //! - whether a model column rename extends a trailing *Renamed Columns* step instead of adding
@@ -146,9 +149,23 @@ pub(crate) fn rename_column(app: &mut App, params: &Value) -> Result {
         return Ok(());
     }
     app.edit_noting(|doc| {
+        let calculated = doc
+            .model
+            .table(&table)
+            .and_then(|t| t.column(&old))
+            .is_some_and(opendash_model::Column::is_calculated);
         doc.model
             .rename_column(&table, &old, &new)
             .map_err(Error::Model)?;
+        if calculated {
+            // Not the Query's: no step, nothing merges it.
+            for t in &mut doc.tables {
+                if t.name() == table {
+                    *t = t.with_column_renamed(&old, &new).map_err(Error::Data)?;
+                }
+            }
+            return Ok(None);
+        }
         let q = doc
             .queries
             .iter()

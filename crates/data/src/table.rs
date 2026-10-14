@@ -102,6 +102,57 @@ impl Table {
         })
     }
 
+    /// This table with `column` added last as `name`, as it is (already encoded narrow, e.g.
+    /// the one column of a [`TableBuilder`]'s table); the other columns are shared.
+    pub fn with_appended(&self, name: &str, column: ArrayRef) -> Result<Table> {
+        if column.len() != self.rows() {
+            return Err(self.error(format!(
+                "column `{name}` has {} rows, the table {}",
+                column.len(),
+                self.rows()
+            )));
+        }
+        let schema = self.batch.schema();
+        let mut fields: Vec<_> = schema.fields().iter().cloned().collect();
+        fields.push(Arc::new(Field::new(name, column.data_type().clone(), true)));
+        let mut columns = self.batch.columns().to_vec();
+        columns.push(column);
+        let batch = RecordBatch::try_new_with_options(
+            Arc::new(Schema::new(fields)),
+            columns,
+            &arrow_array::RecordBatchOptions::new().with_row_count(Some(self.rows())),
+        )
+        .map_err(|e| self.error(e.to_string()))?;
+        Ok(Table {
+            name: Arc::clone(&self.name),
+            batch,
+            folded: self.folded,
+        })
+    }
+
+    /// This table without the columns `drop` names; the others are shared.
+    pub fn without_columns(&self, drop: impl Fn(&str) -> bool) -> Result<Table> {
+        let schema = self.batch.schema();
+        let (fields, columns): (Vec<_>, Vec<_>) = schema
+            .fields()
+            .iter()
+            .zip(self.batch.columns())
+            .filter(|(f, _)| !drop(f.name()))
+            .map(|(f, c)| (Arc::clone(f), Arc::clone(c)))
+            .unzip();
+        let batch = RecordBatch::try_new_with_options(
+            Arc::new(Schema::new(fields)),
+            columns,
+            &arrow_array::RecordBatchOptions::new().with_row_count(Some(self.rows())),
+        )
+        .map_err(|e| self.error(e.to_string()))?;
+        Ok(Table {
+            name: Arc::clone(&self.name),
+            batch,
+            folded: self.folded,
+        })
+    }
+
     /// This table under another name (a Table rename); the columns are shared.
     pub fn renamed(&self, name: &str) -> Table {
         Table {
