@@ -41,7 +41,10 @@ People trust OpenDash BI with their numbers; a crash loses their work. **This ou
 - Parallel agents: separate `CARGO_TARGET_DIR` per agent; edit only the crates you own; delete your target dir when done.
 
 ## Running and looking at the app
-Nothing to run yet. When the workspace lands, document here: the run command with a sample dataset and control port, the headless CLI, and the offscreen snapshot render. **For UI work, look at the result** (snapshot PNG).
+- **Desktop app:** `cargo run -p opendash -- [PROJECT]` (a Project folder or `.odash` Package). `--no-default-features --features wgpu` swaps the OpenGL renderer for wgpu.
+- **Look without opening a window:** `cargo run -p opendash-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]` renders the window offscreen (wgpu) to PNG; the script runs commands (`{"run": id, "params": {…}}`), switches theme or View and takes more shots (see the example's docs). **For UI work, look at the result.**
+- **UI tests** drive the window through AccessKit labels (`crates/ui-egui/tests/`, `egui_kittest`).
+- Still to come: the control port (M6) and the headless CLI.
 
 ## Roadmap
 `ROADMAP.md` (committed, once work starts) is the one-page summary: stage, headline numbers, progress log. Detail lives in `docs/spec/` and `docs/plan/`. Update the affected docs whenever work lands.

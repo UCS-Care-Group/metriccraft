@@ -10,3 +10,14 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+opendash-engine = { path = "../engine", default-features = false }
+opendash-visuals = { path = "../visuals", default-features = false }
+egui = { workspace = true }
+egui_dock = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Headless rendering (wgpu) for UI snapshots and `examples/ui_shot.rs`.
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }

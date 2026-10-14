@@ -33,7 +33,14 @@ const LAYERS: &[(&str, u8)] = &[
 ];
 
 /// Crates that only the UI layer (6) and above may depend on: the UI crate is swappable.
-const UI_ONLY: &[&str] = &["egui", "eframe", "winit", "rfd"];
+const UI_ONLY: &[&str] = &[
+    "egui",
+    "eframe",
+    "winit",
+    "rfd",
+    "egui_dock",
+    "egui_kittest",
+];
 
 /// Native-only binaries left out of the wasm build.
 const NOT_WASM: &[&str] = &["opendash", "opendash-cli", "xtask"];
@@ -54,6 +61,7 @@ fn main() -> ExitCode {
         "test" => test_with(&std::env::args().skip(2).collect::<Vec<_>>()),
         "layers" => layers(),
         "assets" => assets(),
+        "strings" => strings(),
         "wasm" => wasm(),
         "dataset" => dataset::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
@@ -64,7 +72,7 @@ fn main() -> ExitCode {
             std::env::args().any(|a| a == "--pending"),
         ),
         _ => {
-            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]|snapshot [--update]|parity>".into())
+            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|parity>".into())
         }
     };
     match result {
@@ -81,6 +89,7 @@ fn ci() -> Result {
         ("fmt", fmt as fn() -> Result),
         ("layers", layers),
         ("assets", assets),
+        ("strings", strings),
         ("clippy", clippy),
         ("test", test),
         ("wasm", wasm),
@@ -275,6 +284,76 @@ fn assets() -> Result {
     report(check_assets(files.lines(), &attribution, |p| {
         Path::new(p).exists()
     }))
+}
+
+/// Widget calls whose text must come from the string catalogue (spec A-2).
+const WIDGET_CALLS: &[&str] = &[
+    "label(",
+    "button(",
+    "heading(",
+    "strong(",
+    "selectable_label(",
+    "selectable_value(",
+    "checkbox(",
+    "hint_text(",
+    "on_hover_text(",
+    "RichText::new(",
+    "Button::new(",
+    "Label::new(",
+    "menu_button(",
+    "with_title(",
+];
+
+/// UI strings: no letters in a string literal passed to a widget in `crates/ui-egui/src`, outside
+/// `strings.rs` (the catalogue) and test code.
+fn strings() -> Result {
+    let mut errs = Vec::new();
+    let dir = Path::new("crates/ui-egui/src");
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "rs") || path.ends_with("strings.rs") {
+            continue;
+        }
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        errs.extend(literal_widget_text(&text).into_iter().map(|n| {
+            format!(
+                "{}:{n}: widget text not from the string catalogue",
+                path.display()
+            )
+        }));
+    }
+    report(errs)
+}
+
+/// Line numbers (1-based) of widget calls given a literal with letters, before `#[cfg(test)]`.
+fn literal_widget_text(src: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (i, line) in src.lines().enumerate() {
+        if line.trim_start().starts_with("#[cfg(test)]") {
+            break;
+        }
+        if line.trim_start().starts_with("//") {
+            continue;
+        }
+        for call in WIDGET_CALLS {
+            let mut rest = line;
+            while let Some(at) = rest.find(call) {
+                rest = rest.get(at + call.len()..).unwrap_or_default();
+                let args = rest.split(')').next().unwrap_or_default();
+                let lettered = args
+                    .split('"')
+                    .skip(1)
+                    .step_by(2)
+                    .any(|lit| lit.chars().any(char::is_alphabetic));
+                if lettered && !out.contains(&(i + 1)) {
+                    out.push(i + 1);
+                }
+            }
+        }
+    }
+    out
 }
 
 fn is_asset(path: &str) -> bool {
@@ -589,6 +668,14 @@ mod tests {
     }
 
     const ATTR: &str = "| Asset | Author |\n|-------|--------|\n| `assets/logo.svg` | Martin |\n";
+
+    #[test]
+    fn widget_text_must_come_from_the_catalogue() {
+        let src = "ui.label(Str::Ready.text());\nui.button(\"Save\");\nui.checkbox(&mut on, \"\");\n\
+                   ui.add(egui::Button::new(\"+\"));\nr.on_hover_text(\"x\")\n// ui.label(\"ok\")\n\
+                   #[cfg(test)]\nui.label(\"test\");";
+        assert_eq!(literal_widget_text(src), [2, 5]);
+    }
 
     #[test]
     fn assets_require_a_row() {

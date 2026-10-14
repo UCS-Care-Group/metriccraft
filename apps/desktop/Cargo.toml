@@ -10,3 +10,19 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# glow (OpenGL) by default: smaller and lighter at idle (spec N-8, ADR 0008); wgpu if glow misbehaves.
+default = ["glow"]
+glow = ["eframe/glow"]
+wgpu = ["eframe/wgpu"]
+
+[dependencies]
+opendash-engine = { path = "../../crates/engine" }
+opendash-ui-egui = { path = "../../crates/ui-egui" }
+eframe = { workspace = true, features = ["accesskit", "default_fonts", "wayland", "x11"] }
+egui = { workspace = true }
+serde_json = { workspace = true }
+rfd = { workspace = true }
+# Waits for an rfd dialog off the UI thread; rfd already builds it on Linux.
+pollster = "0.4"

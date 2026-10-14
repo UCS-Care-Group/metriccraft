@@ -7,8 +7,10 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 
 use crate::draw::Weight;
 
-static REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
-static BOLD: &[u8] = include_bytes!("../fonts/Inter-Bold.ttf");
+/// Inter Regular (OFL 1.1), the one bundled font (ADR 0007).
+pub static REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
+/// Inter Bold.
+pub static BOLD: &[u8] = include_bytes!("../fonts/Inter-Bold.ttf");
 
 /// Text longer than this many chars is measured and drawn only up to it (hostile cell text).
 pub const MAX_CHARS: usize = 4096;
@@ -64,6 +66,19 @@ pub fn ascent_descent(size: f32, weight: Weight) -> (f32, f32) {
             (f.ascent(), -f.descent())
         }
         None => (size, 0.0),
+    }
+}
+
+/// The em size a renderer that scales fonts by em (egui) must use so that its glyphs match the
+/// ones measured here at `size` (ab_glyph's `PxScale` is the ascent-to-descent height, not the em).
+pub fn em_size(size: f32, weight: Weight) -> f32 {
+    let size = clamp_size(size);
+    match font(weight) {
+        Some(f) => {
+            let (em, h) = (f.units_per_em().unwrap_or(1.0), f.height_unscaled());
+            if h > 0.0 { size * em / h } else { size }
+        }
+        None => size,
     }
 }
 
