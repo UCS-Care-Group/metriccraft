@@ -58,6 +58,8 @@ impl Palette {
                     .hint_text(Str::PaletteHint.text())
                     .desired_width(f32::INFINITY),
             );
+            let edit =
+                crate::icons::name(edit, egui::WidgetType::TextEdit, Str::PaletteHint.text());
             edit.request_focus();
             let (down, up, enter) = ui.input(|i| {
                 (
@@ -312,10 +314,11 @@ fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page:
     };
     match (p.kind, names) {
         (Kind::Bool, _) => {
-            ui.checkbox(&mut f.on, "");
+            let r = ui.checkbox(&mut f.on, "");
+            crate::icons::name(r, egui::WidgetType::Checkbox, p.name);
         }
         (_, Some(names)) if !names.is_empty() => {
-            egui::ComboBox::from_id_salt(("param", p.name))
+            let r = egui::ComboBox::from_id_salt(("param", p.name))
                 .selected_text(f.text.as_str())
                 .width(260.0)
                 .show_ui(ui, |ui| {
@@ -323,6 +326,7 @@ fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page:
                         ui.selectable_value(&mut f.text, n.clone(), n);
                     }
                 });
+            crate::icons::name(r.response, egui::WidgetType::ComboBox, p.name);
         }
         _ => {
             let multiline = matches!(p.kind, Kind::Json | Kind::Field);
@@ -331,7 +335,8 @@ fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page:
             } else {
                 egui::TextEdit::singleline(&mut f.text)
             };
-            ui.add(edit.desired_width(260.0).hint_text(p.kind.word()));
+            let r = ui.add(edit.desired_width(260.0).hint_text(p.kind.word()));
+            crate::icons::name(r, egui::WidgetType::TextEdit, p.name);
         }
     }
 }

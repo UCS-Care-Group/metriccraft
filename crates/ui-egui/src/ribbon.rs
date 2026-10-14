@@ -142,34 +142,45 @@ pub fn button(
     r.clicked().then(|| invoke(c))
 }
 
-/// The groups of `tab` as rows of buttons with the group name beneath.
+/// The groups of `tab` as rows of buttons with the group name beneath; with key tips from
+/// letter number `tips` on (see [`crate::keys`]).
 pub fn show(
     ui: &mut Ui,
     t: &Tokens,
     snap: &Snapshot,
     commands: &'static [Command],
     tab: Tab,
+    tips: Option<usize>,
 ) -> Option<Action> {
-    show_groups(ui, t, snap, commands, groups(commands, tab))
+    show_groups(ui, t, snap, commands, groups(commands, tab), tips)
 }
 
-/// The buttons of `groups`, each group labelled under its buttons.
+/// The buttons of `groups`, each group labelled under its buttons; key tips as for [`show`].
 pub fn show_groups(
     ui: &mut Ui,
     t: &Tokens,
     snap: &Snapshot,
     commands: &'static [Command],
     groups: Vec<(&'static str, Vec<&'static Command>)>,
+    tips: Option<usize>,
 ) -> Option<Action> {
     let mut action = None;
-    ui.horizontal(|ui| {
+    let mut n = tips.unwrap_or_default();
+    ui.horizontal_top(|ui| {
         for (group, list) in groups {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     for c in list {
-                        if let Some(a) = big(ui, t, snap, commands, c) {
+                        let r = ui.scope(|ui| big(ui, t, snap, commands, c));
+                        if let Some(a) = r.inner {
                             action = Some(a);
                         }
+                        if tips.is_some()
+                            && let Some(letter) = crate::keys::button_letter(n)
+                        {
+                            crate::keys::badge(ui, r.response.rect, letter, t);
+                        }
+                        n += 1;
                     }
                 });
                 ui.label(RichText::new(group).small().color(t.muted));

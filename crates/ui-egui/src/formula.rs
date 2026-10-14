@@ -216,13 +216,19 @@ impl Formula {
         let err = error(&self.text);
         let mut out = Outcome::Editing;
         ui.horizontal(|ui| {
-            if ui.button("✓").on_hover_text(Str::Commit.text()).clicked() || enter {
+            let commit = ui.button("✓");
+            if crate::icons::name(commit, egui::WidgetType::Button, Str::Commit.text()).clicked()
+                || enter
+            {
                 out = match self.commands() {
                     Some(c) => Outcome::Commit(c),
                     None => Outcome::Editing,
                 };
             }
-            if ui.button("✗").on_hover_text(Str::Cancel.text()).clicked() || escape {
+            let cancel = ui.button("✗");
+            if crate::icons::name(cancel, egui::WidgetType::Button, Str::Cancel.text()).clicked()
+                || escape
+            {
                 out = Outcome::Cancel;
             }
             let font = FontId::monospace(14.0);

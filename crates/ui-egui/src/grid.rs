@@ -239,7 +239,8 @@ impl Grid {
                     let s = egui::Slider::new(&mut v, max_top as f64..=0.0)
                         .vertical()
                         .show_value(false);
-                    ui.add(s).on_hover_text(Str::RowScroll.text()).changed()
+                    let r = ui.add(s);
+                    crate::icons::name(r, WidgetType::Slider, Str::RowScroll.text()).changed()
                 })
                 .inner;
             if changed {
@@ -256,7 +257,8 @@ impl Grid {
                 .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     ui.spacing_mut().slider_width = rect.width();
                     let s = egui::Slider::new(&mut v, 0.0..=max_left as f64).show_value(false);
-                    ui.add(s).on_hover_text(Str::ColumnScroll.text()).changed()
+                    let r = ui.add(s);
+                    crate::icons::name(r, WidgetType::Slider, Str::ColumnScroll.text()).changed()
                 })
                 .inner;
             if changed {

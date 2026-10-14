@@ -6,7 +6,8 @@
 //! The script is JSON lines, run in order: `{"run": "<command>", "params": {…}}` runs a command
 //! and waits for it; `{"dark": true}` switches to the dark App theme; `{"view": "table"}` picks a
 //! View; `{"select": "$1"}` selects a Visual on the canvas; `{"invoke": "<command>"}` invokes a
-//! command as its Ribbon button does; `{"pq": "Query"}` opens the Power Query editor there; `{"type": "text"}` types into the focused field; `{"shot": "/abs/out.png"}` saves a
+//! command as its Ribbon button does; `{"pq": "Query"}` opens the Power Query editor there; `{"type": "text"}` types into the focused field; `{"alt": true}` presses
+//! and releases Alt (key tips), `{"key": "H"}` presses a key; `{"shot": "/abs/out.png"}` saves a
 //! PNG there too. A string `"$N"` anywhere stands for the id of the Nth Visual the script
 //! created (ids are random). The window is 1440×900 pt at 2×.
 
@@ -87,7 +88,8 @@ fn main() -> Result<(), String> {
             },
             shell,
         );
-    h.state().setup(&h.ctx);
+    let ctx = h.ctx.clone();
+    h.state_mut().setup(&ctx);
     settle(&mut h, None);
     let mut seen = Vec::new();
     for line in script.lines().filter(|l| !l.trim().is_empty()) {
@@ -116,6 +118,19 @@ fn main() -> Result<(), String> {
             }
         } else if let Some(id) = l.get("invoke").and_then(Value::as_str) {
             h.state_mut().invoke(id);
+            settle(&mut h, None);
+        } else if l.get("alt").and_then(Value::as_bool) == Some(true) {
+            for m in [egui::Modifiers::ALT, egui::Modifiers::NONE] {
+                h.input_mut().events.push(egui::Event::ModifiersChanged(m));
+                h.step();
+            }
+            settle(&mut h, None);
+        } else if let Some(k) = l
+            .get("key")
+            .and_then(Value::as_str)
+            .and_then(egui::Key::from_name)
+        {
+            h.key_press(k);
             settle(&mut h, None);
         } else if let Some(text) = l.get("type").and_then(Value::as_str) {
             h.input_mut()

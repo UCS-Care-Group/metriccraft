@@ -1,6 +1,6 @@
 # OpenDash BI
 
-![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M4%20done-orange)
+![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M5%20done-orange)
 ![DAX parity](https://img.shields.io/badge/DAX%20MVP%20functions-17%20of%2017%20implemented-yellow)
 ![parity checks](https://img.shields.io/badge/parity%20checks-247%20of%20247%20passing-brightgreen)
 ![tests](https://img.shields.io/badge/tests-476%20passing-brightgreen)
@@ -25,7 +25,7 @@ saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced
 | M2        | **Model + file**: tables, relationships, Project and Package       | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M5        | **Desktop UI**: ribbon, Power Query editor, model view, canvas     | ![5/6](https://img.shields.io/badge/-5%2F6-yellow)                    |
+| M5        | **Desktop UI**: ribbon, Power Query editor, model view, canvas     | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M6        | **Control, CLI, MCP, web, release**                                | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
 Not affiliated with or endorsed by Microsoft. Power BI is a trademark of Microsoft Corporation.

@@ -7,6 +7,7 @@ pub mod diagram;
 pub mod formula;
 pub mod grid;
 pub mod icons;
+pub mod keys;
 pub mod painter;
 pub mod palette;
 pub mod panes;
@@ -126,6 +127,11 @@ pub struct Shell {
     pq: pq::QueryEditor,
     /// The open form belongs to the Power Query editor's window.
     form_in_pq: bool,
+    keytips: keys::KeyTips,
+    /// Fonts and colours set up ([`Shell::setup`]); the first frame does it if the app didn't.
+    ready: bool,
+    /// The region F6 last moved focus to.
+    region: Option<usize>,
     last_autosave: f64,
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
@@ -182,6 +188,9 @@ impl Shell {
             focus_formula: false,
             pq: pq::QueryEditor::default(),
             form_in_pq: false,
+            keytips: keys::KeyTips::default(),
+            ready: false,
+            region: None,
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
@@ -270,8 +279,10 @@ impl Shell {
         &self.toasts
     }
 
-    /// Sets up fonts and colours; call once with the window's context.
-    pub fn setup(&self, ctx: &egui::Context) {
+    /// Sets up fonts and colours; call once with the window's context (the first
+    /// [`Shell::logic`] does, if not).
+    pub fn setup(&mut self, ctx: &egui::Context) {
+        self.ready = true;
         let mut fonts = egui::FontDefinitions::default();
         for (name, bytes) in [
             ("Inter", opendash_visuals::text::REGULAR),
@@ -405,6 +416,10 @@ impl Shell {
 
     /// Everything that isn't drawing: engine events, shortcuts, autosave.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        if !self.ready {
+            // Painting a Scene before its fonts are registered would panic in egui.
+            self.setup(ctx);
+        }
         self.snap = self.engine.snapshot();
         for event in self.engine.take_events() {
             match event {
@@ -476,6 +491,20 @@ impl Shell {
         }
         if self.palette.is_none() && self.form.is_none() && self.picking.is_none() {
             self.shortcuts(ctx);
+            if let Some(forward) = keys::f6(ctx) {
+                let n = match (self.region, forward) {
+                    (None, _) => 0,
+                    (Some(r), true) => (r + 1) % keys::REGIONS,
+                    (Some(r), false) => (r + keys::REGIONS - 1) % keys::REGIONS,
+                };
+                self.region = Some(n);
+                ctx.memory_mut(|m| m.request_focus(keys::region_id(n)));
+            }
+            match self.keytips.input(ctx, &self.tabs()) {
+                Some(keys::Tip::Tab(tab)) => self.tab = tab,
+                Some(keys::Tip::Button(tab, n)) => self.tip_button(tab, n),
+                None => {}
+            }
         }
         let now = ctx.input(|i| i.time);
         if self.snap.dirty {
@@ -484,6 +513,34 @@ impl Shell {
                 self.engine.autosave(now_ms());
             }
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        }
+    }
+
+    /// The main window's tabs shown now.
+    fn tabs(&self) -> Vec<Tab> {
+        let mut tabs: Vec<Tab> = Tab::MAIN.to_vec();
+        if self.prefs.view == View::Table {
+            tabs.push(Tab::ColumnTools);
+        }
+        tabs
+    }
+
+    /// Runs the `n`th button of `tab`, as its key tip does. Home's first is Transform data.
+    fn tip_button(&mut self, tab: Tab, n: usize) {
+        let n = match (tab, n) {
+            (Tab::Home, 0) => {
+                self.pq.open = true;
+                return;
+            }
+            (Tab::Home, n) => n - 1,
+            (_, n) => n,
+        };
+        let c = ribbon::groups(self.commands, tab)
+            .into_iter()
+            .flat_map(|(_, list)| list)
+            .nth(n);
+        if let Some(c) = c.filter(|c| self.snap.enabled(self.commands, c.id)) {
+            self.act(palette::invoke(c));
         }
     }
 
@@ -529,6 +586,7 @@ impl Shell {
                     .inner_margin(egui::Margin::symmetric(8, 6)),
             )
             .show(ui, |ui| {
+                keys::anchor(ui, 0, Str::RegionRibbon.text());
                 ui.horizontal(|ui| {
                     ui.menu_button(Str::TabFile.text(), |ui| {
                         for c in ribbon::file_menu(self.commands) {
@@ -546,12 +604,11 @@ impl Shell {
                         }
                     }
                     ui.separator();
-                    let mut tabs: Vec<Tab> = Tab::MAIN.to_vec();
-                    if self.prefs.view == View::Table {
-                        tabs.push(Tab::ColumnTools);
-                    }
-                    for tab in tabs {
-                        ui.selectable_value(&mut self.tab, tab, tab.label().text());
+                    for tab in self.tabs() {
+                        let r = ui.selectable_value(&mut self.tab, tab, tab.label().text());
+                        if self.keytips.level == Some(keys::Level::Tabs) {
+                            keys::badge(ui, r.rect, keys::tab_letter(tab), &t);
+                        }
                     }
                 });
                 ui.add_space(4.0);
@@ -566,15 +623,29 @@ impl Shell {
                         }
                     });
                 } else {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_top(|ui| {
+                        let tips = self.keytips.level == Some(keys::Level::Buttons(self.tab));
+                        let mut first = 0;
                         if self.tab == Tab::Home {
                             let icon = icons::Icon::Table;
                             let label = Str::TransformData.text();
-                            if icons::big_button(ui, icon, label, true, &t).clicked() {
-                                self.pq.open = true;
-                            }
+                            ui.vertical(|ui| {
+                                let r = icons::big_button(ui, icon, label, true, &t);
+                                if r.clicked() {
+                                    self.pq.open = true;
+                                }
+                                if tips {
+                                    keys::badge(ui, r.rect, 'A', &t);
+                                }
+                                let group = RichText::new(Str::PowerQueryGroup.text());
+                                ui.label(group.small().color(t.muted));
+                            });
+                            ui.separator();
+                            first = 1;
                         }
-                        if let Some(a) = ribbon::show(ui, &t, &snap, self.commands, self.tab) {
+                        let tips = tips.then_some(first);
+                        if let Some(a) = ribbon::show(ui, &t, &snap, self.commands, self.tab, tips)
+                        {
                             action = Some(a);
                         }
                     });
@@ -693,6 +764,7 @@ impl Shell {
             .resizable(true)
             .frame(egui::Frame::NONE.fill(t.panel))
             .show(ui, |ui| {
+                keys::anchor(ui, 2, Str::RegionPanes.text());
                 let mut viewer = PaneViewer {
                     t,
                     snap: &snap,
@@ -706,6 +778,7 @@ impl Shell {
                     .style(egui_dock::Style::from_egui(ui.style()))
                     .show_close_buttons(false)
                     .show_leaf_close_all_buttons(false)
+                    .show_leaf_collapse_buttons(false)
                     .show_inside(ui, &mut viewer);
                 let open = viewer.open.take();
                 for (id, params) in viewer.out {
@@ -718,19 +791,9 @@ impl Shell {
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(t.well))
-            .show(ui, |ui| match self.prefs.view {
-                View::Report => {
-                    if let Some(a) = self.page_tabs(ui, &t, &snap) {
-                        action = Some(a);
-                    }
-                    self.report(ui, &t, &snap);
-                }
-                View::Table => self.grid.show(ui, &t, &snap.doc, self.table.as_deref()),
-                View::Model => {
-                    for (id, params) in self.diagram.show(ui, &t, &snap.doc) {
-                        self.engine.run(id, params);
-                    }
-                }
+            .show(ui, |ui| {
+                keys::anchor(ui, 1, self.prefs.view.label().text());
+                self.view(ui, &t, &snap, &mut action);
             });
 
         self.show_toasts(ui, &t);
@@ -754,6 +817,24 @@ impl Shell {
         }
         if let Some(a) = action {
             self.act(a);
+        }
+    }
+
+    /// The View picked on the rail.
+    fn view(&mut self, ui: &mut Ui, t: &Tokens, snap: &Snapshot, action: &mut Option<Action>) {
+        match self.prefs.view {
+            View::Report => {
+                if let Some(a) = self.page_tabs(ui, t, snap) {
+                    *action = Some(a);
+                }
+                self.report(ui, t, snap);
+            }
+            View::Table => self.grid.show(ui, t, &snap.doc, self.table.as_deref()),
+            View::Model => {
+                for (id, params) in self.diagram.show(ui, t, &snap.doc) {
+                    self.engine.run(id, params);
+                }
+            }
         }
     }
 
@@ -854,13 +935,14 @@ impl Shell {
                     if let Some(c) = self.commands.iter().find(|c| c.id == "insert.newPage") {
                         let r = ui
                             .add_enabled(snap.enabled(self.commands, c.id), egui::Button::new("+"));
-                        if r.on_hover_text(c.label).clicked() {
+                        if icons::name(r, egui::WidgetType::Button, c.label).clicked() {
                             action = Some(palette::invoke(c));
                         }
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        self.zoom_controls(ui);
-                    });
+                    if current.is_some() {
+                        let layout = egui::Layout::right_to_left(egui::Align::Center);
+                        ui.with_layout(layout, |ui| self.zoom_controls(ui));
+                    }
                 });
             });
         action
@@ -872,12 +954,13 @@ impl Shell {
         let mut pct = (self.canvas.last_scale * 100.0).clamp(10.0, 400.0).round();
         // Rounded and in range, so the slider sees no change of its own making.
         let z = &mut self.canvas.zoom;
-        let slider = egui::Slider::new(&mut pct, 10.0..=400.0)
-            .suffix(" %")
-            .fixed_decimals(0);
-        if ui.add(slider).on_hover_text(Str::Zoom.text()).changed() {
+        let slider = egui::Slider::new(&mut pct, 10.0..=400.0).show_value(false);
+        let r = icons::name(ui.add(slider), egui::WidgetType::Slider, Str::Zoom.text());
+        if r.changed() {
             *z = Zoom::Fixed(pct / 100.0);
         }
+        let pct = format!("{pct:.0}");
+        ui.label(Str::Percent.fill(&[&pct]));
         if ui
             .selectable_label(*z == Zoom::FitWidth, Str::FitWidth.text())
             .clicked()

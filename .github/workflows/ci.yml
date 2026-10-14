@@ -34,3 +34,5 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: matrix.os != 'linux' # self-hosted keeps its own target dir
       - run: cargo xtask ci
+      # Cold start and idle memory of the desktop app (N-8): skipped without a display or xvfb-run.
+      - run: cargo xtask ui-bench

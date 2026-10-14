@@ -100,11 +100,53 @@ impl Dialogs {
 }
 
 /// The window, the preferences last written, and the file dialogs.
-struct Desktop(Shell, Prefs, Dialogs);
+struct Desktop(Shell, Prefs, Dialogs, Option<Bench>);
+
+/// `ODASH_UI_BENCH=1` (`cargo xtask ui-bench`): prints `BENCH ui/first_frame` once the first
+/// frame is on screen and, after two idle seconds, `BENCH ui/idle_private <bytes>` (memory of
+/// its own, what Windows' Task Manager shows) and `BENCH ui/idle_rss <bytes>` (with the shared
+/// libraries, the graphics driver's included), then quits.
+struct Bench {
+    frames: u32,
+    shown: Option<std::time::Instant>,
+}
+
+impl Bench {
+    fn tick(&mut self, ctx: &egui::Context) {
+        self.frames = self.frames.saturating_add(1);
+        // Frame 2 starts once frame 1 has been presented.
+        if self.frames == 2 {
+            println!("BENCH ui/first_frame");
+            self.shown = Some(std::time::Instant::now());
+        }
+        match self.shown {
+            Some(t) if t.elapsed() >= std::time::Duration::from_secs(2) => {
+                for (name, field) in [("idle_private", "RssAnon:"), ("idle_rss", "VmRSS:")] {
+                    if let Some(bytes) = status_bytes(field) {
+                        println!("BENCH ui/{name} {bytes}");
+                    }
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            _ => ctx.request_repaint_after(std::time::Duration::from_millis(500)),
+        }
+    }
+}
+
+/// A memory figure of this process from `/proc/self/status` (Linux; `None` elsewhere).
+fn status_bytes(field: &str) -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with(field))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    kb.checked_mul(1024)
+}
 
 impl eframe::App for Desktop {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.0.logic(ctx);
+        if let Some(b) = &mut self.3 {
+            b.tick(ctx);
+        }
         // Written when they change: `on_exit`'s signature depends on the renderer feature.
         if self.0.prefs() != self.1 {
             self.1 = self.0.prefs();
@@ -145,9 +187,14 @@ fn main() -> eframe::Result {
                 engine.run("file.open", json!({"path": path.display().to_string()}));
             }
             let (hook, dialogs) = file_dialogs(&cc.egui_ctx);
-            let shell = Shell::new(engine, prefs, Engine::recoverable()).with_file_dialogs(hook);
+            let mut shell =
+                Shell::new(engine, prefs, Engine::recoverable()).with_file_dialogs(hook);
             shell.setup(&cc.egui_ctx);
-            Ok(Box::new(Desktop(shell, prefs, dialogs)))
+            let bench = std::env::var_os("ODASH_UI_BENCH").map(|_| Bench {
+                frames: 0,
+                shown: None,
+            });
+            Ok(Box::new(Desktop(shell, prefs, dialogs, bench)))
         }),
     )
 }

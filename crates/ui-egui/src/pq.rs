@@ -108,7 +108,7 @@ impl QueryEditor {
             });
             let path = TABS.get(self.tab).map_or("", |(_, p)| p);
             let groups = crate::ribbon::groups_at(commands, path);
-            if let Some(a) = crate::ribbon::show_groups(ui, t, snap, commands, groups) {
+            if let Some(a) = crate::ribbon::show_groups(ui, t, snap, commands, groups, None) {
                 out.push(match a {
                     Action::Run(c, params) => Request::Run(c.id, params),
                     Action::Form(c) => Request::Form(self.form(c)),
@@ -145,10 +145,12 @@ impl QueryEditor {
                             self.selected = if i == steps.len() { None } else { Some(i) };
                         }
                         if i > 0
-                            && ui
-                                .small_button("×")
-                                .on_hover_text(Str::DeleteStep.text())
-                                .clicked()
+                            && crate::icons::name(
+                                ui.small_button("×"),
+                                egui::WidgetType::Button,
+                                &Str::DeleteStepNamed.fill(&[&name]),
+                            )
+                            .clicked()
                         {
                             out.push(Request::Run(
                                 "query.deleteStep",

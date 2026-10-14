@@ -283,6 +283,13 @@ pub fn big_button(
     response
 }
 
+/// Gives `r` (a control showing a symbol or nothing) the label `label` for screen readers,
+/// and as its tooltip.
+pub fn name(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui::Response {
+    r.widget_info(|| egui::WidgetInfo::labeled(typ, r.enabled(), label));
+    r.on_hover_text(label)
+}
+
 /// A small square button with just an icon; `label` is its AccessKit label and tooltip.
 pub fn icon_button(
     ui: &mut Ui,

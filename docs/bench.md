@@ -115,6 +115,29 @@ Not yet: the second phase (~1.5–3 ns per visible row and query) is the floor o
 could skip the group-slot lookup when keys are dense. A group-by column of a big dictionary
 folds the whole dictionary per query. Baselines not re-recorded (host load > 2).
 
+## Desktop app (M5.5; spec N-8; ADR 0008)
+
+`cargo xtask ui-bench` builds the release app, starts it on a fresh profile with
+`ODASH_UI_BENCH=1` and checks the N-8 budgets for a blank window:
+
+- **cold start**: spawn to the first frame on screen, under 1 s;
+- **idle private memory**: the app's own resident pages (`RssAnon`) two seconds after the
+  first frame, at most 100 MB. This is what Task Manager's *private working set* shows, the
+  figure Power BI Desktop's ~451 MB idle was read as. Total RSS is printed too but not
+  budgeted: about half of it is the graphics driver's shared libraries (on tardis2, NVIDIA's
+  `libnvidia-gpucomp` and `libnvidia-eglcore` and LLVM, ~80 MB), which differ by machine.
+
+It needs a display: `xvfb-run` is used where there is none (`sudo pacman -S
+xorg-server-xvfb` on the workstation runner), and it is skipped where neither exists. It
+opens a window for about two seconds, so it isn't part of `cargo xtask ci`; CI runs it as its
+own step.
+
+| Date       | Machine  | Renderer      | Cold start | Idle private | Idle RSS |
+|------------|----------|---------------|------------|--------------|----------|
+| 2026-10-14 | tardis2  | glow (NVIDIA) | 192 ms     | 69 MB        | 160 MB   |
+
+The first run after a build was 417 ms (files not yet in the page cache).
+
 ## Reference dataset
 
 `cargo xtask dataset [--rows N] [--out DIR] [--csv]` writes `sales_10m.parquet` (and with

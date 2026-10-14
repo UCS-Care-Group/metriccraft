@@ -43,7 +43,9 @@ People trust OpenDash BI with their numbers; a crash loses their work. **This ou
 ## Running and looking at the app
 - **Desktop app:** `cargo run -p opendash -- [PROJECT]` (a Project folder or `.odash` Package). `--no-default-features --features wgpu` swaps the OpenGL renderer for wgpu.
 - **Look without opening a window:** `cargo run -p opendash-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]` renders the window offscreen (wgpu) to PNG; the script runs commands (`{"run": id, "params": {…}}`), switches theme or View, selects Visuals, invokes Ribbon buttons, types, opens the Power Query editor and takes more shots (see the example's docs). **For UI work, look at the result.**
-- **UI tests** drive the window through AccessKit labels (`crates/ui-egui/tests/`, `egui_kittest`).
+- **UI tests** drive the window through AccessKit labels (`crates/ui-egui/tests/`, `egui_kittest`). `tests/a11y.rs` fails on any control without a worded label (spec A-1): give symbol-only controls one with `icons::name`.
+- **UI snapshots:** `cargo xtask snapshot` writes PNGs of every View (light, dark) and the Power Query editor to `observations/snapshots/`.
+- **UI budgets:** `cargo xtask ui-bench` (cold start < 1 s, idle private memory ≤ 100 MB; opens a window for ~2 s, or runs under `xvfb-run`).
 - Still to come: the control port (M6) and the headless CLI.
 
 ## Roadmap

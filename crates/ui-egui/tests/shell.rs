@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use opendash_engine::App;
@@ -44,7 +45,8 @@ fn ribbon_buttons_run_commands_and_undo_reverts() {
     let mut h = harness();
     h.get_by_label("Insert").click();
     h.run();
-    h.get_by_label("New page").click();
+    // The Ribbon's New page (the page tabs' + is New page too).
+    h.get_all_by_label("New page").next().unwrap().click();
     h.run();
     wait(&mut h, |s| s.snapshot().doc.report.pages.len() == 1);
     assert!(h.state().snapshot().dirty);
@@ -73,11 +75,11 @@ fn a_command_needing_params_opens_its_form() {
     h.get_by_label("Get Data").click();
     h.run();
     // The form names each param; Run stays disabled until the required ones are given.
-    h.get_by_label("kind");
-    h.get_by_label("path");
+    h.get_by_role_and_label(Role::ComboBox, "kind");
+    h.get_by_role_and_label(Role::TextInput, "path");
     h.get_by_label("Cancel").click();
     h.run();
-    assert!(h.query_by_label("path").is_none());
+    assert!(h.query_by_role_and_label(Role::TextInput, "path").is_none());
 }
 
 /// The current Page's one Visual's (x, y, w, h).
@@ -321,7 +323,8 @@ fn get_data_picks_a_file_then_shows_its_source_form() {
     h.run();
     // The form opens with the file and its kind filled in.
     h.get_by_label("Run").click();
-    h.run();
+    // The status bar polls the load's progress while it runs: step, don't wait for stillness.
+    h.step();
     wait(&mut h, |s| s.snapshot().doc.tables.len() == 1);
     assert_eq!(h.state().snapshot().doc.tables[0].name(), "Sales");
     std::fs::remove_dir_all(&dir).unwrap();
@@ -362,5 +365,71 @@ fn power_query_editor_previews_steps_and_closes() {
     h.get_by_label("Close editor").click();
     h.run();
     assert!(!h.state().query_editor_open());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn f6_cycles_focus_ribbon_view_panes() {
+    use opendash_ui_egui::keys::region_id;
+    let mut h = harness();
+    let focused = |h: &Harness<'_, Shell>| h.ctx.memory(|m| m.focused());
+    for n in [0, 1, 2, 0] {
+        h.key_press(egui::Key::F6);
+        h.run();
+        assert_eq!(focused(&h), Some(region_id(n)), "region {n}");
+    }
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::F6);
+    h.run();
+    assert_eq!(focused(&h), Some(region_id(2)));
+    // Tab goes on from a region's anchor to its first control.
+    h.key_press(egui::Key::Tab);
+    h.run();
+    let now = focused(&h);
+    assert!(now.is_some() && now != Some(region_id(2)));
+    // Each region's anchor is labelled for screen readers.
+    for label in ["Ribbon", "Panes"] {
+        h.get_by_label(label);
+    }
+}
+
+#[test]
+fn alt_key_tips_open_a_tab_and_run_a_button() {
+    let mut h = harness();
+    // Alt pressed and released alone shows the tabs' key tips.
+    for m in [egui::Modifiers::ALT, egui::Modifiers::NONE] {
+        h.input_mut().events.push(egui::Event::ModifiersChanged(m));
+        h.step();
+    }
+    // N: Insert; A: its first button, New page.
+    h.key_press(egui::Key::N);
+    h.run();
+    h.key_press(egui::Key::A);
+    h.run();
+    wait(&mut h, |s| s.snapshot().doc.report.pages.len() == 1);
+}
+
+#[test]
+fn a_visual_with_text_draws_without_an_explicit_setup() {
+    // Regression: painting a Scene's text before `Shell::setup` registered Inter panicked.
+    let dir = std::env::temp_dir().join(format!("odash-fonts-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("T.csv");
+    std::fs::write(&path, "N\n1\n2\n").unwrap();
+    let mut h = harness();
+    // Wait on outcomes: "not busy" holds before the worker has picked a job up.
+    h.state_mut().run(
+        "home.getData",
+        serde_json::json!({"kind": "csv", "path": path}),
+    );
+    wait(&mut h, |s| !s.snapshot().doc.tables.is_empty());
+    h.state_mut()
+        .run("insert.newVisual", serde_json::json!({"type": "card"}));
+    wait(&mut h, |s| s.snapshot().doc.report.pages.len() == 1);
+    let page = h.state().snapshot().doc.report.pages[0].clone();
+    let params = serde_json::json!({"page": page.id, "visual": page.visuals[0].id,
+        "well": "values", "field": {"table": "T", "column": "N"}});
+    h.state_mut().run("visual.addField", params);
+    wait(&mut h, |s| !s.snapshot().scenes.1.is_empty());
+    h.run();
     std::fs::remove_dir_all(&dir).unwrap();
 }

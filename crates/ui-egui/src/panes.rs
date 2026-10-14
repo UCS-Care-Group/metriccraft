@@ -94,8 +94,9 @@ pub fn visualizations(
         for (i, f) in fields.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.label(field_name(f));
-                let r = ui.small_button("×").on_hover_text(Str::Remove.text());
-                if r.clicked() {
+                let r = ui.small_button("×");
+                let label = Str::RemoveField.fill(&[field_name(f)]);
+                if crate::icons::name(r, egui::WidgetType::Button, &label).clicked() {
                     out.push((
                         "visual.removeField",
                         json!({"page": p.id, "visual": v.id, "well": well.id(), "index": i}),
@@ -134,8 +135,9 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
         ui.label(RichText::new(field).strong());
         ui.horizontal_wrapped(|ui| {
             ui.label(values.join(", "));
-            let r = ui.small_button("×").on_hover_text(Str::Remove.text());
-            if r.clicked() {
+            let r = ui.small_button("×");
+            let label = Str::ClearSelection.fill(&[field]);
+            if crate::icons::name(r, egui::WidgetType::Button, &label).clicked() {
                 out.push((
                     "slicer.select",
                     json!({"page": p.id, "visual": v.id, "items": []}),

@@ -1,7 +1,8 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
 //! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
-//! `bench [--save] [--reference]`, `parity [--update | --export]`; and
+//! `bench [--save] [--reference]`, `snapshot [--update]`, `ui-bench`,
+//! `parity [--update | --export]`; and
 //! `dataset [--rows N] [--out DIR] [--csv]` (the reference dataset, `docs/bench.md`).
 
 use std::collections::BTreeSet;
@@ -66,13 +67,14 @@ fn main() -> ExitCode {
         "dataset" => dataset::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
         "snapshot" => snapshot(std::env::args().any(|a| a == "--update")),
+        "ui-bench" => ui_bench(),
         "parity" if std::env::args().any(|a| a == "--export") => parity_export(),
         "parity" => parity(
             std::env::args().any(|a| a == "--update"),
             std::env::args().any(|a| a == "--pending"),
         ),
         _ => {
-            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|parity>".into())
+            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|ui-bench|parity>".into())
         }
     };
     match result {
@@ -162,6 +164,94 @@ fn snapshot(update: bool) -> Result {
     }
     println!("PNGs in {}", png.display());
     Ok(())
+}
+
+/// Spec N-8 budgets for the blank desktop app (ADR 0008).
+const COLD_START_MS: u128 = 1000;
+/// Idle memory of the app's own (anonymous resident pages): what Power BI's ~451 MB was read
+/// as (Task Manager's private working set). Shared libraries, the graphics driver's above all,
+/// are reported but not budgeted.
+const IDLE_PRIVATE_BYTES: u64 = 100 << 20;
+
+/// Starts the release desktop app on a fresh profile (`ODASH_UI_BENCH=1`, see its `Bench`):
+/// cold start is spawn to first frame on screen, then idle memory after two seconds; both
+/// against the N-8 budgets. Needs a display: under `xvfb-run` where there is none, skipped
+/// where neither is available (so it can sit in any CI job).
+fn ui_bench() -> Result {
+    let display = ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some_and(|d| !d.is_empty()));
+    let xvfb = Command::new("xvfb-run").arg("--help").output().is_ok();
+    if !display && !xvfb {
+        println!("ui-bench: skipped (no display and no xvfb-run)");
+        return Ok(());
+    }
+    cargo(&["build", "--release", "-p", "opendash", "--quiet"])?;
+    let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+    let bin = Path::new(&target).join("release").join("opendash");
+    let profile = std::env::temp_dir().join(format!("odash-ui-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&profile).map_err(|e| format!("{}: {e}", profile.display()))?;
+    let mut cmd = if display {
+        Command::new(&bin)
+    } else {
+        let mut c = Command::new("xvfb-run");
+        c.args(["-a"]).arg(&bin);
+        c
+    };
+    for v in [
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+    ] {
+        cmd.env(v, &profile);
+    }
+    let start = std::time::Instant::now();
+    let mut child = cmd
+        .env("ODASH_UI_BENCH", "1")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("starting {}: {e}", bin.display()))?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let (mut cold, mut private, mut rss) = (None, None, None);
+    for line in std::io::BufRead::lines(std::io::BufReader::new(stdout)).map_while(|l| l.ok()) {
+        if line == "BENCH ui/first_frame" {
+            cold = Some(start.elapsed().as_millis());
+        } else if let Some(n) = line.strip_prefix("BENCH ui/idle_private ") {
+            private = n.trim().parse::<u64>().ok();
+        } else if let Some(n) = line.strip_prefix("BENCH ui/idle_rss ") {
+            rss = n.trim().parse::<u64>().ok();
+        }
+    }
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&profile);
+    let cold = cold.ok_or("the app never showed a frame")?;
+    println!("  ui/cold_start: {cold} ms (budget {COLD_START_MS} ms)");
+    let mut problems = Vec::new();
+    if cold >= COLD_START_MS {
+        problems.push(format!("cold start {cold} ms"));
+    }
+    match private {
+        Some(bytes) => {
+            let budget = IDLE_PRIVATE_BYTES >> 20;
+            println!("  ui/idle_private: {} MB (budget {budget} MB)", bytes >> 20);
+            if bytes > IDLE_PRIVATE_BYTES {
+                problems.push(format!("idle memory {} MB", bytes >> 20));
+            }
+        }
+        None => println!("  ui/idle_private: not measured on this platform"),
+    }
+    if let Some(rss) = rss {
+        println!(
+            "  ui/idle_rss: {} MB (with shared libraries; not budgeted)",
+            rss >> 20
+        );
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("over budget: {}", problems.join(", ")))
+    }
 }
 
 fn wasm() -> Result {
