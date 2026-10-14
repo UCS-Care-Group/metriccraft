@@ -1470,3 +1470,145 @@ fn fresh_reports_make_different_ids() {
     seed_ids(b"host entropy");
     assert_ne!(a.new_id(), b.new_id());
 }
+
+// ---- UI state in the Project (M5.0, ADR 0003 amendment) ----
+
+#[test]
+fn current_page_is_saved_survives_undo_and_does_not_dirty() {
+    let dir = Dir::new();
+    let mut app = full_app();
+    let second = app.document().report.pages[1].id.clone();
+    let path = dir.0.join("Proj").display().to_string();
+    run(&mut app, "file.saveAs", json!({"path": path}));
+    run(&mut app, "page.setCurrent", json!({"page": second}));
+    assert!(!app.is_dirty(), "switching Pages alone is not a change");
+    assert!(!app.can_undo() || app.document().report.current.is_some());
+
+    // An edit, then undo: the current Page stays.
+    run(&mut app, "insert.newPage", json!({"name": "Third"}));
+    run(&mut app, "edit.undo", json!({}));
+    assert_eq!(
+        app.document().report.current.as_deref(),
+        Some(second.as_str())
+    );
+
+    run(&mut app, "file.save", json!({}));
+    let json = std::fs::read_to_string(dir.0.join("Proj/report/report.json")).unwrap();
+    assert!(
+        json.contains(&format!("\"current\": \"{second}\"")),
+        "{json}"
+    );
+    let mut other = App::new();
+    run(&mut other, "file.open", json!({"path": path}));
+    assert_eq!(
+        other.document().report.current.as_deref(),
+        Some(second.as_str())
+    );
+
+    // A deleted current Page isn't written; an unknown id reads as no current Page.
+    run(&mut other, "page.delete", json!({"page": second}));
+    run(&mut other, "file.save", json!({}));
+    let json = std::fs::read_to_string(dir.0.join("Proj/report/report.json")).unwrap();
+    assert!(!json.contains("current"), "{json}");
+    let e = app
+        .run("page.setCurrent", &json!({"page": "nope"}))
+        .unwrap_err();
+    assert!(matches!(e, Error::InvalidParams { .. }), "{e:?}");
+}
+
+#[test]
+fn table_positions_are_saved_renamed_and_merged_for_nudges() {
+    let dir = Dir::new();
+    let mut app = self::app();
+    run(
+        &mut app,
+        "model.moveTable",
+        json!({"table": "Sales", "x": 10, "y": 20}),
+    );
+    // The first nudge starts its own step; the ones after it join it.
+    run(
+        &mut app,
+        "model.moveTable",
+        json!({"table": "sales", "x": 11, "y": 20, "merge": false}),
+    );
+    run(
+        &mut app,
+        "model.moveTable",
+        json!({"table": "Sales", "x": 12, "y": 20, "merge": true}),
+    );
+    assert_eq!(app.document().diagram.get("Sales"), Some(&(12, 20)));
+    run(&mut app, "edit.undo", json!({}));
+    assert_eq!(
+        app.document().diagram.get("Sales"),
+        Some(&(10, 20)),
+        "nudges are one step"
+    );
+    run(&mut app, "edit.undo", json!({}));
+    assert!(app.document().diagram.is_empty());
+    run(&mut app, "edit.redo", json!({}));
+
+    // Without merge (a drag), each move is its own step.
+    run(
+        &mut app,
+        "model.moveTable",
+        json!({"table": "Regions", "x": 300, "y": 0}),
+    );
+    run(
+        &mut app,
+        "model.moveTable",
+        json!({"table": "Regions", "x": 310, "y": 0}),
+    );
+    run(&mut app, "edit.undo", json!({}));
+    assert_eq!(app.document().diagram.get("Regions"), Some(&(300, 0)));
+
+    run(
+        &mut app,
+        "modeling.renameTable",
+        json!({"table": "Sales", "name": "Orders"}),
+    );
+    assert_eq!(app.document().diagram.get("Orders"), Some(&(10, 20)));
+
+    let path = dir.0.join("Proj").display().to_string();
+    run(&mut app, "file.saveAs", json!({"path": path}));
+    let bytes = std::fs::read_to_string(dir.0.join("Proj/model/diagram.json")).unwrap();
+    assert_eq!(
+        bytes,
+        "{\n  \"tables\": {\n    \"Orders\": {\n      \"x\": 10,\n      \"y\": 20\n    },\n    \
+         \"Regions\": {\n      \"x\": 300,\n      \"y\": 0\n    }\n  }\n}\n"
+    );
+    let mut other = App::new();
+    run(&mut other, "file.open", json!({"path": path}));
+    assert_eq!(other.document().diagram, app.document().diagram);
+
+    for bad in [
+        json!({"table": "Nope", "x": 0, "y": 0}),
+        json!({"table": "Orders", "x": -1, "y": 0}),
+    ] {
+        assert!(app.run("model.moveTable", &bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn nudges_of_a_visual_merge_into_one_undo_step() {
+    let (mut app, v) = report_app();
+    let page = app.document().report.pages[0].id.clone();
+    let mv =
+        |x: i32, merge: bool| json!({"page": page, "visual": v, "x": x, "y": 0, "merge": merge});
+    run(&mut app, "visual.move", mv(5, false));
+    run(&mut app, "visual.move", mv(6, false));
+    run(&mut app, "visual.move", mv(7, true));
+    run(&mut app, "edit.undo", json!({}));
+    let x = app.document().report.pages[0]
+        .visuals
+        .iter()
+        .find(|x| x.id == v)
+        .map(|x| x.x);
+    assert_eq!(x, Some(5));
+    run(&mut app, "edit.undo", json!({}));
+    let x = app.document().report.pages[0]
+        .visuals
+        .iter()
+        .find(|x| x.id == v)
+        .map(|x| x.x);
+    assert_eq!(x, Some(0));
+}

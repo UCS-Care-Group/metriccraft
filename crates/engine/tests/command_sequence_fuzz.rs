@@ -879,6 +879,7 @@ mod fuzz {
             model: doc.model.clone(),
             // The report is checked through the app below (its JSON is the engine's).
             report: BTreeMap::new(),
+            diagram: None,
         };
         let files = opendash_file::encode(&project, None, &Preserved::default())
             .map_err(|e| format!("encode: {e}"))?;

@@ -58,6 +58,9 @@ pub const MAX_VISUALS: usize = 10_000;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Report {
     pub pages: Vec<Page>,
+    /// The id of the Page open when last saved or switched to (`page.setCurrent`); saved so a
+    /// Project reopens there. `None` (or an id no Page has): the first Page.
+    pub current: Option<String>,
     /// Unknown members of `report.json`.
     pub(crate) extra: Map<String, Value>,
 }
@@ -862,3 +865,19 @@ pub(crate) fn slicer_style_id(s: SlicerStyle) -> &'static str {
 
 #[cfg(test)]
 mod tests;
+
+/// `page.setCurrent`: the Page being shown, saved with the Project so it reopens there. Not an
+/// edit: not undone, and switching Pages alone doesn't make the document dirty.
+pub(crate) fn set_current(app: &mut App, params: &Value) -> Result {
+    const ID: &str = "page.setCurrent";
+    let key = text(params, "page", ID)?;
+    let id = app
+        .doc
+        .report
+        .page(&key)
+        .ok_or_else(|| invalid(ID, format!("there is no page `{key}`")))?
+        .id
+        .clone();
+    app.doc.report.current = Some(id);
+    Ok(())
+}

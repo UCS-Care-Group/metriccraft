@@ -28,6 +28,8 @@ pub struct Document {
     pub formula_errors: Vec<opendash_model::Error>,
     /// The report: Pages of Visuals (`report.rs`).
     pub report: crate::report::Report,
+    /// Model view layout: where each Table's box sits (`diagram.rs`).
+    pub diagram: crate::diagram::Diagram,
     /// Lets unit tests observe edits before the document has real content.
     #[cfg(test)]
     pub(crate) probe: i64,
@@ -67,6 +69,8 @@ pub struct App {
     pub(crate) session: crate::selection::Session,
     /// Stops a running Page drawing (`App::cancel_flag`).
     pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// What the last command moved, for `merge` (see [`merge_key`]).
+    last_move: Option<String>,
 }
 
 impl Default for App {
@@ -96,6 +100,7 @@ impl App {
             autosave: crate::recovery::Autosave::default(),
             session: crate::selection::Session::default(),
             cancel: std::sync::Arc::default(),
+            last_move: None,
         }
     }
 
@@ -184,10 +189,22 @@ impl App {
             command: id.into(),
             message,
         })?;
+        let moved = merge_key(id, params);
+        let merge = moved.is_some()
+            && moved == self.last_move
+            && params.get("merge").and_then(Value::as_bool) == Some(true);
+        self.last_move = None;
+        let undo_before = self.undo.len();
         match cmd.run {
-            Run::Edit(edit) => self.edit_noting(|doc| edit(doc, params).map(|()| None)),
-            Run::App(act) => act(self, params),
+            Run::Edit(edit) => self.edit_noting(|doc| edit(doc, params).map(|()| None))?,
+            Run::App(act) => act(self, params)?,
         }
+        // A merged move replaces the previous one in the history: undo goes back to before both.
+        if merge && self.undo.len() > undo_before {
+            self.undo.pop_back();
+        }
+        self.last_move = moved;
+        Ok(())
     }
 
     /// Runs `edit` like a [`Run::Edit`] (on a copy, recorded for undo); its notice, if any,
@@ -295,7 +312,9 @@ impl App {
             .undo
             .pop_back()
             .ok_or_else(|| Error::Disabled("edit.undo".into()))?;
+        let current = self.doc.report.current.clone();
         self.redo.push(std::mem::replace(&mut self.doc, prev));
+        self.keep_current(current);
         self.last_load = None;
         self.changed();
         Ok(())
@@ -306,11 +325,23 @@ impl App {
             .redo
             .pop()
             .ok_or_else(|| Error::Disabled("edit.redo".into()))?;
+        let current = self.doc.report.current.clone();
         let prev = std::mem::replace(&mut self.doc, next);
         self.push_undo(prev);
+        self.keep_current(current);
         self.last_load = None;
         self.changed();
         Ok(())
+    }
+
+    /// Undo and redo don't move the user to another Page: the current Page stays, if it still
+    /// exists.
+    fn keep_current(&mut self, current: Option<String>) {
+        if let Some(id) = current
+            && self.doc.report.pages.iter().any(|p| p.id == id)
+        {
+            self.doc.report.current = Some(id);
+        }
     }
 
     fn push_undo(&mut self, doc: Document) {
@@ -318,6 +349,17 @@ impl App {
             self.undo.pop_front();
         }
         self.undo.push_back(doc);
+    }
+}
+
+/// What a move command moves (`model.moveTable`, `visual.move`, `visual.resize`), so that a
+/// following move of the same object with `merge` joins it in one undo step.
+fn merge_key(id: &str, params: &Value) -> Option<String> {
+    let s = |k: &str| params.get(k).and_then(Value::as_str).unwrap_or_default();
+    match id {
+        "model.moveTable" => Some(format!("{id}\n{}", opendash_model::name_key(s("table")))),
+        "visual.move" | "visual.resize" => Some(format!("{id}\n{}\n{}", s("page"), s("visual"))),
+        _ => None,
     }
 }
 

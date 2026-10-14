@@ -3,7 +3,8 @@
 //! (`Project::report`).
 //!
 //! ```text
-//! report/report.json                          {"pages": [<pageId>, …]}  (Page order)
+//! report/report.json                          {"current": <pageId>, "pages": [<pageId>, …]}
+//!                                             (the Page open when saved; Page order)
 //! report/pages/<pageId>/page.json             {"height", "name", "selections": {<visualId>:
 //!                                              [values…]}, "width"}
 //! report/pages/<pageId>/visuals/<visualId>.json
@@ -66,6 +67,11 @@ pub(crate) fn encode(report: &Report, kept: &Kept) -> Result<Parts> {
         let mut m = Map::new();
         let ids = report.pages.iter().map(|p| Value::String(p.id.clone()));
         m.insert("pages".into(), Value::Array(ids.collect()));
+        if let Some(id) = &report.current
+            && report.pages.iter().any(|p| &p.id == id)
+        {
+            m.insert("current".into(), Value::String(id.clone()));
+        }
         fill(&mut m, &report.extra);
         out.insert(REPORT_JSON.into(), print(m)?);
     }
@@ -307,6 +313,11 @@ pub(crate) fn decode(parts: &Parts) -> Result<(Report, Kept)> {
                     }
                 }
                 Some(_) => return Err(part_err(path, "`pages` must be a list of page ids")),
+            }
+            match m.remove("current") {
+                None => {}
+                Some(Value::String(id)) => report.current = Some(id),
+                Some(_) => return Err(part_err(path, "`current` must be a page id")),
             }
             report.extra = m;
             continue;

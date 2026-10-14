@@ -117,6 +117,7 @@ fn rename_in(doc: &mut Document, old: &str, new: &str) {
     }
     doc.model.rename_table(old, new);
     doc.report.rename_table(old, new);
+    crate::diagram::rename_table(&mut doc.diagram, old, new);
     for set in [&mut doc.stale, &mut doc.unloaded] {
         if set.remove(old) {
             set.insert(new.into());

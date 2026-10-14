@@ -110,6 +110,7 @@ fn sample() -> Project {
         unloaded: ["CON".to_string()].into(),
         model,
         report: BTreeMap::new(),
+        diagram: None,
     }
 }
 
@@ -256,6 +257,7 @@ fn unknown_content_survives_open_and_save() {
     );
     let model = Project {
         report: BTreeMap::new(),
+        diagram: None,
         ..p.clone()
     };
     assert_eq!(model, sample(), "unknown content doesn't change the model");

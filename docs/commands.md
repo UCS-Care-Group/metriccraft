@@ -189,6 +189,13 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 - `column?`: Column — one of its Columns or Measures (default: the Table itself)
 - `description`: text — empty clears it
 
+## `model.moveTable` — Move table
+
+- `table`: Table — the Table
+- `x`: integer — its box's new left edge in Model view, 0 to 100000
+- `y`: integer — its box's new top edge, 0 to 100000
+- `merge?`: logical — join the previous move of the same object into one undo step (arrow-key nudges; default false)
+
 ## `modeling.renameTable` — Rename
 
 - Shortcut: F2
@@ -277,6 +284,10 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 - Ribbon: Insert > Pages
 - `name?`: text — the Page's name, unique ignoring case (default: Page n, the first free n)
 
+## `page.setCurrent` — Go to page
+
+- `page`: Page — the Page's id or name
+
 ## `page.delete` — Delete page
 
 - `page`: Page — the Page's id or name
@@ -312,6 +323,7 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 - `visual`: Visual — the Visual's id
 - `x`: integer — the new position, 0 to 100000
 - `y`: integer — the new position, 0 to 100000
+- `merge?`: logical — join the previous move of the same object into one undo step (arrow-key nudges; default false)
 
 ## `visual.resize` — Resize
 
@@ -319,6 +331,7 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 - `visual`: Visual — the Visual's id
 - `w`: integer — the new size, 1 to 100000
 - `h`: integer — the new size, 1 to 100000
+- `merge?`: logical — join the previous move of the same object into one undo step (arrow-key nudges; default false)
 
 ## `visual.changeType` — Change visual type
 

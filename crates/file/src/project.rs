@@ -7,6 +7,7 @@
 //!                           when there are none
 //! model/tables/<t>.odm      table, its columns and their properties, its measures
 //! queries/<q>.odq           query: load, culture (when not the Project's), m: block
+//! model/diagram.json        Model view layout (ADR 0003, M5): JSON, carried as opaque bytes
 //! report/…                  the report (M4.2): JSON parts, carried here as opaque bytes
 //! .gitignore                .cache/, .local/, .staging/ — written on create, then the user's
 //! ```
@@ -68,6 +69,8 @@ use crate::{Error, FileSet, Result};
 pub const MODEL: &str = "model/model.odm";
 pub const RELATIONSHIPS: &str = "model/relationships.odm";
 pub const TABLES: &str = "model/tables/";
+/// Model view layout: JSON the app reads and writes ([`Project::diagram`]).
+pub const DIAGRAM: &str = "model/diagram.json";
 pub const QUERIES: &str = "queries/";
 /// Report parts: `report/report.json`, `report/pages/<pageId>/…` ([`Project::report`]).
 pub const REPORT: &str = "report/";
@@ -89,6 +92,8 @@ pub struct Project {
     pub model: Model,
     /// The report's parts: path (under [`REPORT`]) → bytes, opaque here (see the module docs).
     pub report: BTreeMap<String, Vec<u8>>,
+    /// `model/diagram.json`, opaque here like the report parts.
+    pub diagram: Option<Vec<u8>>,
 }
 
 impl Default for Project {
@@ -99,6 +104,7 @@ impl Default for Project {
             unloaded: BTreeSet::new(),
             model: Model::default(),
             report: BTreeMap::new(),
+            diagram: None,
         }
     }
 }
@@ -555,6 +561,9 @@ pub fn encode(project: &Project, root: Option<&Path>, preserved: &Preserved) -> 
     if let Some(bytes) = print(model, &Key::Model, &MODEL_FILE) {
         parts.insert(MODEL.into(), bytes);
     }
+    if let Some(bytes) = &project.diagram {
+        parts.insert(DIAGRAM.into(), bytes.clone());
+    }
     for (path, bytes) in &project.report {
         if !path.starts_with(REPORT) {
             return Err(Error::Save(format!("`{path}` is not a report part")));
@@ -966,6 +975,8 @@ fn decode_tree(
     for (path, bytes) in tree.other {
         if path.starts_with(REPORT) {
             project.report.insert(path, bytes);
+        } else if path == DIAGRAM {
+            project.diagram = Some(bytes);
         } else {
             pre.parts.insert(path, bytes);
         }

@@ -205,6 +205,7 @@ impl App {
             unloaded: doc.unloaded.clone(),
             model: doc.model.clone(),
             report: crate::report::encode(&doc.report, &self.file.report_unknown)?,
+            diagram: crate::diagram::encode(doc)?,
         })
     }
 
@@ -296,6 +297,7 @@ impl App {
         let (report, report_unknown) = crate::report::decode(&project.report)?;
         let mut doc = Document {
             report,
+            diagram: crate::diagram::decode(project.diagram.as_deref())?,
             ..Document::default()
         };
         let mut saved = BTreeMap::new();

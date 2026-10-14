@@ -587,6 +587,28 @@ pub static COMMANDS: &[Command] = &[
     },
     // The Fields pane / Data view: right-click > Rename or Delete from model (spec D-4).
     Command {
+        id: "model.moveTable",
+        label: "Move table",
+        ribbon: "",
+        shortcut: None,
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req(
+                "x",
+                Kind::Integer,
+                "its box's new left edge in Model view, 0 to 100000",
+            ),
+            req("y", Kind::Integer, "its box's new top edge, 0 to 100000"),
+            opt(
+                "merge",
+                Kind::Bool,
+                "join the previous move of the same object into one undo step (arrow-key nudges; default false)",
+            ),
+        ],
+        enabled: has_tables,
+        run: Run::Edit(crate::diagram::move_table),
+    },
+    Command {
         id: "modeling.renameTable",
         label: "Rename",
         ribbon: "",
@@ -839,6 +861,15 @@ pub static COMMANDS: &[Command] = &[
     },
     // The page tabs: right-click a Page.
     Command {
+        id: "page.setCurrent",
+        label: "Go to page",
+        ribbon: "",
+        shortcut: None,
+        params: &[req("page", Kind::Page, "the Page's id or name")],
+        enabled: has_pages,
+        run: Run::App(report::set_current),
+    },
+    Command {
         id: "page.delete",
         label: "Delete page",
         ribbon: "",
@@ -939,6 +970,11 @@ pub static COMMANDS: &[Command] = &[
             req("visual", Kind::Visual, "the Visual's id"),
             req("x", Kind::Integer, "the new position, 0 to 100000"),
             req("y", Kind::Integer, "the new position, 0 to 100000"),
+            opt(
+                "merge",
+                Kind::Bool,
+                "join the previous move of the same object into one undo step (arrow-key nudges; default false)",
+            ),
         ],
         enabled: has_visuals,
         run: Run::Edit(report::move_visual),
@@ -953,6 +989,11 @@ pub static COMMANDS: &[Command] = &[
             req("visual", Kind::Visual, "the Visual's id"),
             req("w", Kind::Integer, "the new size, 1 to 100000"),
             req("h", Kind::Integer, "the new size, 1 to 100000"),
+            opt(
+                "merge",
+                Kind::Bool,
+                "join the previous move of the same object into one undo step (arrow-key nudges; default false)",
+            ),
         ],
         enabled: has_visuals,
         run: Run::Edit(report::resize_visual),
