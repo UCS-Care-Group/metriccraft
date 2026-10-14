@@ -5,7 +5,9 @@
 //! an undone rename the old name must still find its items. Items left under a name no object
 //! has are never written (as after a delete).
 
-use super::{Key, Preserved, parse_relationship, relationship_header, same_header};
+use super::{
+    Key, Preserved, expression_header, parse_relationship, relationship_header, same_header,
+};
 use crate::syntax::{Item, Node, quote_name};
 
 impl Preserved {
@@ -35,6 +37,20 @@ impl Preserved {
     /// Column `old` of Table `table` is now `new`: copies its unknown items, and those of the
     /// Relationships on it, to the new name.
     pub fn rename_column(&mut self, table: &str, old: &str, new: &str) {
+        self.rename_in_table(table, "column", old, new);
+        self.rename_in_relationships(|t, c| {
+            (t == table && c == old).then(|| (t.to_owned(), new.to_owned()))
+        });
+    }
+
+    /// Measure `old` of Table `table` is now `new`: copies its unknown items to the new name.
+    pub fn rename_measure(&mut self, table: &str, old: &str, new: &str) {
+        self.rename_in_table(table, "measure", old, new);
+    }
+
+    /// Copies the `kind` object `old` of Table `table` (a Column or Measure; plain or an
+    /// expression node) to `new`.
+    fn rename_in_table(&mut self, table: &str, kind: &str, old: &str, new: &str) {
         let tree = self.trees.get_mut(&Key::Table(table.into()));
         let node = tree.and_then(|items| {
             items.iter_mut().find_map(|i| match i {
@@ -47,17 +63,23 @@ impl Preserved {
             })
         });
         if let Some(node) = node {
-            let copy = find(&node.items, "column", &quote_name(old)).map(|c| Node {
-                header: quote_name(new),
-                ..c.clone()
+            let copy = node.items.iter().find_map(|i| match i {
+                Item::Node(c) if c.kind == kind => {
+                    let (name, expression) = expression_header(&c.header)?;
+                    (name == old).then(|| Node {
+                        header: match expression {
+                            Some(_) => format!("{} =", quote_name(new)),
+                            None => quote_name(new),
+                        },
+                        ..c.clone()
+                    })
+                }
+                _ => None,
             });
             if let Some(copy) = copy {
                 upsert(&mut node.items, copy);
             }
         }
-        self.rename_in_relationships(|t, c| {
-            (t == table && c == old).then(|| (t.to_owned(), new.to_owned()))
-        });
     }
 
     /// Copies each Relationship node with an end `to` renames ((table, column) → new names).
@@ -89,13 +111,6 @@ impl Preserved {
             upsert(items, copy);
         }
     }
-}
-
-fn find<'a>(items: &'a [Item], kind: &str, header: &str) -> Option<&'a Node> {
-    items.iter().find_map(|i| match i {
-        Item::Node(n) if n.kind == kind && same_header(&n.header, header) => Some(n),
-        _ => None,
-    })
 }
 
 /// Puts `node` in `items`, replacing the node of the same kind and header if there is one (so

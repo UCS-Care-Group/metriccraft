@@ -234,9 +234,23 @@ pub(crate) fn merge_queries(doc: &mut Document, params: &Value) -> Result {
                     .find(|t| t.name() == other)
                     .map(|t| t.batch().schema())
             };
+            // A loaded Table's Calculated columns aren't the Query's.
+            let calculated = |c: &str| {
+                doc.model
+                    .table(&other)
+                    .and_then(|t| t.column(c))
+                    .is_some_and(opendash_model::Column::is_calculated)
+            };
             previewed
                 .or_else(loaded)
-                .map(|schema| schema.fields().iter().map(|f| f.name().clone()).collect())
+                .map(|schema| {
+                    schema
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().clone())
+                        .filter(|n| !calculated(n))
+                        .collect()
+                })
                 .ok_or_else(|| invalid(ID, format!("`{other}` can't be read; list `expand`")))?
         }
     };

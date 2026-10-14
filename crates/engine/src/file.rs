@@ -14,6 +14,9 @@
 //! buffers; [`FileState`] keeps the buffer set last written), metadata by its bytes. A Package
 //! is written whole, with the cache unless `file.saveAs` is given `data: false`.
 //!
+//! Calculated columns are never in the cache (ADR 0006): saving leaves them out, and opening
+//! computes them again over the cached data (`expression.rs`).
+//!
 //! Opening loads each Table from the cache, within the memory cap, without reading any Source:
 //! Stale when its Query or Source files changed since it loaded (the cached data is shown);
 //! empty and Stale, with a notice offering Refresh, when there is no usable cache. A Table with
@@ -241,6 +244,14 @@ impl App {
             let Some(table) = doc.tables.iter().find(|t| t.name() == model.name) else {
                 continue;
             };
+            // Calculated columns are computed on open, never cached (ADR 0006).
+            let table = if model.has_calculated() {
+                &table
+                    .without_columns(|n| model.column(n).is_some_and(|c| c.is_calculated()))
+                    .map_err(Error::Data)?
+            } else {
+                table
+            };
             let mut provenance = match doc.provenance.get(&model.name) {
                 Some(p) => p.clone(),
                 None => {
@@ -360,6 +371,10 @@ impl App {
         doc.queries = project.queries;
         doc.unloaded = project.unloaded;
         doc.model = project.model;
+        let limit = self.memory_cap().saturating_sub(used);
+        if let Err(e) = crate::expression::recompute(&mut doc, limit) {
+            problems.push(format!("the Calculated columns weren't computed ({e})"));
+        }
         self.replace(doc);
         self.file = FileState {
             location,

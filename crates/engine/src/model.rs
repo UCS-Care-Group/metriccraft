@@ -54,9 +54,41 @@ pub(crate) fn set_hidden(doc: &mut Document, params: &Value) -> Result {
     let (table, column) = target(doc, params, ID)?;
     match column {
         None => table.hidden = hidden,
-        Some(c) => table.column_mut(&c).map_err(Error::Model)?.hidden = hidden,
+        Some(c) => match property(table, &c)? {
+            Property::Column(col) => col.hidden = hidden,
+            Property::Measure(m) => m.hidden = hidden,
+        },
     }
     Ok(())
+}
+
+/// A Column's or Measure's properties.
+enum Property<'a> {
+    Column(&'a mut opendash_model::Column),
+    Measure(&'a mut opendash_model::Measure),
+}
+
+/// The Column `name` of `table`, else its Measure `name`.
+fn property<'a>(table: &'a mut ModelTable, name: &str) -> Result<Property<'a>> {
+    if table.column(name).is_some() {
+        return table
+            .column_mut(name)
+            .map(Property::Column)
+            .map_err(Error::Model);
+    }
+    let t = table.name.clone();
+    table
+        .measures
+        .iter_mut()
+        .find(|m| m.name == name)
+        .map(Property::Measure)
+        .ok_or_else(|| {
+            Error::Model(opendash_model::Error {
+                table: t,
+                column: name.into(),
+                message: "there is no such column or measure".into(),
+            })
+        })
 }
 
 /// `model.setDescription`: a Table's or Column's description (empty clears it).
@@ -66,7 +98,10 @@ pub(crate) fn set_description(doc: &mut Document, params: &Value) -> Result {
     let (table, column) = target(doc, params, ID)?;
     match column {
         None => table.description = description,
-        Some(c) => table.column_mut(&c).map_err(Error::Model)?.description = description,
+        Some(c) => match property(table, &c)? {
+            Property::Column(col) => col.description = description,
+            Property::Measure(m) => m.description = description,
+        },
     }
     Ok(())
 }
@@ -76,11 +111,12 @@ pub(crate) fn set_format(doc: &mut Document, params: &Value) -> Result {
     const ID: &str = "columnTools.format";
     let format = text(params, "formatString", ID)?;
     // ponytail: format strings are checked when M3.8 renders them; any text is kept until then.
-    let (table, column) = column(doc, params, ID)?;
-    table
-        .column_mut(&column)
-        .map_err(Error::Model)?
-        .format_string = format;
+    let column = text(params, "column", ID)?;
+    let (table, _) = target(doc, params, ID)?;
+    match property(table, &column)? {
+        Property::Column(col) => col.format_string = format,
+        Property::Measure(m) => m.format_string = format,
+    }
     Ok(())
 }
 
@@ -156,6 +192,8 @@ pub(crate) fn set_data_type(doc: &mut Document, params: &Value) -> Result {
     if let Some(t) = doc.tables.iter_mut().find(|t| t.name() == name) {
         *t = converted;
     }
+    // Calculated columns that use it are computed again after the edit (`App::edit_noting`);
+    // so is this one, if it is one, which applies its new type.
     // The converted values must still be keys where a Relationship's one side is this column
     // (e.g. 1.1 and 1.2 both become 1 as whole numbers).
     doc.model

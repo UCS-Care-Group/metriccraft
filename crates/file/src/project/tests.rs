@@ -59,18 +59,21 @@ fn sample() -> Project {
         hidden: false,
         description: "Every sale".into(),
         columns: vec![region.clone(), qty, price, order],
+        measures: Vec::new(),
     });
     model.tables.push(ModelTable {
         name: "Unit Regions".into(),
         hidden: true,
         description: String::new(),
         columns: vec![Column::new("Region", ColumnType::Text)],
+        measures: Vec::new(),
     });
     model.tables.push(ModelTable {
         name: "sales".into(),
         hidden: false,
         description: String::new(),
         columns: vec![Column::new("x]y", ColumnType::Boolean)],
+        measures: Vec::new(),
     });
     model.relationships.push(Relationship::new(
         "Sales",
@@ -578,9 +581,82 @@ fn mutate(rng: &mut Rng, bytes: &mut Vec<u8>) {
     }
 }
 
+/// [`sample`] with Measures and Calculated columns.
+fn sample_with_expressions() -> Project {
+    let mut p = sample();
+    let sales = p.model.table_mut("Sales").unwrap();
+    let mut margin = Column::new("Margin", ColumnType::Decimal);
+    margin.expression = Some("[Qty] *\n    2 -- twice\n\n  + 1".into());
+    margin.query_type = ColumnType::Whole;
+    sales.columns.push(margin);
+    let mut total = Measure::new("Total Qty", "SUM ( Sales[Qty] )");
+    total.format_string = "#,0".into();
+    total.description = "All of it".into();
+    total.hidden = true;
+    sales.measures = vec![Measure::new("broken", "SUM(("), total];
+    p.model.table_mut("Unit Regions").unwrap().measures = vec![Measure::new("Count", "")];
+    p
+}
+
+#[test]
+fn measures_and_calculated_columns_round_trip() {
+    let project = sample_with_expressions();
+    let files = encode(&project, Some(&root()), &Preserved::default()).unwrap();
+    let sales = text(&files, "model/tables/Sales.odm");
+    assert!(
+        sales.contains(
+            "  column Margin =\n      [Qty] *\n          2 -- twice\n\n        + 1\n    \
+             dataType: decimal\n    queryType: whole\n"
+        ),
+        "{sales}"
+    );
+    assert!(
+        sales.ends_with(
+            "  measure broken =\n      SUM((\n  measure 'Total Qty' =\n      SUM ( Sales[Qty] \
+             )\n    formatString: \"#,0\"\n    description: \"All of it\"\n    hidden\n"
+        ),
+        "measures last, sorted by name: {sales}"
+    );
+    let (back, pre) = round_trip(&files);
+    assert_eq!(back, project);
+    assert_eq!(encode(&back, Some(&root()), &pre).unwrap(), files);
+    // The one-line form reads too.
+    let mut files = files;
+    let one_line = sales.replace(
+        "  measure broken =\n      SUM((\n",
+        "  measure broken = 1 + 2\n",
+    );
+    files.insert("model/tables/Sales.odm".into(), one_line.into_bytes());
+    rehash(&mut files, &[]);
+    let (back, _) = round_trip(&files);
+    let m = back
+        .model
+        .table("Sales")
+        .unwrap()
+        .measure("broken")
+        .unwrap();
+    assert_eq!(m.expression, "1 + 2");
+    // A Measure named like a Column, or twice, is refused.
+    for bad in [
+        "  measure Qty =\n      1\n",
+        "  measure 'total qty' =\n      1\n",
+    ] {
+        let mut files = encode(&project, Some(&root()), &Preserved::default()).unwrap();
+        let t = text(&files, "model/tables/Sales.odm") + bad;
+        files.insert("model/tables/Sales.odm".into(), t.into_bytes());
+        rehash(&mut files, &[]);
+        assert!(decode(&files, Some(&root())).is_err(), "{bad}");
+    }
+}
+
 #[test]
 fn opening_mutated_projects_never_panics() {
-    let base = encode(&sample(), Some(&root()), &Preserved::default()).unwrap();
+    let base = encode(
+        &sample_with_expressions(),
+        Some(&root()),
+        &Preserved::default(),
+    )
+    .unwrap();
     let paths: Vec<String> = base.keys().cloned().collect();
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
     let mut opened = 0;

@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::expression;
 use crate::file;
 use crate::load;
 use crate::model::{self, has_tables};
@@ -316,7 +317,7 @@ pub static COMMANDS: &[Command] = &[
         ribbon: "Column tools > Formatting",
         shortcut: None,
         params: "table: text — the Table\n\
-                 column: text — the Column\n\
+                 column: text — the Column or Measure\n\
                  formatString: text — a format string, e.g. #,0.00 (empty: the default)",
         enabled: has_tables,
         run: Run::Edit(model::set_format),
@@ -352,7 +353,7 @@ pub static COMMANDS: &[Command] = &[
         ribbon: "",
         shortcut: None,
         params: "table: text — the Table\n\
-                 column: text — one of its Columns (default: the Table itself)\n\
+                 column: text — one of its Columns or Measures (default: the Table itself)\n\
                  hidden: logical — default true",
         enabled: has_tables,
         run: Run::Edit(model::set_hidden),
@@ -364,7 +365,7 @@ pub static COMMANDS: &[Command] = &[
         ribbon: "",
         shortcut: None,
         params: "table: text — the Table\n\
-                 column: text — one of its Columns (default: the Table itself)\n\
+                 column: text — one of its Columns or Measures (default: the Table itself)\n\
                  description: text — empty clears it",
         enabled: has_tables,
         run: Run::Edit(model::set_description),
@@ -403,6 +404,54 @@ pub static COMMANDS: &[Command] = &[
                  another Query merges it)",
         enabled: has_tables,
         run: Run::Edit(rename::delete_table),
+    },
+    // Measures and Calculated columns (spec D-3; `expression.rs`): Modeling > Calculations,
+    // the formula bar, and the Fields pane's right-click > Rename / Delete from model.
+    Command {
+        id: "modeling.newMeasure",
+        label: "New measure",
+        ribbon: "Modeling > Calculations",
+        shortcut: None,
+        params: expression::NEW_MEASURE_PARAMS,
+        enabled: expression::has_model_tables,
+        run: Run::Edit(expression::new_measure),
+    },
+    Command {
+        id: "modeling.newColumn",
+        label: "New column",
+        ribbon: "Modeling > Calculations",
+        shortcut: None,
+        params: expression::NEW_COLUMN_PARAMS,
+        enabled: has_tables,
+        run: Run::Edit(expression::new_column),
+    },
+    Command {
+        id: "modeling.editExpression",
+        label: "Edit formula",
+        // The formula bar.
+        ribbon: "",
+        shortcut: None,
+        params: expression::EDIT_PARAMS,
+        enabled: expression::has_model_tables,
+        run: Run::Edit(expression::edit_expression),
+    },
+    Command {
+        id: "modeling.delete",
+        label: "Delete from model",
+        ribbon: "",
+        shortcut: Some("Delete"),
+        params: expression::DELETE_PARAMS,
+        enabled: expression::has_model_tables,
+        run: Run::Edit(expression::delete),
+    },
+    Command {
+        id: "modeling.renameMeasure",
+        label: "Rename",
+        ribbon: "",
+        shortcut: Some("F2"),
+        params: expression::RENAME_MEASURE_PARAMS,
+        enabled: expression::has_model_tables,
+        run: Run::App(expression::rename_measure),
     },
     // Relationships (spec D-2): Modeling > Manage relationships.
     Command {
