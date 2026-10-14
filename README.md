@@ -10,11 +10,19 @@
 ![licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue)
 
 A clean-room, open-source, Rust-native alternative to Microsoft Power BI Desktop: connect to
-data, shape it, model it, and build interactive reports. DAX results match Power BI; your work
-saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced web build via WASM.
+data, shape it, model it, and build interactive reports. The goal is DAX results identical to
+Power BI's, checked by parity cases whose expected values were observed in Power BI Desktop. Your
+work saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced web build via
+WASM.
 
-**Status:** specified; foundations in progress. Scope: [`docs/spec/`](docs/spec/). Plan:
-[`docs/plan/`](docs/plan/). Contributor and agent rules: [`AGENTS.md`](AGENTS.md).
+**Status:** pre-alpha. The desktop app connects to CSV/XLSX/Parquet, shapes data in a Power Query
+editor, models relationships, evaluates DAX and draws six visual types. Scope:
+[`docs/spec/`](docs/spec/). Plan: [`docs/plan/`](docs/plan/). Contributor and agent rules:
+[`AGENTS.md`](AGENTS.md).
+
+**Limitations:** not yet released, and not a drop-in replacement. It does not open `.pbix`/`.pbip`
+files, and supports only file data sources, a subset of DAX and M, and six visuals. There is no
+publishing or sharing (the Power BI Service half). Parity is measured only by the cases in this repo.
 
 ## Milestones
 
