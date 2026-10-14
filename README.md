@@ -24,7 +24,7 @@ saves to an open, text-based file. Native on Linux, Windows and macOS; a reduced
 | M1        | **Connect + shape**: CSV/XLSX/Parquet, Applied Steps, M            | ![11/13](https://img.shields.io/badge/-11%2F13-yellow)                |
 | M2        | **Model + file**: tables, relationships, Project and Package       | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![6/8](https://img.shields.io/badge/-6%2F8-yellow)                    |
+| M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![7/8](https://img.shields.io/badge/-7%2F8-yellow)                    |
 | M5        | **Desktop UI**: ribbon, Power Query editor, model view, canvas     | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 | M6        | **Control, CLI, MCP, web, release**                                | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
