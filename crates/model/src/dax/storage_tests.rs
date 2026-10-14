@@ -259,10 +259,13 @@ fn distinct_values_match_the_general_path() {
         cols.extend(number_cols(&mut rng, n));
         for col in &cols {
             for mask in masks(&mut rng, n) {
-                let got = distinct_values(col, n, mask.as_ref(), Cancel::default()).unwrap();
+                let got =
+                    distinct_values(col, n, mask.as_ref(), Cancel::default(), &mut |_| Ok(()))
+                        .unwrap();
                 assert_eq!(got, general_distinct(col, n, mask.as_ref()), "{n} rows");
                 // Past the column's end: BLANK, once.
-                let got = distinct_values(col, n + 3, None, Cancel::default()).unwrap();
+                let got =
+                    distinct_values(col, n + 3, None, Cancel::default(), &mut |_| Ok(())).unwrap();
                 assert_eq!(got, general_distinct(col, n + 3, None));
             }
         }
@@ -345,7 +348,7 @@ fn cancel_stops_the_fast_scans() {
     for col in dict_cols(&mut rng, n) {
         let allowed = Bitset::new(7, true);
         assert!(code_mask(&col, n, &allowed, true, cancel).is_err());
-        assert!(distinct_values(&col, n, None, cancel).is_err());
+        assert!(distinct_values(&col, n, None, cancel, &mut |_| Ok(())).is_err());
         assert!(distinct_count(&col, n, None, cancel).is_err());
     }
     for col in number_cols(&mut rng, n) {

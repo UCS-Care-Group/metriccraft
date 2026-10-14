@@ -465,15 +465,44 @@ impl Value {
         match (self, other) {
             (Value::Text(a), Value::Text(b)) => fold(a).cmp(&fold(b)),
             (Value::Boolean(a), Value::Boolean(b)) => a.cmp(b),
-            (a, b) if rank(a) == 1 && rank(b) == 1 => match a.compare(b) {
-                Ok(Some(o)) => o,
-                _ => {
-                    let (x, y) = (a.number_only(), b.number_only());
-                    x.unwrap_or(f64::NAN).total_cmp(&y.unwrap_or(f64::NAN))
+            (a, b) if rank(a) == 1 && rank(b) == 1 => match (a.sort_key(), b.sort_key()) {
+                (Some((ca, ia, fa)), Some((cb, ib, fb))) => {
+                    ca.cmp(&cb).then(ia.cmp(&ib)).then(fa.total_cmp(&fb))
                 }
+                _ => Ordering::Equal,
             },
             (a, b) => rank(a).cmp(&rank(b)),
         }
+    }
+
+    /// A number as an exact sort key `(class, whole part, fraction)`: class 0 is -∞, 1 finite,
+    /// 2 +∞, 3 NaN; a finite number is its floor (exact, in `i128`) and its fraction in
+    /// `[0, 1)`. Integers compare exactly with Decimals beyond 2⁵³ (no rounding to `f64`), so
+    /// [`Value::order`] is a total order over mixed numbers.
+    fn sort_key(&self) -> Option<(u8, i128, f64)> {
+        let float = |d: f64| {
+            if d.is_nan() {
+                (3, 0, 0.0)
+            } else if d == f64::INFINITY {
+                (2, 0, 0.0)
+            } else if d == f64::NEG_INFINITY {
+                (0, 0, 0.0)
+            } else {
+                let floor = d.floor();
+                // Every finite f64 is below 2^1024, but its floor fits i128 only below 2^127:
+                // beyond that `as` saturates, which still orders correctly against any i64.
+                (1, floor as i128, (d - floor).max(0.0))
+            }
+        };
+        Some(match self {
+            Value::Integer(i) => (1, i128::from(*i), 0.0),
+            Value::Currency(c) => {
+                let (whole, frac) = (c.div_euclid(CURRENCY_SCALE), c.rem_euclid(CURRENCY_SCALE));
+                (1, i128::from(whole), frac as f64 / CURRENCY_SCALE as f64)
+            }
+            Value::Decimal(d) | Value::DateTime(d) => float(*d),
+            _ => return None,
+        })
     }
 
     /// The value as DAX converts it to text (`&`, text functions).
@@ -787,5 +816,47 @@ mod tests {
             v.iter().map(Value::copy_text).collect::<Vec<_>>(),
             ["", "1", "1.5", "2", "NaN", "A", "b", "false"]
         );
+    }
+
+    /// Integers beyond 2^53 order exactly against Decimals (review M3 #6): `2^53`, `2^53 + 1` and
+    /// `2^53` as a Decimal used to be "equal" pairwise yet unequal as Integers, which isn't a
+    /// total order (`sort_by` may panic on that).
+    #[test]
+    fn sort_order_is_exact_beyond_2_pow_53() {
+        let big = 1i64 << 53;
+        let (a, b, c) = (Integer(big), Integer(big + 1), Decimal(big as f64));
+        assert_eq!(a.order(&c), Ordering::Equal);
+        assert_eq!(b.order(&c), Ordering::Greater);
+        assert_eq!(c.order(&b), Ordering::Less);
+        assert_eq!(a.order(&b), Ordering::Less);
+        assert_eq!(Integer(i64::MAX).order(&Decimal(9.3e18)), Ordering::Less);
+        assert_eq!(
+            Integer(i64::MIN).order(&Decimal(-9.3e18)),
+            Ordering::Greater
+        );
+        assert_eq!(Currency(-15_000).order(&Decimal(-1.5)), Ordering::Equal);
+        assert_eq!(Currency(-15_000).order(&Decimal(-1.4)), Ordering::Less);
+        assert_eq!(
+            Decimal(f64::INFINITY).order(&Integer(i64::MAX)),
+            Ordering::Greater
+        );
+        assert_eq!(
+            Decimal(f64::NEG_INFINITY).order(&Integer(i64::MIN)),
+            Ordering::Less
+        );
+        // Many mixed values near 2^53: sorting is consistent (every adjacent pair ordered).
+        let mut v: Vec<Value> = (0..200)
+            .map(|i: i64| {
+                let n = big - 50 + i / 2;
+                if i % 2 == 0 {
+                    Integer(n)
+                } else {
+                    Decimal(n as f64)
+                }
+            })
+            .collect();
+        v.reverse();
+        v.sort_by(Value::order);
+        assert!(v.windows(2).all(|w| w[0].order(&w[1]) != Ordering::Greater));
     }
 }

@@ -19,10 +19,10 @@ use opendash_core::Value;
 use opendash_dax::{BinOp, Define, Expr, ExprKind, Query, Span, UnaryOp};
 
 use super::functions::{self, Call};
-use super::storage::{self, Bitset, Cancel, Filter, Key, and};
+use super::storage::{self, Bitset, Cancel, DbTable, Filter, Key, and};
 use super::{
     Database, DaxError, ErrorKind, FilterContext, MAX_EVAL_DEPTH, MAX_EVAL_STACK,
-    MAX_MEASURE_CHAIN, MAX_RELATIONSHIP_DEPTH, Options, Result, ResultTable,
+    MAX_MEASURE_CHAIN, MAX_RELATIONSHIP_DEPTH, MAX_TEXT_BYTES, Options, Result, ResultTable,
 };
 use crate::same_name;
 
@@ -91,8 +91,17 @@ struct Measure<'q> {
 pub struct Evaluator<'a, 'q> {
     pub db: &'a Database,
     pub cancel: Cancel<'a>,
-    memory_left: usize,
+    /// Bytes intermediate data may use: the memory cap less the loaded data.
+    budget: usize,
+    /// Bytes charged by the evaluations in progress ([`Self::charge`]); a finished function
+    /// call, `VAR` block, Measure or row of an iteration refunds what it charged but for its
+    /// result's own bytes ([`Self::end_scope`]).
+    used: usize,
+    /// Bytes charged for the whole query: caches kept across calls ([`Self::pin`]).
+    pinned: usize,
     measures: Vec<Measure<'q>>,
+    /// [`Self::measures`] by [`crate::name_key`] (names are unique ignoring case).
+    measure_names: HashMap<String, usize>,
     measure_stack: Vec<usize>,
     /// Variables in scope, innermost last; the first `query_vars` are the query's `DEFINE VAR`s.
     vars: Vec<(String, Val)>,
@@ -110,8 +119,11 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         Self {
             db,
             cancel: Cancel(options.cancel),
-            memory_left: options.memory_cap.saturating_sub(db.loaded_bytes),
+            budget: options.memory_cap.saturating_sub(db.loaded_bytes),
+            used: 0,
+            pinned: 0,
             measures: Vec::new(),
+            measure_names: HashMap::new(),
             measure_stack: Vec::new(),
             vars: Vec::new(),
             query_vars: 0,
@@ -171,7 +183,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         expr: &'q Expr,
         span: Span,
     ) -> Result<()> {
-        if self.measures.iter().any(|m| same_name(&m.name, name)) {
+        if folded_get(&self.measure_names, name).is_some() {
             return Err(DaxError::new(
                 span,
                 format!("the Measure [{name}] is defined twice"),
@@ -192,6 +204,8 @@ impl<'a, 'q> Evaluator<'a, 'q> {
                 format!("'{table}' already has a Column [{name}]: a Measure needs another name"),
             ));
         }
+        self.measure_names
+            .insert(crate::name_key(name), self.measures.len());
         self.measures.push(Measure {
             table: table.into(),
             name: name.into(),
@@ -228,6 +242,10 @@ impl<'a, 'q> Evaluator<'a, 'q> {
                     .map(|k| ev.scalar(&k.expr, &root))
                     .collect::<Result<Vec<_>>>()
             })?;
+            self.charge(
+                k.iter().map(text_bytes).fold(0, usize::saturating_add),
+                span,
+            )?;
             sort_keys.push(k);
         }
         let mut order: Vec<usize> = (0..n).collect();
@@ -256,20 +274,43 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         Ok(rows)
     }
 
-    /// Counts `bytes` of intermediate data against the memory cap.
+    /// Counts `bytes` of intermediate data against the memory cap, until the function call,
+    /// `VAR` block, Measure or iteration row charging it finishes (see [`Self::end_scope`]).
     pub fn charge(&mut self, bytes: usize, span: Span) -> Result<()> {
-        if bytes > self.memory_left {
-            return Err(DaxError {
-                kind: ErrorKind::Memory,
-                span,
-                message: format!(
-                    "the query needs more memory than the memory cap leaves ({} MB)",
-                    self.memory_left >> 20
-                ),
-            });
+        let left = self.memory_left();
+        if bytes > left {
+            return Err(out_of_memory(span, left));
         }
-        self.memory_left -= bytes;
+        self.used = self.used.saturating_add(bytes);
         Ok(())
+    }
+
+    /// Counts `bytes` against the memory cap for the rest of the query: data kept across calls
+    /// (a cache such as `RELATED`'s lookups).
+    pub fn pin(&mut self, bytes: usize, span: Span) -> Result<()> {
+        let left = self.memory_left();
+        if bytes > left {
+            return Err(out_of_memory(span, left));
+        }
+        self.pinned = self.pinned.saturating_add(bytes);
+        Ok(())
+    }
+
+    /// Bytes intermediate data may still use.
+    pub fn memory_left(&self) -> usize {
+        self.budget
+            .saturating_sub(self.used.saturating_add(self.pinned))
+    }
+
+    /// Ends a memory scope begun when [`Self::used`] was `before`: what the scope charged is
+    /// refunded (its temporaries are dropped), but for the bytes its result still holds.
+    #[inline(never)]
+    fn end_scope(&mut self, before: usize, result: &Result<Val>) {
+        let kept = match result {
+            Ok(v) => val_bytes(v),
+            Err(_) => 0,
+        };
+        self.used = self.used.min(before.saturating_add(kept));
     }
 
     /// The row context, outermost first.
@@ -277,15 +318,18 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         &self.rows
     }
 
-    /// Runs `f` with `frame` as the innermost row context.
+    /// Runs `f` with `frame` as the innermost row context. The memory `f` charges is refunded
+    /// when it returns: a caller keeping its result charges what it keeps.
     pub fn with_row<T>(
         &mut self,
         frame: RowFrame,
         f: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
+        let before = self.used;
         self.rows.push(frame);
         let r = f(self);
         self.rows.pop();
+        self.used = self.used.min(before);
         r
     }
 
@@ -345,7 +389,8 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         let Some(f) = functions::lookup(&name.to_ascii_lowercase()) else {
             return Err(unknown_function(name, e.span));
         };
-        f(
+        let before = self.used;
+        let r = f(
             self,
             &Call {
                 name,
@@ -353,7 +398,9 @@ impl<'a, 'q> Evaluator<'a, 'q> {
                 span: e.span,
                 fc,
             },
-        )
+        );
+        self.end_scope(before, &r);
+        r
     }
 
     #[inline(never)]
@@ -371,6 +418,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             return Err(wrong_arm(e.span));
         };
         let base = self.vars.len();
+        let before = self.used;
         let mut r = Ok(());
         for (name, x) in vars {
             let v = self.eval(x, fc);
@@ -384,6 +432,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             Err(e) => Err(e),
         };
         self.vars.truncate(base);
+        self.end_scope(before, &r);
         r
     }
 
@@ -511,9 +560,9 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     }
 
     fn find_measure(&self, table: Option<&str>, name: &str) -> Option<usize> {
-        self.measures
-            .iter()
-            .position(|m| same_name(&m.name, name) && table.is_none_or(|t| same_name(&m.table, t)))
+        let &m = folded_get(&self.measure_names, name)?;
+        let home = &self.measures.get(m)?.table;
+        table.is_none_or(|t| same_name(home, t)).then_some(m)
     }
 
     /// Evaluates Measure `m` under `fc`.
@@ -535,6 +584,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             &transitioned
         };
         let rows = std::mem::take(&mut self.rows);
+        let before = self.used;
         self.measure_stack.push(m);
         // A Measure sees the query's VARs, not the caller's.
         let local = self.vars.split_off(self.query_vars.min(self.vars.len()));
@@ -543,7 +593,9 @@ impl<'a, 'q> Evaluator<'a, 'q> {
         self.vars.extend(local);
         self.measure_stack.pop();
         self.rows = rows;
-        r.map(Val::Scalar)
+        let r = r.map(Val::Scalar);
+        self.end_scope(before, &r);
+        r
     }
 
     /// Why Measure `m` can't be evaluated here (see [`Self::measure`]).
@@ -697,7 +749,10 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     /// `t` as rows of values (a storage scan for a model Table), charged to the memory cap.
     pub fn materialise(&mut self, t: &TableVal, span: Span) -> Result<Rows> {
         let (table, mask) = match t {
-            TableVal::Rows(r) => return Ok(r.clone()),
+            TableVal::Rows(r) => {
+                self.charge(rows_bytes(r), span)?;
+                return Ok(r.clone());
+            }
             TableVal::Base { table, rows } => (*table, rows.as_ref()),
         };
         let dt = self
@@ -712,7 +767,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             span,
         )?;
         let mut out = Vec::with_capacity(n);
-        let (mut text, left) = (0usize, self.memory_left);
+        let (mut text, left) = (0usize, self.memory_left());
         storage::scan(dt.rows, mask, self.cancel, |r| {
             let row: Vec<Value> = dt.columns.iter().map(|c| c.data.value(r)).collect();
             text = dt
@@ -748,155 +803,278 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     /// through active Relationships (many → one) the filters on the Tables it reaches, and the
     /// row-set filters of Tables that reach it (a table filter filters its *expanded* Table:
     /// the one side keeps the rows the filter's rows reach).
+    ///
+    /// The Tables on the way from `table` apply their own row sets: a Table reached from them
+    /// leaves their row-set filters out (as `excluded` bits), so a row of theirs whose key has no
+    /// match isn't dropped by its own filter's projection.
+    ///
+    /// Each Table's rows (per set of row-set filters left out), and each row-set filter's
+    /// projection onto a Table, are worked out once per call ([`Walk`]), so stacked diamonds of
+    /// Relationships cost linear time, not one pass per path. Depth along Relationships is
+    /// capped at [`MAX_RELATIONSHIP_DEPTH`].
     pub fn mask(&self, table: usize, fc: &FilterContext, span: Span) -> Result<Option<Bitset>> {
-        let mut path = Vec::new();
-        self.mask_on_path(table, fc, span, &mut path)
+        let n = self.db.tables.len();
+        let mut walk = Walk {
+            masks: HashMap::new(),
+            busy: vec![false; n],
+            sources: vec![0; n],
+            bits: Vec::with_capacity(fc.filters.len()),
+            projections: HashMap::new(),
+        };
+        let mut next = 0u32;
+        for f in &fc.filters {
+            walk.bits.push(match f.as_ref() {
+                Filter::Rows { table: from, .. } => {
+                    let bit = 1u64.checked_shl(next).ok_or_else(|| {
+                        DaxError::limit(span, "more than 64 table filters apply at once")
+                    })?;
+                    next += 1;
+                    if let Some(s) = walk.sources.get_mut(*from) {
+                        *s |= bit;
+                    }
+                    bit
+                }
+                Filter::Column { .. } => 0,
+            });
+        }
+        self.mask_of(table, 0, fc, span, 0, &mut walk)
     }
 
-    fn mask_on_path(
+    fn mask_of(
         &self,
         table: usize,
+        excluded: u64,
         fc: &FilterContext,
         span: Span,
-        path: &mut Vec<usize>,
+        depth: usize,
+        walk: &mut Walk,
     ) -> Result<Option<Bitset>> {
-        if path.len() >= MAX_RELATIONSHIP_DEPTH {
-            return Err(DaxError::limit(
-                span,
-                format!("filters cross more than {MAX_RELATIONSHIP_DEPTH} Relationships"),
-            ));
+        if let Some(done) = walk.masks.get(&(table, excluded)) {
+            return Ok(done.clone());
+        }
+        if depth >= MAX_RELATIONSHIP_DEPTH {
+            return Err(too_many_relationships(span));
         }
         let Some(t) = self.db.tables.get(table) else {
             return Ok(None);
         };
-        path.push(table);
-        let mut mask = None;
-        let mut result = Ok(());
-        for f in &fc.filters {
-            let step = match f.as_ref() {
-                _ if f.table() == table => f.rows(t, self.cancel).map(Some),
-                // The Tables on the path apply their own row sets.
-                Filter::Rows { table: from, rows } if !path.contains(from) => {
-                    let mut seen = vec![*from];
-                    self.project_up(*from, rows, table, span, &mut seen)
-                }
-                Filter::Rows { .. } | Filter::Column { .. } => Ok(None),
-            };
-            match step {
-                Ok(Some(rows)) => mask = and(mask, rows),
-                Ok(None) => {}
-                Err(e) => {
-                    result = Err(e);
-                    break;
-                }
-            }
+        self.cancel.check()?;
+        if let Some(b) = walk.busy.get_mut(table) {
+            *b = true;
         }
-        if result.is_ok() {
-            for r in &self.db.relationships {
-                if !r.active || r.from_table != table || path.contains(&r.to_table) {
-                    continue;
-                }
-                let step = (|| {
-                    let Some(one) = self.mask_on_path(r.to_table, fc, span, path)? else {
-                        return Ok(None);
-                    };
-                    let (Some(to), Some(from)) =
-                        (self.db.tables.get(r.to_table), t.columns.get(r.from_column))
-                    else {
-                        return Ok(None);
-                    };
-                    let Some(key) = to.columns.get(r.to_column) else {
-                        return Ok(None);
-                    };
-                    let keys = storage::key_set(to, &key.data, &one, self.cancel)?;
-                    storage::semijoin(t, &from.data, &keys, self.cancel).map(Some)
-                })();
-                match step {
-                    Ok(Some(rows)) => mask = and(mask, rows),
-                    Ok(None) => {}
-                    Err(e) => {
-                        result = Err(e);
-                        break;
-                    }
-                }
-            }
+        let r = self.mask_parts(table, t, excluded, fc, span, depth, walk);
+        if let Some(b) = walk.busy.get_mut(table) {
+            *b = false;
         }
-        path.pop();
-        result.map(|()| mask)
+        let mask = r?;
+        // The Table asked for is never reached again: only the ones below it are memoised.
+        if depth > 0 {
+            walk.masks.insert((table, excluded), mask.clone());
+        }
+        Ok(mask)
     }
 
-    /// The rows of `target` that rows `rows` of Table `from` reach through active Relationships
-    /// (many → one); `None` when `target` isn't reached. `seen`: the Tables on the way.
-    fn project_up(
+    /// [`Self::mask_of`]'s work: `table`'s own filters, the row-set filters reaching it (but
+    /// the `excluded` ones), and the Tables it reaches (those on the way to it skipped: a
+    /// cycle).
+    #[allow(clippy::too_many_arguments)]
+    fn mask_parts(
         &self,
-        from: usize,
-        rows: &Bitset,
-        target: usize,
+        table: usize,
+        t: &DbTable,
+        excluded: u64,
+        fc: &FilterContext,
         span: Span,
-        seen: &mut Vec<usize>,
+        depth: usize,
+        walk: &mut Walk,
     ) -> Result<Option<Bitset>> {
-        if seen.len() > MAX_RELATIONSHIP_DEPTH {
-            return Err(DaxError::limit(
-                span,
-                format!("filters cross more than {MAX_RELATIONSHIP_DEPTH} Relationships"),
-            ));
+        let mut mask = None;
+        for (i, f) in fc.filters.iter().enumerate() {
+            let bit = walk.bits.get(i).copied().unwrap_or(0);
+            let rows = match f.as_ref() {
+                _ if f.table() == table => Some(f.rows(t, self.cancel)?),
+                Filter::Rows { .. } if excluded & bit != 0 => None,
+                Filter::Rows { table: from, rows } => {
+                    self.projection(i, *from, rows, table, span, depth, walk)?
+                }
+                Filter::Column { .. } => None,
+            };
+            if let Some(rows) = rows {
+                mask = and(mask, rows);
+            }
         }
-        let Some(t) = self.db.tables.get(from) else {
-            return Ok(None);
-        };
-        let mut out = None;
+        let below = excluded | walk.sources.get(table).copied().unwrap_or(0);
         for r in &self.db.relationships {
-            if !r.active || r.from_table != from || seen.contains(&r.to_table) {
+            if !r.active || r.from_table != table || walk.busy.get(r.to_table) != Some(&false) {
                 continue;
             }
-            if r.to_table != target && !self.reaches(r.to_table, target, seen) {
+            let Some(one) = self.mask_of(r.to_table, below, fc, span, depth + 1, walk)? else {
                 continue;
-            }
-            let (Some(to), Some(key)) =
+            };
+            let (Some(to), Some(from)) =
                 (self.db.tables.get(r.to_table), t.columns.get(r.from_column))
             else {
                 continue;
             };
-            let Some(one_key) = to.columns.get(r.to_column) else {
+            let Some(key) = to.columns.get(r.to_column) else {
                 continue;
             };
-            let keys = storage::key_set(t, &key.data, rows, self.cancel)?;
-            let reached = storage::semijoin(to, &one_key.data, &keys, self.cancel)?;
-            if r.to_table == target {
-                out = and(out, reached);
+            let keys = storage::key_set(to, &key.data, &one, self.cancel)?;
+            mask = and(mask, storage::semijoin(t, &from.data, &keys, self.cancel)?);
+        }
+        Ok(mask)
+    }
+
+    /// The rows of `target` that rows `rows` of Table `from` (filter `filter` of the context)
+    /// reach through active Relationships (many → one), ANDed over the Relationships into
+    /// `target`; `None` when `target` isn't reached. Memoised per filter and Table in `walk`.
+    #[allow(clippy::too_many_arguments)]
+    fn projection(
+        &self,
+        filter: usize,
+        from: usize,
+        rows: &Bitset,
+        target: usize,
+        span: Span,
+        depth: usize,
+        walk: &mut Walk,
+    ) -> Result<Option<Bitset>> {
+        if depth >= MAX_RELATIONSHIP_DEPTH {
+            return Err(too_many_relationships(span));
+        }
+        let n = self.db.tables.len();
+        let p = walk
+            .projections
+            .entry(filter)
+            .or_insert_with(|| Projection {
+                reach: self.reachable(from),
+                rows: vec![None; n],
+                busy: vec![false; n],
+            });
+        if p.reach.get(target) != Some(&true) {
+            return Ok(None);
+        }
+        if let Some(Some(done)) = p.rows.get(target) {
+            return Ok(done.clone());
+        }
+        self.cancel.check()?;
+        if let Some(b) = p.busy.get_mut(target) {
+            *b = true;
+        }
+        let r = self.projection_parts(filter, from, rows, target, span, depth, walk);
+        if let Some(p) = walk.projections.get_mut(&filter) {
+            if let Some(b) = p.busy.get_mut(target) {
+                *b = false;
+            }
+            if let (Ok(out), Some(slot)) = (&r, p.rows.get_mut(target)) {
+                *slot = Some(out.clone());
+            }
+        }
+        r
+    }
+
+    /// [`Self::projection`]'s work: over each active Relationship into `target` from `from` or
+    /// a Table `from` reaches, the source rows' keys matched on `target`.
+    #[allow(clippy::too_many_arguments)]
+    fn projection_parts(
+        &self,
+        filter: usize,
+        from: usize,
+        rows: &Bitset,
+        target: usize,
+        span: Span,
+        depth: usize,
+        walk: &mut Walk,
+    ) -> Result<Option<Bitset>> {
+        let Some(to) = self.db.tables.get(target) else {
+            return Ok(None);
+        };
+        let mut out = None;
+        for r in &self.db.relationships {
+            if !r.active || r.to_table != target || r.from_table == target {
                 continue;
             }
-            seen.push(r.to_table);
-            let further = self.project_up(r.to_table, &reached, target, span, seen);
-            seen.pop();
-            if let Some(m) = further? {
-                out = and(out, m);
-            }
+            let source = if r.from_table == from {
+                Some(rows.clone())
+            } else {
+                let usable = walk.projections.get(&filter).is_some_and(|p| {
+                    p.reach.get(r.from_table) == Some(&true)
+                        && p.busy.get(r.from_table) == Some(&false)
+                });
+                if !usable {
+                    continue;
+                }
+                self.projection(filter, from, rows, r.from_table, span, depth + 1, walk)?
+            };
+            let Some(source) = source else {
+                continue;
+            };
+            let (Some(t), Some(one_key)) = (
+                self.db.tables.get(r.from_table),
+                to.columns.get(r.to_column),
+            ) else {
+                continue;
+            };
+            let Some(key) = t.columns.get(r.from_column) else {
+                continue;
+            };
+            let keys = storage::key_set(t, &key.data, &source, self.cancel)?;
+            out = and(
+                out,
+                storage::semijoin(to, &one_key.data, &keys, self.cancel)?,
+            );
         }
         Ok(out)
     }
 
-    /// Whether `target` is reachable from `from` over active Relationships (many → one)
-    /// without passing the Tables in `avoid`.
-    fn reaches(&self, from: usize, target: usize, avoid: &[usize]) -> bool {
-        let mut seen = vec![from];
-        let mut next = 0;
-        while let Some(&t) = seen.get(next) {
-            next += 1;
+    /// The Tables reachable from `from` over active Relationships (many → one), by index.
+    fn reachable(&self, from: usize) -> Vec<bool> {
+        let mut reach = vec![false; self.db.tables.len()];
+        let mut queue = vec![from];
+        while let Some(t) = queue.pop() {
             for r in &self.db.relationships {
-                if !r.active || r.from_table != t {
-                    continue;
-                }
-                if r.to_table == target {
-                    return true;
-                }
-                if !seen.contains(&r.to_table) && !avoid.contains(&r.to_table) {
-                    seen.push(r.to_table);
+                if r.active
+                    && r.from_table == t
+                    && let Some(slot) = reach.get_mut(r.to_table)
+                    && !*slot
+                {
+                    *slot = true;
+                    queue.push(r.to_table);
                 }
             }
         }
-        false
+        reach
     }
+}
+
+/// [`Evaluator::mask`]'s memo: each Table's visible rows once worked out, the Tables being
+/// worked out (a Relationship back to one is a cycle, skipped), and the row-set filters'
+/// projections.
+struct Walk {
+    /// By (Table, row-set filters left out).
+    masks: HashMap<(usize, u64), Option<Bitset>>,
+    busy: Vec<bool>,
+    /// Per Table, the bits of the row-set filters it is the Table of.
+    sources: Vec<u64>,
+    /// Per filter of the context, its bit (0: not a row-set filter).
+    bits: Vec<u64>,
+    projections: HashMap<usize, Projection>,
+}
+
+/// One row-set filter's projection onto the Tables its Table reaches.
+struct Projection {
+    reach: Vec<bool>,
+    rows: Vec<Option<Option<Bitset>>>,
+    busy: Vec<bool>,
+}
+
+#[cold]
+#[inline(never)]
+fn too_many_relationships(span: Span) -> DaxError {
+    DaxError::limit(
+        span,
+        format!("filters cross more than {MAX_RELATIONSHIP_DEPTH} Relationships"),
+    )
 }
 
 /// Where the stack is now (the address of a local): [`Evaluator::eval`] measures how much
@@ -928,7 +1106,7 @@ fn unary_op(
 /// A binary operator (not `IN`) applied to its evaluated operands.
 #[inline(never)]
 fn binary_op(
-    ev: &Evaluator<'_, '_>,
+    ev: &mut Evaluator<'_, '_>,
     op: BinOp,
     a: Value,
     b: Result<Val>,
@@ -945,7 +1123,7 @@ fn binary_op(
         BinOp::Multiply => a.multiply(&b),
         BinOp::Divide => a.divide(&b),
         BinOp::Power => a.power(&b),
-        BinOp::Concat => Ok(a.concat(&b)),
+        BinOp::Concat => return concat(ev, &a, &b, span),
         BinOp::And => a.and(&b),
         BinOp::Or => a.or(&b),
         BinOp::Equal => a.equals(&b).map(Value::Boolean),
@@ -960,6 +1138,90 @@ fn binary_op(
         BinOp::In => return Err(wrong_arm(span)),
     };
     v.map(Val::Scalar).map_err(|e| value_error(span, &e))
+}
+
+/// `a & b`: its text is at most [`MAX_TEXT_BYTES`] long and charged to the memory cap, so
+/// text doubled through `VAR`s fails fast rather than exhausting memory (review M3 #1).
+#[inline(never)]
+fn concat(ev: &mut Evaluator<'_, '_>, a: &Value, b: &Value, span: Span) -> Result<Val> {
+    if text_bytes(a).saturating_add(text_bytes(b)) > MAX_TEXT_BYTES {
+        return Err(text_too_long(span));
+    }
+    let v = a.concat(b);
+    let n = text_bytes(&v);
+    if n > MAX_TEXT_BYTES {
+        return Err(text_too_long(span));
+    }
+    ev.charge(n, span)?;
+    Ok(Val::Scalar(v))
+}
+
+#[cold]
+#[inline(never)]
+fn text_too_long(span: Span) -> DaxError {
+    DaxError::limit(
+        span,
+        format!(
+            "the text would be longer than {} MiB, the longest a text value may be",
+            MAX_TEXT_BYTES >> 20
+        ),
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn out_of_memory(span: Span, left: usize) -> DaxError {
+    DaxError {
+        kind: ErrorKind::Memory,
+        span,
+        message: format!(
+            "the query needs more memory than the memory cap leaves ({} MB)",
+            left >> 20
+        ),
+    }
+}
+
+/// `map[name]` ignoring case, for a map keyed by [`crate::name_key`]: an ASCII name of up to 64
+/// bytes is folded on the stack (no allocation per lookup).
+fn folded_get<'m, V>(map: &'m HashMap<String, V>, name: &str) -> Option<&'m V> {
+    let mut buf = [0u8; 64];
+    if name.is_ascii()
+        && let Some(b) = buf.get_mut(..name.len())
+    {
+        b.copy_from_slice(name.as_bytes());
+        b.make_ascii_lowercase();
+        return map.get(std::str::from_utf8(b).ok()?);
+    }
+    map.get(&crate::name_key(name))
+}
+
+/// Bytes a result holds, as charged while it was built: a materialised table's values and
+/// rows, a row set's bits, a text's bytes.
+fn val_bytes(v: &Val) -> usize {
+    match v {
+        Val::Scalar(v) => text_bytes(v),
+        Val::Table(t) => match t.as_ref() {
+            TableVal::Base { rows, .. } => rows
+                .as_ref()
+                .map_or(0, |b| b.words().len().saturating_mul(8)),
+            TableVal::Rows(r) => rows_bytes(r),
+        },
+    }
+}
+
+/// Bytes materialised rows cost, as [`Evaluator::materialise`] charges them.
+pub(super) fn rows_bytes(r: &Rows) -> usize {
+    let width = r.columns.len();
+    let text = r
+        .rows
+        .iter()
+        .flatten()
+        .map(text_bytes)
+        .fold(0usize, usize::saturating_add);
+    r.rows
+        .len()
+        .saturating_mul(width.saturating_mul(VALUE_BYTES).saturating_add(ROW_BYTES))
+        .saturating_add(text)
 }
 
 /// The table a constructor's rows make.

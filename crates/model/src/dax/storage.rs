@@ -218,11 +218,12 @@ pub enum Key {
 impl Key {
     /// `None` for BLANK. `trim`: ignore trailing spaces in text (Relationship keys).
     pub fn of(v: &Value, trim: bool) -> Option<Key> {
+        // A whole float within i64's range is the Integer it equals exactly (`as` is exact
+        // there), so Integer(10^16) and Decimal(1e16) are one key (review M3 #7).
+        const I64_END: f64 = 9_223_372_036_854_775_808.0; // 2^63
         let float = |f: f64| {
-            if f.fract() == 0.0 && f.abs() < 9.0e15 {
+            if f.fract() == 0.0 && (-I64_END..I64_END).contains(&f) {
                 Key::Int(f as i64)
-            } else if f == 0.0 {
-                Key::Int(0)
             } else if f.is_nan() {
                 Key::Float(f64::NAN.to_bits())
             } else {
@@ -1310,12 +1311,16 @@ where
 
 /// The distinct values of `col` over the rows of `0..rows` in `mask`, in first-seen order
 /// (text ignoring case: the first spelling seen wins), BLANK among them: a scan. A dictionary
-/// column collects codes ([`first_codes`]), then reads each code's value once.
+/// column collects codes ([`first_codes`]), then reads each code's value once. `on_new` sees
+/// each new value before it is kept (to charge it to the memory cap as the set grows): its
+/// error stops the scan. (`dyn`, not generic: one copy of the code-collecting loop, which a
+/// generic copy per caller made measurably slower.)
 pub fn distinct_values(
     col: &Col,
     rows: usize,
     mask: Option<&Bitset>,
     cancel: Cancel<'_>,
+    on_new: &mut dyn FnMut(&Value) -> Result<()>,
 ) -> Result<Vec<Value>> {
     let mut keys: HashSet<Option<Key>> = HashSet::new();
     let mut out = Vec::new();
@@ -1323,6 +1328,7 @@ pub fn distinct_values(
         for code in first_codes(col, rows, mask, cancel)? {
             let v = code.map_or(Value::Blank, |c| Value::text(dict.value(c)));
             if keys.insert(Key::of(&v, false)) {
+                on_new(&v)?;
                 out.push(v);
             }
         }
@@ -1331,6 +1337,7 @@ pub fn distinct_values(
     scan(rows, mask, cancel, |r| {
         let v = col.value(r);
         if keys.insert(Key::of(&v, false)) {
+            on_new(&v)?;
             out.push(v);
         }
         Ok(())

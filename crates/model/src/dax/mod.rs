@@ -13,9 +13,11 @@
 //!   `FILTER(T, …)`) also restricts the one side of `T`'s active Relationships (expanded tables).
 //! - **Errors** ([`DaxError`]) carry the span of the failing sub-expression.
 //! - **Bounds**: evaluation depth [`MAX_EVAL_DEPTH`] and stack [`MAX_EVAL_STACK`], Measure chains [`MAX_MEASURE_CHAIN`],
-//!   Relationship paths [`MAX_RELATIONSHIP_DEPTH`]; intermediate tables count against the memory
-//!   cap left after the loaded data; the cancel flag is checked between scans and every
-//!   [`storage::CHUNK`] rows.
+//!   Relationship paths [`MAX_RELATIONSHIP_DEPTH`], text values [`MAX_TEXT_BYTES`];
+//!   intermediate data counts against the memory cap left after the loaded data, and is
+//!   refunded when the function call, `VAR` block, Measure or iteration row that made it
+//!   finishes (its result stays charged); the cancel flag is checked between scans, at each
+//!   Table a filter propagates to, and every [`storage::CHUNK`] rows.
 //!
 //! **Adding a DAX function** is a one-place change in [`functions`]: see its module doc.
 
@@ -23,6 +25,8 @@ pub mod calculate;
 pub mod eval;
 pub mod functions;
 pub mod model_eval;
+#[cfg(test)]
+mod review_tests;
 pub mod storage;
 #[cfg(test)]
 mod tests;
@@ -49,8 +53,12 @@ pub const MAX_EVAL_DEPTH: usize = 512;
 pub const MAX_EVAL_STACK: usize = 640 << 10;
 /// Measures referencing Measures, deepest chain (ADR 0006).
 pub const MAX_MEASURE_CHAIN: usize = 64;
-/// Relationships followed from one Table when propagating filters.
+/// Relationships followed in a row (a chain's depth, not the Tables reached) when propagating
+/// filters.
 pub const MAX_RELATIONSHIP_DEPTH: usize = 64;
+/// The longest text value `&` may build (a `Limit` error beyond it); text is also charged to
+/// the memory cap.
+pub const MAX_TEXT_BYTES: usize = 64 << 20;
 
 /// What went wrong, for callers that treat them differently (`ISERROR` catches only `Eval`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

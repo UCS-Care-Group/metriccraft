@@ -424,3 +424,33 @@ fn calculated_columns_use_measures_and_related() {
     assert_eq!(ints(&app, "Rank"), [Some(1), Some(2), Some(1)]);
     assert!(app.document().formula_errors.is_empty());
 }
+
+/// Review M3 #1: text doubled through `VAR`s in a Calculated column (as a hostile file could
+/// hold) is the column's error, fast, not an out-of-memory abort; the column holds BLANKs.
+#[test]
+fn calculated_text_growth_is_the_columns_error() {
+    let mut app = app();
+    let mut expression = String::from("VAR a0 = \"xxxxxxxxxxxxxxxx\" ");
+    for i in 1..=40 {
+        expression += &format!("VAR a{i} = a{p} & a{p} ", p = i - 1);
+    }
+    expression += "RETURN a40";
+    let start = std::time::Instant::now();
+    run(
+        &mut app,
+        "modeling.newColumn",
+        json!({"table": "Sales", "name": "Huge", "expression": expression}),
+    );
+    assert!(start.elapsed() < std::time::Duration::from_secs(20));
+    let errors = &app.document().formula_errors;
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(errors[0].column, "Huge");
+    assert!(
+        errors[0].message.contains("longest a text value"),
+        "{errors:?}"
+    );
+    assert_eq!(
+        one(&app, "EVALUATE ROW(\"n\", COUNTROWS(Sales))"),
+        DaxValue::Integer(3)
+    );
+}

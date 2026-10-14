@@ -318,21 +318,17 @@ fn distinct(
     if let [c] = columns
         && let Some(col) = t.columns.get(*c)
     {
-        let values = storage::distinct_values(&col.data, t.rows, mask, ev.cancel)?;
-        let bytes = values.iter().fold(0usize, |b, v| {
-            let b = b.saturating_add(VALUE_BYTES.saturating_add(KEY_BYTES));
-            match v {
-                Value::Text(s) => b.saturating_add(s.len().saturating_mul(2)),
-                _ => b,
-            }
-        });
-        ev.charge(bytes, span)?;
+        // Charged as the set grows, so a huge one fails before it is built.
+        let cancel = ev.cancel;
+        let values = storage::distinct_values(&col.data, t.rows, mask, cancel, &mut |v| {
+            ev.charge(tuple_bytes(std::slice::from_ref(v)), span)
+        })?;
         return Ok(values.into_iter().map(|v| vec![v]).collect());
     }
     let mut seen: HashSet<Vec<Option<Key>>> = HashSet::new();
     let mut out = Vec::new();
-    let mut bytes = 0usize;
-    storage::scan(t.rows, mask, ev.cancel, |r| {
+    let cancel = ev.cancel;
+    storage::scan(t.rows, mask, cancel, |r| {
         let values: Vec<Value> = columns
             .iter()
             .map(|&c| {
@@ -341,22 +337,26 @@ fn distinct(
                     .map_or(Value::Blank, |col| col.data.value(r))
             })
             .collect();
-        if seen.insert(tuple_key(&values)) {
-            bytes = bytes.saturating_add(
-                columns
-                    .len()
-                    .saturating_mul(VALUE_BYTES.saturating_add(KEY_BYTES)),
-            );
-            bytes = values.iter().fold(bytes, |b, v| match v {
-                Value::Text(s) => b.saturating_add(s.len().saturating_mul(2)),
-                _ => b,
-            });
+        let key = tuple_key(&values);
+        if !seen.contains(&key) {
+            ev.charge(tuple_bytes(&values), span)?;
+            seen.insert(key);
             out.push(values);
         }
         Ok(())
     })?;
-    ev.charge(bytes, span)?;
     Ok(out)
+}
+
+/// Bytes a distinct tuple costs: its values and their keys in the set (text twice).
+fn tuple_bytes(values: &[Value]) -> usize {
+    values.iter().fold(0usize, |b, v| {
+        let b = b.saturating_add(VALUE_BYTES.saturating_add(KEY_BYTES));
+        match v {
+            Value::Text(s) => b.saturating_add(s.len().saturating_mul(2)),
+            _ => b,
+        }
+    })
 }
 
 /// `(Table, Column)` of a written `T[C]`.
@@ -400,22 +400,41 @@ fn table_ref(ev: &Evaluator<'_, '_>, e: &Expr, what: &str) -> Result<usize> {
 
 /// The Tables `table` expands to: itself and every Table it reaches through active
 /// Relationships, many → one.
+///
+/// Breadth-first, a level per Relationship followed: a chain deeper than
+/// [`MAX_RELATIONSHIP_DEPTH`] is a `Limit` error, however many Tables a level has (a star).
 pub(super) fn expanded(ev: &Evaluator<'_, '_>, table: usize, span: Span) -> Result<Vec<usize>> {
+    let mut seen = vec![false; ev.db.tables.len()];
+    if let Some(s) = seen.get_mut(table) {
+        *s = true;
+    }
     let mut out = vec![table];
-    let mut next = 0;
-    while let Some(&t) = out.get(next) {
-        next += 1;
-        if next > MAX_RELATIONSHIP_DEPTH {
-            return Err(DaxError::limit(
-                span,
-                format!("Relationships chain more than {MAX_RELATIONSHIP_DEPTH} Tables"),
-            ));
-        }
-        for r in &ev.db.relationships {
-            if r.active && r.from_table == t && !out.contains(&r.to_table) {
-                out.push(r.to_table);
+    let (mut level, mut depth) = (0, 0);
+    while level < out.len() {
+        let end = out.len();
+        for i in level..end {
+            let Some(&t) = out.get(i) else { break };
+            for r in &ev.db.relationships {
+                if r.active
+                    && r.from_table == t
+                    && let Some(s) = seen.get_mut(r.to_table)
+                    && !*s
+                {
+                    *s = true;
+                    out.push(r.to_table);
+                }
             }
         }
+        if out.len() > end {
+            depth += 1;
+            if depth > MAX_RELATIONSHIP_DEPTH {
+                return Err(DaxError::limit(
+                    span,
+                    format!("Relationships chain more than {MAX_RELATIONSHIP_DEPTH} deep"),
+                ));
+            }
+        }
+        level = end;
     }
     Ok(out)
 }
@@ -798,6 +817,7 @@ pub fn filter(ev: &mut Evaluator<'_, '_>, call: &Call<'_>) -> Result<Val> {
         }
         TableVal::Rows(rows) => {
             let columns = rows.columns.clone();
+            ev.charge(super::eval::rows_bytes(rows), call.span)?;
             let kept = keep_rows(ev, rows.clone(), cond, call.fc)?;
             Ok(Val::Table(Rc::new(TableVal::Rows(Rows {
                 columns,
@@ -990,7 +1010,8 @@ pub(super) fn related_index(
         && let Some(t) = ev.db.tables.get(r.to_table)
         && let Some(col) = t.columns.get(r.to_column)
     {
-        ev.charge(
+        // Kept for the rest of the query (a cache), so pinned rather than charged to a call.
+        ev.pin(
             t.rows
                 .saturating_mul(KEY_BYTES.saturating_add(std::mem::size_of::<usize>())),
             span,
