@@ -29,6 +29,11 @@ pub struct Tokens {
     pub hover: Color32,
     pub danger: Color32,
     pub warning: Color32,
+    /// Code colouring (DAX, M): functions, Fields and Tables, text, numbers. Comments are muted.
+    pub code_function: Color32,
+    pub code_field: Color32,
+    pub code_text: Color32,
+    pub code_number: Color32,
 }
 
 impl Tokens {
@@ -46,6 +51,10 @@ impl Tokens {
                 hover: Color32::from_rgb(0xe3, 0xef, 0xec),
                 danger: Color32::from_rgb(0xb4, 0x23, 0x18),
                 warning: Color32::from_rgb(0x9a, 0x5b, 0x00),
+                code_function: Color32::from_rgb(0x1f, 0x4f, 0xb4),
+                code_field: Color32::from_rgb(0x7a, 0x3a, 0x9a),
+                code_text: Color32::from_rgb(0xa1, 0x3c, 0x14),
+                code_number: Color32::from_rgb(0x1a, 0x6a, 0x3a),
             },
             Mode::Dark => Tokens {
                 mode,
@@ -59,6 +68,10 @@ impl Tokens {
                 hover: Color32::from_rgb(0x26, 0x34, 0x31),
                 danger: Color32::from_rgb(0xf0, 0x6a, 0x5f),
                 warning: Color32::from_rgb(0xe0, 0xa4, 0x3c),
+                code_function: Color32::from_rgb(0x82, 0xaa, 0xff),
+                code_field: Color32::from_rgb(0xd2, 0x9b, 0xf0),
+                code_text: Color32::from_rgb(0xf0, 0xa0, 0x70),
+                code_number: Color32::from_rgb(0x7c, 0xd3, 0x9b),
             },
         }
     }
@@ -118,6 +131,9 @@ mod tests {
             }
             assert!(contrast(t.accent, t.panel) >= 3.0, "{mode:?} accent");
             assert!(contrast(t.danger, t.panel) >= 4.5, "{mode:?} danger");
+            for c in [t.code_function, t.code_field, t.code_text, t.code_number] {
+                assert!(contrast(c, t.base) >= 4.5, "{mode:?} code {c:?}");
+            }
         }
     }
 }

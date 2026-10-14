@@ -220,3 +220,38 @@ fn model_view_moves_tables_and_relates_columns_dragged_either_way() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn new_measure_opens_the_formula_bar_and_enter_commits() {
+    let dir = std::env::temp_dir().join(format!("odash-dax-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("T.csv");
+    std::fs::write(&path, "N\n1\n2\n").unwrap();
+    let mut h = harness();
+    h.state_mut().run(
+        "home.getData",
+        serde_json::json!({"kind": "csv", "path": path, "name": "T"}),
+    );
+    wait(&mut h, |s| !s.snapshot().doc.model.tables.is_empty());
+    h.get_by_label("Modeling").click();
+    h.run();
+    h.get_by_label("New measure").click();
+    h.run();
+    h.get_by_label("Measure formula").type_text("SUM(");
+    h.run();
+    // A parse error shows while typing; nothing is committed.
+    h.get_by_label_contains("expected an expression");
+    h.get_by_label("Measure formula").type_text("T[N])");
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    wait(&mut h, |s| {
+        s.snapshot().doc.model.tables.first().is_some_and(|t| {
+            t.measures
+                .iter()
+                .any(|m| m.name == "Measure" && m.expression == "SUM(T[N])")
+        })
+    });
+    assert!(h.query_by_label("Measure formula").is_none());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

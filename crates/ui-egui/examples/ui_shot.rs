@@ -5,7 +5,8 @@
 //!
 //! The script is JSON lines, run in order: `{"run": "<command>", "params": {…}}` runs a command
 //! and waits for it; `{"dark": true}` switches to the dark App theme; `{"view": "table"}` picks a
-//! View; `{"select": "$1"}` selects a Visual on the canvas; `{"shot": "/abs/out.png"}` saves a
+//! View; `{"select": "$1"}` selects a Visual on the canvas; `{"invoke": "<command>"}` invokes a
+//! command as its Ribbon button does; `{"type": "text"}` types into the focused field; `{"shot": "/abs/out.png"}` saves a
 //! PNG there too. A string `"$N"` anywhere stands for the id of the Nth Visual the script
 //! created (ids are random). The window is 1440×900 pt at 2×.
 
@@ -104,6 +105,14 @@ fn main() -> Result<(), String> {
             settle(&mut h, None);
         } else if let Some(v) = l.get("view").and_then(Value::as_str) {
             h.state_mut().set_view(v);
+            settle(&mut h, None);
+        } else if let Some(id) = l.get("invoke").and_then(Value::as_str) {
+            h.state_mut().invoke(id);
+            settle(&mut h, None);
+        } else if let Some(text) = l.get("type").and_then(Value::as_str) {
+            h.input_mut()
+                .events
+                .push(egui::Event::Text(text.to_string()));
             settle(&mut h, None);
         } else if let Some(v) = l.get("select").and_then(Value::as_str) {
             h.state_mut().select(v);

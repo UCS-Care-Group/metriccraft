@@ -14,6 +14,7 @@ mod lex;
 mod parse;
 mod print;
 
+pub use lex::{Tok, Token, tokens};
 pub use parse::{MAX_DEPTH, MAX_SOURCE, parse_expr, parse_query};
 pub use print::{print_expr, print_query};
 

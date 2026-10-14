@@ -4,6 +4,7 @@
 
 pub mod canvas;
 pub mod diagram;
+pub mod formula;
 pub mod grid;
 pub mod icons;
 pub mod painter;
@@ -111,6 +112,10 @@ pub struct Shell {
     canvas: canvas::Canvas,
     grid: grid::Grid,
     diagram: diagram::Diagram,
+    /// The formula bar, while a Measure or Calculated column is edited.
+    formula: Option<formula::Formula>,
+    /// Focus the formula bar next frame.
+    focus_formula: bool,
     last_autosave: f64,
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
@@ -156,6 +161,8 @@ impl Shell {
             canvas: canvas::Canvas::default(),
             grid: grid::Grid::default(),
             diagram: diagram::Diagram::default(),
+            formula: None,
+            focus_formula: false,
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
@@ -250,6 +257,11 @@ impl Shell {
         &self.grid
     }
 
+    fn open_formula(&mut self, f: formula::Formula) {
+        self.formula = Some(f);
+        self.focus_formula = true;
+    }
+
     /// The canvas's selected Visual.
     pub fn selected(&self) -> Option<&str> {
         self.canvas.selected.as_deref()
@@ -271,6 +283,13 @@ impl Shell {
         self.engine.run(id, params);
     }
 
+    /// Invokes a command as a Ribbon button does: its form (or panel) if it needs params.
+    pub fn invoke(&mut self, id: &str) {
+        if let Some(c) = self.commands.iter().find(|c| c.id == id) {
+            self.act(palette::invoke(c));
+        }
+    }
+
     fn act(&mut self, action: Action) {
         match action {
             Action::Run(c, params) => {
@@ -280,7 +299,18 @@ impl Shell {
             }
             Action::Form(c) => {
                 self.palette = None;
-                if !self.ask_path(c) {
+                let kind = match c.id {
+                    "modeling.newMeasure" => Some(formula::Kind::Measure),
+                    "modeling.newColumn" => Some(formula::Kind::Column),
+                    _ => None,
+                };
+                let table = self
+                    .table
+                    .clone()
+                    .or_else(|| self.snap.doc.model.tables.first().map(|t| t.name.clone()));
+                if let (Some(kind), Some(table)) = (kind, table) {
+                    self.open_formula(formula::Formula::new(kind, &table));
+                } else if !self.ask_path(c) {
                     self.form = Some(Form::new(c));
                 }
             }
@@ -443,6 +473,30 @@ impl Shell {
                 }
             });
 
+        if let Some(f) = &mut self.formula {
+            let outcome = egui::Panel::top("formula-bar")
+                .frame(
+                    egui::Frame::NONE
+                        .fill(t.panel)
+                        .inner_margin(egui::Margin::symmetric(8, 4)),
+                )
+                .show(ui, |ui| f.show(ui, &t))
+                .inner;
+            if std::mem::take(&mut self.focus_formula) {
+                ui.memory_mut(|m| m.request_focus(formula::id()));
+            }
+            match outcome {
+                formula::Outcome::Editing => {}
+                formula::Outcome::Cancel => self.formula = None,
+                formula::Outcome::Commit(commands) => {
+                    self.formula = None;
+                    for (id, params) in commands {
+                        self.engine.run(id, params);
+                    }
+                }
+            }
+        }
+
         if let Some(a) = self.recovery_banner(ui, &t) {
             action = Some(a);
         }
@@ -516,6 +570,7 @@ impl Shell {
                     table: &mut self.table,
                     selected: self.canvas.selected.as_deref(),
                     out: Vec::new(),
+                    open: None,
                 };
                 egui_dock::DockArea::new(&mut self.dock)
                     .id(egui::Id::new("panes-dock"))
@@ -523,8 +578,12 @@ impl Shell {
                     .show_close_buttons(false)
                     .show_leaf_close_all_buttons(false)
                     .show_inside(ui, &mut viewer);
+                let open = viewer.open.take();
                 for (id, params) in viewer.out {
                     self.engine.run(id, params);
+                }
+                if let Some(f) = open {
+                    self.open_formula(f);
                 }
             });
 
@@ -757,6 +816,8 @@ struct PaneViewer<'a> {
     /// The canvas's selected Visual.
     selected: Option<&'a str>,
     out: Vec<panes::Request>,
+    /// A Measure or Calculated column clicked: edit it in the formula bar.
+    open: Option<formula::Formula>,
 }
 
 impl egui_dock::TabViewer for PaneViewer<'_> {
@@ -779,6 +840,7 @@ impl egui_dock::TabViewer for PaneViewer<'_> {
         match tab {
             Pane::Data => {
                 let field = views::data_pane(ui, &self.t, &self.snap.doc, self.table);
+                self.open = field.as_ref().and_then(|f| formula_for(&self.snap.doc, f));
                 if let (Some(f), Some(p), Some(v)) = (field, page, visual)
                     && let Some(well) = panes::well_for(v, &f)
                 {
@@ -794,6 +856,36 @@ impl egui_dock::TabViewer for PaneViewer<'_> {
                 let r = panes::filters(ui, &self.t, page);
                 self.out.extend(r);
             }
+        }
+    }
+}
+
+/// The formula bar for Field `f` if it is a Measure or a Calculated column.
+fn formula_for(
+    doc: &opendash_engine::Document,
+    f: &opendash_visuals::FieldRef,
+) -> Option<formula::Formula> {
+    use opendash_visuals::FieldRef;
+    match f {
+        FieldRef::Measure { name } => {
+            let (t, m) = doc.model.measure(name)?;
+            Some(formula::Formula::edit(
+                formula::Kind::Measure,
+                &t.name,
+                &m.name,
+                &m.expression,
+            ))
+        }
+        FieldRef::Column { table, column } => {
+            let t = doc.model.tables.iter().find(|t| &t.name == table)?;
+            let c = t.columns.iter().find(|c| &c.name == column)?;
+            let expr = c.expression.as_deref()?;
+            Some(formula::Formula::edit(
+                formula::Kind::Column,
+                table,
+                column,
+                expr,
+            ))
         }
     }
 }

@@ -2830,6 +2830,7 @@ dependencies = [
  "egui_dock",
  "egui_kittest",
  "opendash-core",
+ "opendash-dax",
  "opendash-engine",
  "opendash-model",
  "opendash-visuals",
