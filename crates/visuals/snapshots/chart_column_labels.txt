@@ -1,0 +1,25 @@
+scene 400 260
+rect 0 0 400 260 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Revenue by region"
+line 40.14 238 392 238 #e3e6eb 1
+text 34.14 241.31 11 Regular #5c6370 End "-0.5M"
+text 34.14 189.68 11 Regular #5c6370 End "0.0M"
+line 40.14 134.75 392 134.75 #e3e6eb 1
+text 34.14 138.06 11 Regular #5c6370 End "0.5M"
+line 40.14 83.13 392 83.13 #e3e6eb 1
+text 34.14 86.43 11 Regular #5c6370 End "1.0M"
+line 40.14 31.5 392 31.5 #e3e6eb 1
+text 34.14 34.81 11 Regular #5c6370 End "1.5M"
+text 84.12 249.81 11 Regular #5c6370 Middle "Region 0"
+text 172.09 249.81 11 Regular #5c6370 Middle "Region 1"
+text 260.05 249.81 11 Regular #5c6370 Middle "Region 2"
+text 348.02 249.81 11 Regular #5c6370 Middle "Region 3"
+rect 48.94 58.91 70.37 127.47 fill #3a6ea5 #0:0
+text 84.12 53.71 11 Regular #1f2430 Middle "1.23M" #0:0
+rect 136.9 99.13 70.37 87.25 fill #3a6ea5 #0:1
+text 172.09 93.94 11 Regular #1f2430 Middle "845K" #0:1
+rect 224.87 186.38 70.37 23.75 fill #3a6ea5 #0:2
+text 260.05 221.93 11 Regular #1f2430 Middle "-230K" #0:2
+rect 312.83 186.38 70.37 0 fill #3a6ea5 #0:3
+text 348.02 181.18 11 Regular #1f2430 Middle "0" #0:3
+line 40.14 186.38 392 186.38 #9aa1ab 1

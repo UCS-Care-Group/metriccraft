@@ -1,0 +1,23 @@
+scene 400 300
+rect 0 0 400 300 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Sum of Amount by Region"
+text 19.98 281.31 11 Regular #5c6370 End "0K"
+line 25.98 228.7 392 228.7 #e3e6eb 1
+text 19.98 232.01 11 Regular #5c6370 End "1K"
+line 25.98 179.4 392 179.4 #e3e6eb 1
+text 19.98 182.71 11 Regular #5c6370 End "2K"
+line 25.98 130.1 392 130.1 #e3e6eb 1
+text 19.98 133.41 11 Regular #5c6370 End "3K"
+line 25.98 80.8 392 80.8 #e3e6eb 1
+text 19.98 84.11 11 Regular #5c6370 End "4K"
+line 25.98 31.5 392 31.5 #e3e6eb 1
+text 19.98 34.81 11 Regular #5c6370 End "5K"
+text 71.73 289.81 11 Regular #5c6370 Middle "South"
+text 163.24 289.81 11 Regular #5c6370 Middle "North"
+text 254.74 289.81 11 Regular #5c6370 Middle "East"
+text 346.25 289.81 11 Regular #5c6370 Middle "West"
+rect 35.13 70.94 73.2 207.06 fill #3a6ea5 #0:0
+rect 126.64 105.45 73.2 172.55 fill #3a6ea5 #0:1
+rect 218.14 154.75 73.2 123.25 fill #3a6ea5 #0:2
+rect 309.65 233.63 73.2 44.37 fill #3a6ea5 #0:3
+line 25.98 278 392 278 #9aa1ab 1

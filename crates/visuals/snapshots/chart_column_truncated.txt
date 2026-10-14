@@ -1,0 +1,50 @@
+scene 400 260
+rect 0 0 400 260 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Total by Region"
+text 8 249.81 11 Regular #5c6370 Start "Showing the first 30 categories"
+text 23.17 226.31 11 Regular #5c6370 End "0"
+line 29.17 175.13 392 175.13 #e3e6eb 1
+text 23.17 178.43 11 Regular #5c6370 End "25"
+line 29.17 127.25 392 127.25 #e3e6eb 1
+text 23.17 130.56 11 Regular #5c6370 End "50"
+line 29.17 79.38 392 79.38 #e3e6eb 1
+text 23.17 82.68 11 Regular #5c6370 End "75"
+line 29.17 31.5 392 31.5 #e3e6eb 1
+text 23.17 34.81 11 Regular #5c6370 End "100"
+text 35.22 234.81 11 Regular #5c6370 Middle "Region 0"
+text 95.69 234.81 11 Regular #5c6370 Middle "Region 5"
+text 156.16 234.81 11 Regular #5c6370 Middle "Region 10"
+text 216.63 234.81 11 Regular #5c6370 Middle "Region 15"
+text 277.1 234.81 11 Regular #5c6370 Middle "Region 20"
+text 337.58 234.81 11 Regular #5c6370 Middle "Region 25"
+rect 30.38 31.5 9.68 191.5 fill #3a6ea5 #0:0
+rect 42.47 33.41 9.68 189.59 fill #3a6ea5 #0:1
+rect 54.57 35.33 9.68 187.67 fill #3a6ea5 #0:2
+rect 66.66 37.24 9.68 185.76 fill #3a6ea5 #0:3
+rect 78.76 39.16 9.68 183.84 fill #3a6ea5 #0:4
+rect 90.85 41.07 9.68 181.93 fill #3a6ea5 #0:5
+rect 102.94 42.99 9.68 180.01 fill #3a6ea5 #0:6
+rect 115.04 44.9 9.68 178.1 fill #3a6ea5 #0:7
+rect 127.13 46.82 9.68 176.18 fill #3a6ea5 #0:8
+rect 139.23 48.74 9.68 174.26 fill #3a6ea5 #0:9
+rect 151.32 50.65 9.68 172.35 fill #3a6ea5 #0:10
+rect 163.42 52.57 9.68 170.43 fill #3a6ea5 #0:11
+rect 175.51 54.48 9.68 168.52 fill #3a6ea5 #0:12
+rect 187.6 56.4 9.68 166.6 fill #3a6ea5 #0:13
+rect 199.7 58.31 9.68 164.69 fill #3a6ea5 #0:14
+rect 211.79 60.22 9.68 162.78 fill #3a6ea5 #0:15
+rect 223.89 62.14 9.68 160.86 fill #3a6ea5 #0:16
+rect 235.98 64.06 9.68 158.94 fill #3a6ea5 #0:17
+rect 248.08 65.97 9.68 157.03 fill #3a6ea5 #0:18
+rect 260.17 67.88 9.68 155.12 fill #3a6ea5 #0:19
+rect 272.27 69.8 9.68 153.2 fill #3a6ea5 #0:20
+rect 284.36 71.71 9.68 151.29 fill #3a6ea5 #0:21
+rect 296.45 73.63 9.68 149.37 fill #3a6ea5 #0:22
+rect 308.55 75.54 9.68 147.46 fill #3a6ea5 #0:23
+rect 320.64 77.46 9.68 145.54 fill #3a6ea5 #0:24
+rect 332.74 79.38 9.68 143.63 fill #3a6ea5 #0:25
+rect 344.83 81.29 9.68 141.71 fill #3a6ea5 #0:26
+rect 356.93 83.21 9.68 139.79 fill #3a6ea5 #0:27
+rect 369.02 85.12 9.68 137.88 fill #3a6ea5 #0:28
+rect 381.12 87.04 9.68 135.96 fill #3a6ea5 #0:29
+line 29.17 223 392 223 #9aa1ab 1

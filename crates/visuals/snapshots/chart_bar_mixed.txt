@@ -1,0 +1,33 @@
+scene 420 300
+rect 0 0 420 300 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Margin by Region and Product"
+text 8 289.81 11 Bold #5c6370 Start "Product"
+rect 51.24 282.4 8 8 fill #3a6ea5
+text 63.24 289.81 11 Regular #1f2430 Start "Apple"
+rect 100.14 282.4 8 8 fill #e0812f
+text 112.14 289.81 11 Regular #1f2430 Start "Pear"
+line 52.04 26 52.04 261 #e3e6eb 1
+text 52.04 272.81 11 Regular #5c6370 Middle "-40"
+line 139.51 26 139.51 261 #e3e6eb 1
+text 139.51 272.81 11 Regular #5c6370 Middle "-20"
+text 226.97 272.81 11 Regular #5c6370 Middle "0"
+line 314.44 26 314.44 261 #e3e6eb 1
+text 314.44 272.81 11 Regular #5c6370 Middle "20"
+line 401.9 26 401.9 261 #e3e6eb 1
+text 401.9 272.81 11 Regular #5c6370 Middle "40"
+text 46.04 68.47 11 Regular #5c6370 End "Region 0"
+text 46.04 146.81 11 Regular #5c6370 End "Region 1"
+text 46.04 225.14 11 Regular #5c6370 End "Region 2"
+rect 226.97 33.83 109.33 31.33 fill #3a6ea5 #0:0
+text 339.3 52.81 11 Regular #1f2430 Start "25" #0:0
+rect 73.91 112.17 153.06 31.33 fill #3a6ea5 #0:1
+text 70.91 131.14 11 Regular #1f2430 End "-35" #0:1
+rect 226.97 190.5 21.87 31.33 fill #3a6ea5 #0:2
+text 251.84 209.47 11 Regular #1f2430 Start "5" #0:2
+rect 183.24 65.17 43.73 31.33 fill #e0812f #1:0
+text 180.24 84.14 11 Regular #1f2430 End "-10" #1:0
+rect 226.97 143.5 65.6 31.33 fill #e0812f #1:1
+text 295.57 162.47 11 Regular #1f2430 Start "15" #1:1
+rect 226.97 221.83 131.2 31.33 fill #e0812f #1:2
+text 361.17 240.81 11 Regular #1f2430 Start "30" #1:2
+line 226.97 26 226.97 261 #9aa1ab 1

@@ -1,0 +1,19 @@
+scene 300 220
+rect 0 0 300 220 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Loss by Region"
+line 30.16 198 292 198 #e3e6eb 1
+text 24.16 201.31 11 Regular #5c6370 End "-4K"
+line 30.16 156.38 292 156.38 #e3e6eb 1
+text 24.16 159.68 11 Regular #5c6370 End "-3K"
+line 30.16 114.75 292 114.75 #e3e6eb 1
+text 24.16 118.06 11 Regular #5c6370 End "-2K"
+line 30.16 73.13 292 73.13 #e3e6eb 1
+text 24.16 76.43 11 Regular #5c6370 End "-1K"
+text 24.16 34.81 11 Regular #5c6370 End "0K"
+text 73.8 209.81 11 Regular #5c6370 Middle "Region 0"
+text 161.08 209.81 11 Regular #5c6370 Middle "Region 1"
+text 248.36 209.81 11 Regular #5c6370 Middle "Region 2"
+rect 38.89 31.5 69.82 62.44 fill #3a6ea5 #0:0
+rect 126.17 31.5 69.82 133.2 fill #3a6ea5 #0:1
+rect 213.45 31.5 69.82 33.3 fill #3a6ea5 #0:2
+line 30.16 31.5 292 31.5 #9aa1ab 1

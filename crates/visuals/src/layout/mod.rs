@@ -10,7 +10,9 @@ use crate::text;
 use crate::theme::Theme;
 use crate::visual::Visual;
 
+pub mod axis;
 pub mod card;
+pub mod chart;
 pub mod matrix;
 pub mod table;
 

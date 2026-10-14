@@ -1,0 +1,18 @@
+scene 120 80
+rect 0 0 120 80 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Total by Region …"
+text 8 34.81 11 Bold #5c6370 Start "Prod…"
+rect 46.01 27.4 8 8 fill #3a6ea5
+text 58.01 34.81 11 Regular #1f2430 Start "Apple"
+text 13.74 61.31 11 Regular #5c6370 End "0"
+line 19.74 48.5 112 48.5 #e3e6eb 1
+text 13.74 51.81 11 Regular #5c6370 End "2"
+text 35.11 69.81 11 Regular #5c6370 Middle "Region 0"
+text 96.62 69.81 11 Regular #5c6370 Middle "Regi…"
+rect 22.81 53.25 12.3 4.75 fill #3a6ea5 #0:0
+rect 53.57 53.25 12.3 4.75 fill #3a6ea5 #0:1
+rect 84.32 53.25 12.3 4.75 fill #3a6ea5 #0:2
+rect 35.11 48.5 12.3 9.5 fill #e0812f #1:0
+rect 65.87 48.5 12.3 9.5 fill #e0812f #1:1
+rect 96.62 48.5 12.3 9.5 fill #e0812f #1:2
+line 19.74 58 112 58 #9aa1ab 1
