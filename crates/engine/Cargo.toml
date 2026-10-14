@@ -30,3 +30,7 @@ harness = false
 [[bench]]
 name = "import"
 harness = false
+
+[[bench]]
+name = "dax"
+harness = false
