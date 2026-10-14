@@ -394,8 +394,22 @@ impl Parser {
             Tok::Punct("(") => {
                 self.enter()?;
                 let e = self.expr()?;
-                self.expect(")")?;
-                e.kind
+                if self.eat(",") {
+                    // A row tuple `(a, b, …)`, as on the left of `IN`: a one-row table.
+                    let mut row = vec![e];
+                    loop {
+                        row.push(self.expr()?);
+                        if self.eat(",") {
+                            continue;
+                        }
+                        self.expect(")")?;
+                        break;
+                    }
+                    ExprKind::Table(vec![row])
+                } else {
+                    self.expect(")")?;
+                    e.kind
+                }
             }
             Tok::Punct("{") => {
                 self.enter()?;
@@ -592,6 +606,7 @@ mod tests {
             ("NOT a = b && c || d", "(|| (&& (Not (= a b)) c) d)"),
             ("NOT(TRUE()) && FALSE", "(&& (Not TRUE()) FALSE())"),
             ("x IN {1, 2} && y", "(&& (IN x {1; 2}) y)"),
+            ("(1, \"a\") IN {(1, \"a\")}", "(IN {1 \"a\"} {1 \"a\"})"),
             ("a == b <> c", "(<> (== a b) c)"),
             ("(1 + 2) * 3", "(* (+ 1 2) 3)"),
             ("{(1, \"a\"), (2, \"b\")}", "{1 \"a\"; 2 \"b\"}"),
