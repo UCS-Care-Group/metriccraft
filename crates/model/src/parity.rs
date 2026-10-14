@@ -376,7 +376,8 @@ fn evaluate(case: &Case) -> (Result<Table>, ColumnErrors) {
 }
 
 /// The case's *Enter data* tables, loaded as Get Data would (types converted, text
-/// dictionary-encoded), as the evaluator's database. Empty cells are blanks.
+/// dictionary-encoded, Relationships auto-detected), as the evaluator's database. Empty cells
+/// are blanks.
 fn dataset(case: &Case) -> Result<crate::dax::Database> {
     use arrow_array::{ArrayRef, RecordBatch, StringArray};
     use opendash_data::TableBuilder;
@@ -422,6 +423,8 @@ fn dataset(case: &Case) -> Result<crate::dax::Database> {
         model.put(m);
         loaded.push(table);
     }
+    // Power BI auto-detects Relationships when the tables load (same-named key columns).
+    model.autodetect(&loaded, |_| true);
     Ok(crate::dax::Database::new(&model, &loaded))
 }
 
@@ -672,6 +675,22 @@ mod tests {
         ] {
             assert!(parse("x", &bad).is_err(), "{why} should be rejected");
         }
+    }
+
+    #[test]
+    fn enter_data_tables_get_auto_detected_relationships() {
+        let case = parse(
+            "0043",
+            include_str!("../../../parity/observed/0043-summarizecolumns.md"),
+        )
+        .unwrap();
+        let db = dataset(&case).unwrap();
+        assert_eq!(db.relationships.len(), 1);
+        let (result, errors) = evaluate(&case);
+        assert!(errors.is_empty());
+        let t = result.unwrap();
+        assert_eq!(t.columns, ["Region", "Product", "Total", "Big Orders"]);
+        assert_eq!(t.rows.len(), 3);
     }
 
     #[test]
