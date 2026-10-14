@@ -2,6 +2,7 @@
 //!
 //! Layer L0 — see `docs/plan/0001-mvp.md` §1.
 
+pub mod date;
 mod format;
 mod value;
 

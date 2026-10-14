@@ -46,13 +46,12 @@
 
 use std::fmt;
 
+use crate::date::{UNIX_EPOCH_DAYS, civil};
 use crate::value::{DataType, Value, number_text};
 
 /// Longest format string accepted (characters of UTF-8 bytes).
 pub const MAX_FORMAT_LEN: usize = 1024;
 
-/// Days from serial 0 (1899-12-30) to 1970-01-01.
-const UNIX_EPOCH_DAYS: i64 = 25_569;
 /// Serial of 100-01-01 and of 10000-01-01: the dates VBA can show.
 const MIN_SERIAL: f64 = -657_434.0;
 const MAX_SERIAL: f64 = 2_958_466.0;
@@ -1121,20 +1120,6 @@ impl Parts {
         let jan1 = (self.weekday_from(first) - 1 - (doy - 1)).rem_euclid(7);
         (doy - 1 + jan1) / 7 + 1
     }
-}
-
-/// (year, month, day) for days since 1970-01-01 (H. Hinnant's algorithm).
-fn civil(days: i64) -> (i64, i64, i64) {
-    let z = days.saturating_add(719_468);
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (y, m, d)
 }
 
 fn name<const N: usize>(names: &[&'static str; N], i: i64) -> &'static str {

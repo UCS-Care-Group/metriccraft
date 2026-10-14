@@ -1,7 +1,7 @@
 //! Chart axes (M4.4): "nice" value ticks with consistent display units, and nice date ticks for
 //! a continuous line axis. Pure numbers in, numbers and labels out; no drawing.
 
-use opendash_core::{Locale, Value};
+use opendash_core::{Locale, Value, date};
 
 use crate::layout::value_text;
 use crate::query::Header;
@@ -119,32 +119,15 @@ pub fn tick_labels(
 /// The serials VBA can show (100-01-01..=9999-12-31); date ticks stay inside them.
 const MIN_SERIAL: f64 = -657_434.0;
 const MAX_SERIAL: f64 = 2_958_465.0;
-/// Days from 0000-03-01 (the civil algorithm's epoch) to serial 0.
-const SERIAL_EPOCH: i64 = 693_899;
-
 /// (year, month 1–12, day) of whole-day serial `s` (clamped to the VBA range).
 fn civil(s: f64) -> (i64, i64, i64) {
-    let z = s.clamp(MIN_SERIAL, MAX_SERIAL).floor() as i64 + SERIAL_EPOCH;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (y, m, d)
+    let days = s.clamp(MIN_SERIAL, MAX_SERIAL).floor() as i64;
+    date::civil(days - date::UNIX_EPOCH_DAYS)
 }
 
 /// The serial of (year, month 1–12, day 1–31), years clamped to 100..=9999.
 fn serial(y: i64, m: i64, d: i64) -> f64 {
-    let y = y.clamp(100, 9_999) - i64::from(m <= 2);
-    let era = y.div_euclid(400);
-    let yoe = y.rem_euclid(400);
-    let mp = if m > 2 { m - 3 } else { m + 9 };
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    (era * 146_097 + doe - SERIAL_EPOCH) as f64
+    (date::days_from_civil(y.clamp(100, 9_999), m, d) + date::UNIX_EPOCH_DAYS) as f64
 }
 
 /// Date steps, smallest first: (days, months, years, label code).
