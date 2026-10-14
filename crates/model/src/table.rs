@@ -193,8 +193,18 @@ impl Model {
 /// Whether two Table, Query or Column names are the same to Power BI: ignoring case.
 // ponytail: Unicode lowercase; Analysis Services compares names under the model's collation,
 // which may fold differently beyond ASCII (parity uncertainty).
+// Compared char by char without allocating: it runs inside loops over file-derived names.
 pub fn same_name(a: &str, b: &str) -> bool {
-    a == b || a.to_lowercase() == b.to_lowercase()
+    a == b
+        || a.chars()
+            .flat_map(char::to_lowercase)
+            .eq(b.chars().flat_map(char::to_lowercase))
+}
+
+/// The key two names share exactly when [`same_name`] holds: for hashing names once, so a
+/// check over many names is linear rather than comparing every pair.
+pub fn name_key(name: &str) -> String {
+    name.chars().flat_map(char::to_lowercase).collect()
 }
 
 /// A Table's model properties. `columns` follow the loaded Table's column order: the Query's

@@ -40,7 +40,7 @@
 //! **No data.** The parts are definitions only; the Data cache (`.cache/`) is [`crate::cache`],
 //! written and read beside them by the app.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -52,7 +52,7 @@ use opendash_data::source::{File, Source};
 use opendash_data::step::ColumnType;
 use opendash_data::{Query, Table, TableBuilder};
 use opendash_model::{
-    Column, Measure, Model, ModelTable, Relationship, SummarizeBy, measure_order, same_name,
+    Column, Measure, Model, ModelTable, Relationship, SummarizeBy, measure_order, name_key,
 };
 use serde_json::{Map, Value as Json};
 
@@ -717,10 +717,11 @@ fn expression_parts(path: &str, node: &Node) -> Result<(String, Option<String>)>
 fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
     let name = node_name(path, node)?;
     let mut columns: Vec<Column> = Vec::new();
+    let mut column_names: HashSet<String> = HashSet::new();
     for c in node.children().filter(|c| c.kind == "column") {
         let (cname, expression) = expression_parts(path, c)?;
         let ctx = format!("column `{cname}`");
-        if columns.iter().any(|x| x.name == cname) {
+        if !column_names.insert(cname.clone()) {
             return Err(part_err(path, format!("{ctx} appears twice")));
         }
         let data_type = c
@@ -761,6 +762,13 @@ fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
             expression,
         });
     }
+    // Folded names, hashed once: a file may hold many Measures and Columns, and comparing
+    // every pair would hang on it.
+    let column_keys: HashMap<String, &str> = columns
+        .iter()
+        .map(|c| (name_key(&c.name), c.name.as_str()))
+        .collect();
+    let mut measure_keys: HashSet<String> = HashSet::new();
     let mut measures: Vec<Measure> = Vec::new();
     for m in node.children().filter(|c| c.kind == "measure") {
         let (mname, expression) = expression_parts(path, m)?;
@@ -770,13 +778,14 @@ fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
                 format!("measure `{mname}`: expected `measure '{mname}' =` and its DAX"),
             ));
         };
-        if let Some(c) = columns.iter().find(|c| same_name(&c.name, &mname)) {
+        let key = name_key(&mname);
+        if let Some(c) = column_keys.get(&key) {
             return Err(part_err(
                 path,
-                format!("measure `{mname}` has the name of the column `{}`", c.name),
+                format!("measure `{mname}` has the name of the column `{c}`"),
             ));
         }
-        if measures.iter().any(|x| same_name(&x.name, &mname)) {
+        if !measure_keys.insert(key) {
             return Err(part_err(path, format!("measure `{mname}` appears twice")));
         }
         let text = |k: &str| {
@@ -795,7 +804,7 @@ fn decode_table(path: &str, node: &Node) -> Result<ModelTable> {
     measures.sort_by(measure_order);
     for c in &columns {
         if let Some(by) = &c.sort_by
-            && !columns.iter().any(|x| &x.name == by)
+            && !column_names.contains(by)
         {
             return Err(part_err(
                 path,
@@ -952,10 +961,11 @@ fn decode_tree(
 /// most one per pair of tables is active.
 fn check(project: &Project) -> Result {
     let model = &project.model;
-    let mut measures: Vec<(&str, &str)> = Vec::new();
+    // Folded Measure name → its Table, hashed: linear in the Measures however many a file has.
+    let mut measures: HashMap<String, &str> = HashMap::new();
     for t in &model.tables {
         for m in &t.measures {
-            if let Some((other, _)) = measures.iter().find(|(_, n)| same_name(n, &m.name)) {
+            if let Some(other) = measures.get(&name_key(&m.name)) {
                 return Err(part_err(
                     TABLES,
                     format!(
@@ -964,11 +974,12 @@ fn check(project: &Project) -> Result {
                     ),
                 ));
             }
-            measures.push((&t.name, &m.name));
+            measures.insert(name_key(&m.name), &t.name);
         }
     }
+    let queries: HashSet<&str> = project.queries.iter().map(|q| q.name.as_str()).collect();
     for t in &model.tables {
-        if !project.queries.iter().any(|q| q.name == t.name) {
+        if !queries.contains(t.name.as_str()) {
             return Err(part_err(
                 TABLES,
                 format!("table `{}` has no query of the same name", t.name),

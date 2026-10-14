@@ -649,6 +649,30 @@ fn measures_and_calculated_columns_round_trip() {
     }
 }
 
+// Regression (M3 review): every Measure was compared with every other, allocating lowercase
+// copies each time, so a file with tens of thousands of Measures hung on open.
+#[test]
+fn a_project_with_50k_measures_opens_quickly() {
+    let mut project = sample();
+    for (t, name) in ["Sales", "Unit Regions"].into_iter().enumerate() {
+        project.model.table_mut(name).unwrap().measures = (0..25_000)
+            .map(|i| Measure::new(&format!("M{t}_{i:05}"), "1"))
+            .collect();
+    }
+    let files = encode(&project, Some(&root()), &Preserved::default()).unwrap();
+    let started = std::time::Instant::now();
+    let (back, _) = round_trip(&files);
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    assert_eq!(back, project);
+    // A duplicate across Tables is still found.
+    let mut files = files;
+    let t = text(&files, "model/tables/Sales.odm") + "  measure m1_00007 =\n      1\n";
+    files.insert("model/tables/Sales.odm".into(), t.into_bytes());
+    rehash(&mut files, &[]);
+    let e = decode(&files, Some(&root())).unwrap_err().to_string();
+    assert!(e.contains("measure names are unique"), "{e}");
+}
+
 #[test]
 fn opening_mutated_projects_never_panics() {
     let base = encode(

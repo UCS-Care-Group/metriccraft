@@ -44,6 +44,11 @@ pub type Cultures<'a> = &'a dyn Fn(&str) -> &'static Culture;
 /// Days from 1899-12-30 (DAX DateTime's epoch) to 1970-01-01 (Arrow's).
 const UNIX_EPOCH_DAYS: f64 = 25_569.0;
 const MICROS_PER_DAY: f64 = 86_400_000_000.0;
+/// The DateTimes a Calculated column holds, as DAX serials: 0001-01-01 to the end of
+/// 9999-12-31 (the calendar the app formats). Outside, or not finite: the column's error.
+const MIN_DATE_SERIAL: f64 = -693_593.0;
+const END_DATE_SERIAL: f64 = 2_958_466.0;
+const DATE_RANGE: &str = "A date or time value is out of the supported range (years 1 to 9999).";
 
 const VARIANT: &str =
     "Expressions that yield variant data-type cannot be used to define calculated columns.";
@@ -408,12 +413,21 @@ fn plain_array(values: &[Value]) -> std::result::Result<(ArrayRef, Option<Column
             Value::Boolean(b) => Some(*b),
             _ => None,
         }))),
-        ColumnType::DateTime | ColumnType::Date => Arc::new(TimestampMicrosecondArray::from_iter(
-            values.iter().map(|v| match v {
-                Value::DateTime(d) => Some(((d - UNIX_EPOCH_DAYS) * MICROS_PER_DAY).round() as i64),
-                _ => None,
-            }),
-        )),
+        ColumnType::DateTime | ColumnType::Date => {
+            let mut out = Vec::with_capacity(values.len());
+            for v in values {
+                out.push(match v {
+                    // The range check also refuses NaN and infinities, which a cast would
+                    // silently turn into 1970 or a clamped date.
+                    Value::DateTime(d) if (MIN_DATE_SERIAL..END_DATE_SERIAL).contains(d) => {
+                        Some(((d - UNIX_EPOCH_DAYS) * MICROS_PER_DAY).round() as i64)
+                    }
+                    Value::DateTime(_) => return Err(DATE_RANGE.into()),
+                    _ => None,
+                });
+            }
+            Arc::new(TimestampMicrosecondArray::from(out))
+        }
     };
     Ok((array, Some(ty)))
 }
@@ -516,6 +530,38 @@ mod tests {
         let again = data.clone();
         compute(&mut model, &mut data);
         assert_eq!(data, again, "deterministic");
+    }
+
+    // Regression (M3 review): a NaN DateTime became 1970-01-01 and an out-of-range one a
+    // clamped date, silently.
+    #[test]
+    fn datetimes_out_of_range_are_the_columns_error() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1e10,
+            -1e10,
+            2_958_466.0,
+        ] {
+            let values = [
+                Value::DateTime(45_000.25),
+                Value::DateTime(bad),
+                Value::Blank,
+            ];
+            let e = plain_array(&values).unwrap_err();
+            assert_eq!(e, DATE_RANGE, "{bad}");
+        }
+        let (array, ty) = plain_array(&[
+            Value::DateTime(MIN_DATE_SERIAL),
+            Value::DateTime(2_958_465.5),
+            Value::Blank,
+        ])
+        .unwrap();
+        assert_eq!(ty, Some(ColumnType::DateTime));
+        assert_eq!(array.null_count(), 1);
+        // `compute_calculated` turns a `plain_array` error into a BLANK column with the error,
+        // as for a variant type (no DAX here yields such a DateTime yet: no DATE arithmetic).
     }
 
     #[test]

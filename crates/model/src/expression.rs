@@ -32,7 +32,7 @@ use opendash_dax::{Expr, ExprKind, Span, is_keyword, parse_expr};
 
 use crate::dax::MAX_MEASURE_CHAIN;
 use crate::table::{Error, Result};
-use crate::{Model, ModelTable, same_name};
+use crate::{Model, ModelTable, name_key, same_name};
 
 /// A named DAX expression evaluated on demand under the current filter context.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -128,30 +128,8 @@ pub(crate) fn references(e: &Expr) -> Vec<Ref<'_>> {
     out
 }
 
-/// The spans of a column reference's Table part (if any) and its `[Column]` part in `src`.
-fn column_parts(src: &str, span: Span) -> Option<(Option<Span>, Span)> {
-    let text = src.get(span.start..span.end)?;
-    if text.starts_with('[') {
-        return Some((None, span));
-    }
-    let bytes = text.as_bytes();
-    let table_len = if text.starts_with('\'') {
-        let mut i = 1usize;
-        loop {
-            match bytes.get(i) {
-                Some(b'\'') if bytes.get(i.saturating_add(1)) == Some(&b'\'') => {
-                    i = i.saturating_add(2);
-                }
-                Some(b'\'') => break i.saturating_add(1),
-                Some(_) => i = i.saturating_add(1),
-                None => return None,
-            }
-        }
-    } else {
-        text.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))?
-    };
-    // Blanks and comments may sit between the Table and its `[Column]`.
-    let mut at = table_len;
+/// `at` moved past the blanks and comments that start `text[at..]`.
+fn skip_trivia(text: &str, mut at: usize) -> Option<usize> {
     loop {
         let rest = text.get(at..)?;
         let trimmed = rest.trim_start();
@@ -162,14 +140,91 @@ fn column_parts(src: &str, span: Span) -> Option<(Option<Span>, Span)> {
         } else if let Some(body) = trimmed.strip_prefix("/*") {
             let close = body.find("*/")?;
             at = at.saturating_add(close.saturating_add(4));
-        } else if trimmed.starts_with('[') {
-            break;
         } else {
-            return None;
+            return Some(at);
         }
     }
-    let table = Span::new(span.start, span.start.saturating_add(table_len));
-    let column = Span::new(span.start.saturating_add(at), span.end);
+}
+
+/// The byte length of the `open`…`close` token `text` starts with, a doubled `close` being
+/// an escaped one (`'…'` Table names, `[…]` Columns).
+fn delimited_len(text: &str, open: u8, close: u8) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.first() != Some(&open) {
+        return None;
+    }
+    let mut i = 1usize;
+    loop {
+        match bytes.get(i) {
+            Some(&b) if b == close && bytes.get(i.saturating_add(1)) == Some(&close) => {
+                i = i.saturating_add(2);
+            }
+            Some(&b) if b == close => return Some(i.saturating_add(1)),
+            Some(_) => i = i.saturating_add(1),
+            None => return None,
+        }
+    }
+}
+
+/// The byte length of the Table name `text` starts with: `'…'` or a plain name (dotted
+/// segments, as the lexer reads one).
+fn table_name_len(text: &str) -> Option<usize> {
+    if text.starts_with('\'') {
+        return delimited_len(text, b'\'', b'\'');
+    }
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut end = 0usize;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let dotted = c == '.' && end > 0 && chars.peek().is_some_and(|&(_, d)| word(d));
+        if word(c) || dotted {
+            end = i.saturating_add(c.len_utf8());
+        } else {
+            break;
+        }
+    }
+    (end > 0).then_some(end)
+}
+
+/// Where the reference an expression spanning `span` holds starts. A parenthesised
+/// reference's span covers its parentheses (`( [X] )`), so step past every `(`, blank and
+/// comment it opens with.
+fn reference_start(src: &str, span: Span) -> Option<usize> {
+    let text = src.get(span.start..span.end)?;
+    let mut at = 0usize;
+    loop {
+        at = skip_trivia(text, at)?;
+        if text.get(at..)?.starts_with('(') {
+            at = at.saturating_add(1);
+        } else {
+            return Some(span.start.saturating_add(at));
+        }
+    }
+}
+
+/// The span of the Table name a [`Ref::Table`] spanning `span` is written as (inside any
+/// parentheses).
+fn table_part(src: &str, span: Span) -> Option<Span> {
+    let start = reference_start(src, span)?;
+    let len = table_name_len(src.get(start..span.end)?)?;
+    Some(Span::new(start, start.saturating_add(len)))
+}
+
+/// The spans of a column reference's Table part (if any) and its `[Column]` part in `src`
+/// (inside any parentheses).
+fn column_parts(src: &str, span: Span) -> Option<(Option<Span>, Span)> {
+    let start = reference_start(src, span)?;
+    let text = src.get(start..span.end)?;
+    if let Some(len) = delimited_len(text, b'[', b']') {
+        return Some((None, Span::new(start, start.saturating_add(len))));
+    }
+    let table_len = table_name_len(text)?;
+    // Blanks and comments may sit between the Table and its `[Column]`.
+    let at = skip_trivia(text, table_len)?;
+    let column_len = delimited_len(text.get(at..)?, b'[', b']')?;
+    let table = Span::new(start, start.saturating_add(table_len));
+    let column_start = start.saturating_add(at);
+    let column = Span::new(column_start, column_start.saturating_add(column_len));
     Some((Some(table), column))
 }
 
@@ -247,8 +302,10 @@ pub(crate) fn rewrite(src: &str, r: Renamed<'_>) -> Option<String> {
     for reference in references(&e) {
         match (reference, r) {
             (Ref::Table { name, span }, Renamed::Table { old, new }) if same_name(name, old) => {
-                let quoted = src.get(span.start..).is_some_and(|s| s.starts_with('\''));
-                edits.push((span, table_text(new, quoted)));
+                if let Some(ts) = table_part(src, span) {
+                    let quoted = src.get(ts.start..).is_some_and(|s| s.starts_with('\''));
+                    edits.push((ts, table_text(new, quoted)));
+                }
             }
             (
                 Ref::Column {
@@ -509,38 +566,43 @@ impl Model {
                 });
             }
         }
-        let find_measure = |table: Option<usize>, name: &str| {
-            objects.iter().position(|o| match *o {
-                Object::Measure { table: t, index } => {
-                    table.is_none_or(|x| x == t)
-                        && self
-                            .tables
-                            .get(t)
-                            .and_then(|t| t.measures.get(index))
-                            .is_some_and(|m| same_name(&m.name, name))
-                }
-                Object::Column { .. } => false,
-            })
-        };
-        let calc_columns = |table: Option<usize>, name: &str| -> Vec<usize> {
-            objects
-                .iter()
-                .enumerate()
-                .filter(|(_, o)| match **o {
-                    Object::Column { table: t, index } => {
-                        table.is_none_or(|x| x == t)
-                            && self
-                                .tables
-                                .get(t)
-                                .and_then(|t| t.columns.get(index))
-                                .is_some_and(|c| same_name(&c.name, name))
+        // Folded names → objects, hashed once, so resolving every reference is linear in the
+        // Model rather than a scan of all objects per reference (a file may hold 50k Measures).
+        // `None` keys any Table; the first object in `objects` order wins, as a scan would.
+        let mut measures: HashMap<(Option<usize>, String), usize> = HashMap::new();
+        let mut calc: HashMap<(Option<usize>, String), Vec<usize>> = HashMap::new();
+        for (i, &o) in objects.iter().enumerate() {
+            let (Object::Measure { table, index } | Object::Column { table, index }) = o;
+            let t = self.tables.get(table);
+            match o {
+                Object::Measure { .. } => {
+                    if let Some(m) = t.and_then(|t| t.measures.get(index)) {
+                        let key = name_key(&m.name);
+                        measures.entry((None, key.clone())).or_insert(i);
+                        measures.entry((Some(table), key)).or_insert(i);
                     }
-                    Object::Measure { .. } => false,
-                })
-                .map(|(i, _)| i)
-                .collect()
+                }
+                Object::Column { .. } => {
+                    if let Some(c) = t.and_then(|t| t.columns.get(index)) {
+                        let key = name_key(&c.name);
+                        calc.entry((None, key.clone())).or_default().push(i);
+                        calc.entry((Some(table), key)).or_default().push(i);
+                    }
+                }
+            }
+        }
+        let find_measure =
+            |table: Option<usize>, name: &str| measures.get(&(table, name_key(name))).copied();
+        let calc_columns = |table: Option<usize>, name: &str| -> Vec<usize> {
+            calc.get(&(table, name_key(name)))
+                .cloned()
+                .unwrap_or_default()
         };
-        let table_index = |name: &str| self.tables.iter().position(|t| same_name(&t.name, name));
+        let mut tables: HashMap<String, usize> = HashMap::new();
+        for (i, t) in self.tables.iter().enumerate() {
+            tables.entry(name_key(&t.name)).or_insert(i);
+        }
+        let table_index = |name: &str| tables.get(&name_key(name)).copied();
         let edges = objects
             .iter()
             .map(|&o| {
@@ -981,6 +1043,145 @@ mod tests {
             None,
             "doesn't parse: left as is"
         );
+    }
+
+    // Regression (M3 review): a parenthesised reference's span covers its parentheses, and the
+    // rewrite used to find no reference in `([Total])` and drop the edit, or replace `((Sales))`
+    // parentheses and all.
+    #[test]
+    fn renames_reach_parenthesised_references() {
+        let measure = Renamed::Measure {
+            home: "Sales",
+            old: "Total",
+            new: "Sum",
+        };
+        assert_eq!(rename("([Total]) * 2", measure), "([Sum]) * 2");
+        assert_eq!(
+            rename("( /* c */ ( Sales[Total] ) ) + (-- x\n[Total])", measure),
+            "( /* c */ ( Sales[Sum] ) ) + (-- x\n[Sum])"
+        );
+        let table = Renamed::Table {
+            old: "Sales",
+            new: "Orders",
+        };
+        assert_eq!(
+            rename("SUMX(Sales, (Sales[Qty]))", table),
+            "SUMX(Orders, (Orders[Qty]))"
+        );
+        assert_eq!(
+            rename("COUNTROWS(((Sales)))", table),
+            "COUNTROWS(((Orders)))"
+        );
+        assert_eq!(
+            rename("COUNTROWS(( 'Sales' ))", table),
+            "COUNTROWS(( 'Orders' ))"
+        );
+        let column = Renamed::Column {
+            table: "Sales",
+            old: "Qty",
+            new: "Units",
+            unqualified: true,
+        };
+        assert_eq!(
+            rename("SUMX(Sales, (Sales[Qty])) + ([Qty])", column),
+            "SUMX(Sales, (Sales[Units])) + ([Units])"
+        );
+    }
+
+    /// How many references `src` makes to Table `old` (`.0`) and to Columns or Measures named
+    /// `old` (`.1`).
+    fn old_names(src: &str) -> (usize, usize) {
+        let e = parse_expr(src).unwrap_or_else(|err| panic!("{src}: {err}"));
+        let (mut tables, mut columns) = (0, 0);
+        for r in references(&e) {
+            let (table, column) = match r {
+                Ref::Table { name, .. } => (Some(name), None),
+                Ref::Column { table, column, .. } => (table, Some(column)),
+            };
+            tables += usize::from(table.is_some_and(|t| same_name(t, "old")));
+            columns += usize::from(column.is_some_and(|c| same_name(c, "old")));
+        }
+        (tables, columns)
+    }
+
+    #[test]
+    fn renames_reach_references_however_they_are_parenthesised() {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let refs = [
+            "[Old]",
+            "Old[Qty]",
+            "'Old' [Old]",
+            "COUNTROWS(Old)",
+            "SUMX('Old', Old /* x */ [Old])",
+        ];
+        let trivia = [" ", "", "/* ( */", "-- )\n", "\n  "];
+        for _ in 0..500 {
+            let mut terms = Vec::new();
+            for _ in 0..=next(4) {
+                let mut term = refs[next(refs.len())].to_string();
+                for _ in 0..next(4) {
+                    let (a, b) = (trivia[next(trivia.len())], trivia[next(trivia.len())]);
+                    term = format!("({a}{term}{b})");
+                }
+                terms.push(term);
+            }
+            let src = terms.join(" + ");
+            let parens = |s: &str| (s.matches('(').count(), s.matches(')').count());
+            let out = rename(
+                &src,
+                Renamed::Table {
+                    old: "Old",
+                    new: "New",
+                },
+            );
+            assert_eq!(parens(&out), parens(&src), "{src} → {out}");
+            assert_eq!(old_names(&out).0, 0, "{src} → {out}");
+            for r in [
+                Renamed::Column {
+                    table: "Old",
+                    old: "Old",
+                    new: "New",
+                    unqualified: true,
+                },
+                Renamed::Measure {
+                    home: "Old",
+                    old: "Old",
+                    new: "New",
+                },
+            ] {
+                let out = rename(&src, r);
+                assert_eq!(parens(&out), parens(&src), "{src} → {out}");
+                assert_eq!(old_names(&out).1, 0, "{r:?}: {src} → {out}");
+            }
+        }
+    }
+
+    // Regression (M3 review): resolving references scanned every object per reference, so a
+    // Model of 50k Measures took minutes.
+    #[test]
+    fn dependencies_of_many_measures_are_linear() {
+        let n = 50_000;
+        let mut model = Model::default();
+        for t in 0..2 {
+            model.tables.push(ModelTable {
+                name: format!("T{t}"),
+                measures: (0..n / 2)
+                    .map(|i| Measure::new(&format!("M{t}_{i}"), "[M0_0] + T1[m1_0]"))
+                    .collect(),
+                ..ModelTable::default()
+            });
+        }
+        let started = std::time::Instant::now();
+        let deps = model.dependencies();
+        assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+        assert_eq!(deps.objects.len(), n);
+        assert_eq!(deps.edges.get(5).map(Vec::len), Some(2));
     }
 
     #[test]

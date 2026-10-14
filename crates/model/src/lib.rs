@@ -13,4 +13,4 @@ mod table;
 pub use calculated::Cultures;
 pub use expression::{Dependencies, Measure, Object, measure_order, normalise_expression};
 pub use relationship::Relationship;
-pub use table::{Column, Error, Model, ModelTable, SummarizeBy, same_name};
+pub use table::{Column, Error, Model, ModelTable, SummarizeBy, name_key, same_name};
