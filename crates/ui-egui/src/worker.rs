@@ -155,6 +155,7 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
 /// The UI's handle on the engine.
 pub struct Engine {
     shared: Arc<Mutex<Shared>>,
+    progress: Arc<opendash_engine::Progress>,
     commands: &'static [Command],
     #[cfg(not(target_arch = "wasm32"))]
     jobs: std::sync::mpsc::Sender<Job>,
@@ -168,6 +169,7 @@ impl Engine {
     /// Starts the engine on `app`; `repaint` wakes the window when a command finishes.
     pub fn new(mut app: App, repaint: impl Fn() + Send + 'static) -> Self {
         let commands = app.commands();
+        let progress = app.load_progress();
         let shared = Arc::new(Mutex::new(Shared {
             snap: Arc::new(Snapshot::of(&mut app, 0)),
             events: Vec::new(),
@@ -197,6 +199,7 @@ impl Engine {
             });
             Engine {
                 shared,
+                progress,
                 commands,
                 jobs,
             }
@@ -206,6 +209,7 @@ impl Engine {
             let _ = repaint;
             Engine {
                 shared,
+                progress,
                 commands,
                 app,
                 seq: 0,
@@ -253,6 +257,16 @@ impl Engine {
             &mut self.seq,
             Job::Autosave(now_ms),
         );
+    }
+
+    /// Rows read per Query by the load running now (Get Data, Refresh, Close & Apply).
+    pub fn load_rows(&self) -> Vec<(String, u64)> {
+        self.progress.rows()
+    }
+
+    /// Stops the load running now; it changes nothing.
+    pub fn cancel_load(&self) {
+        self.progress.cancel();
     }
 
     pub fn snapshot(&self) -> Arc<Snapshot> {

@@ -69,6 +69,8 @@ pub struct App {
     pub(crate) session: crate::selection::Session,
     /// Stops a running Page drawing (`App::cancel_flag`).
     pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Rows read and the cancel switch of the load running (Get Data, Refresh, Close & Apply).
+    pub(crate) progress: std::sync::Arc<opendash_data::Progress>,
     /// What the last command moved, for `merge` (see [`merge_key`]).
     last_move: Option<String>,
 }
@@ -100,6 +102,7 @@ impl App {
             autosave: crate::recovery::Autosave::default(),
             session: crate::selection::Session::default(),
             cancel: std::sync::Arc::default(),
+            progress: std::sync::Arc::default(),
             last_move: None,
         }
     }

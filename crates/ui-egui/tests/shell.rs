@@ -255,3 +255,37 @@ fn new_measure_opens_the_formula_bar_and_enter_commits() {
     assert!(h.query_by_label("Measure formula").is_none());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_running_load_shows_rows_read_and_cancels() {
+    let dir = std::env::temp_dir().join(format!("odash-cancel-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Big.csv");
+    let mut text = String::from("Id,Name\n");
+    for i in 0..3_000_000 {
+        text.push_str(&format!("{i},name {i}\n"));
+    }
+    std::fs::write(&path, text).unwrap();
+    let mut h = harness();
+    h.state_mut().run(
+        "home.getData",
+        serde_json::json!({"kind": "csv", "path": path}),
+    );
+    // Rows read show while it runs; Cancel stops it.
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.query_by_label_contains("rows read").is_none() && Instant::now() < end {
+        h.step();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    h.get_by_label("Cancel").click();
+    h.step();
+    wait(&mut h, |s| s.snapshot().busy.is_none());
+    assert!(h.state().snapshot().doc.tables.is_empty());
+    assert!(
+        h.state()
+            .toasts()
+            .iter()
+            .any(|t| t.text.contains("cancelled"))
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

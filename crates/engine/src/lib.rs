@@ -23,6 +23,7 @@ pub use cmd::{COMMANDS, Command, Run, reference};
 pub use diagram::Diagram;
 pub use file::Location;
 pub use load::{LoadReport, Loaded};
+pub use opendash_data::Progress;
 pub use recovery::{DEFAULT_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES, RecoveryInfo, recovery_dir};
 pub use report::{
     BrokenField, MAX_COORD, MAX_PAGES, MAX_VISUALS, PAGE_HEIGHT, PAGE_WIDTH, Page, Report, resolve,

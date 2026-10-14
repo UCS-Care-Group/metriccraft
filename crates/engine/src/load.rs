@@ -50,7 +50,7 @@ use std::path::Path;
 
 use opendash_data::culture::Culture;
 use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
-use opendash_data::{Pass, Preview, Query, Table, fold_case};
+use opendash_data::{Pass, Preview, Progress, Query, Table, fold_case};
 use opendash_file::cache::{Provenance, now_ms};
 use opendash_model::{ModelTable, Relationship};
 use serde_json::Value;
@@ -133,6 +133,8 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
     if name.is_empty() {
         return Err(invalid(GET_DATA, "`name` must not be empty".into()));
     }
+    let progress = app.load_progress();
+    progress.reset();
     app.edit_loading(0, |doc, limit| {
         if doc.queries.iter().any(|q| q.name == name) || doc.tables.iter().any(|t| t.name() == name)
         {
@@ -141,7 +143,9 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
         let query = Query::connect(&name, source.clone(), culture, limit).map_err(Error::Data)?;
         // Before the read: a change to the file while it is read then shows as Stale.
         let provenance = Provenance::of(std::slice::from_ref(&query), &name, now_ms());
-        let (table, cell_errors) = query.run(limit).map_err(Error::Data)?;
+        let (table, cell_errors) = query
+            .run_watched(&[], limit, &progress)
+            .map_err(Error::Data)?;
         let limit = limit.saturating_sub(table.memory());
         let (table, extra) = fold(table, limit)?;
         let limit = limit.saturating_sub(extra);
@@ -168,7 +172,9 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
 
 pub(crate) fn refresh(app: &mut App, _params: &Value) -> Result {
     let estimate = loaded(&app.document().tables);
-    app.edit_loading(estimate, |doc, limit| load(doc, |_| true, limit))
+    let progress = app.load_progress();
+    progress.reset();
+    app.edit_loading(estimate, |doc, limit| load(doc, |_| true, limit, &progress))
 }
 
 /// Whether Close & Apply has anything to load.
@@ -199,18 +205,25 @@ pub(crate) fn close_apply(app: &mut App, _params: &Value) -> Result {
         .filter(|t| names.iter().any(|n| n == t.name()))
         .map(Table::memory)
         .sum();
+    let progress = app.load_progress();
+    progress.reset();
     app.edit_loading(estimate, |doc, limit| {
-        load(doc, |q| names.contains(&q.name), limit)
+        load(doc, |q| names.contains(&q.name), limit, &progress)
     })
 }
 
 /// Re-runs the Queries `pick` selects, from their Sources, and replaces their tables and
 /// models; all-or-nothing (the caller runs on a copy of the Document). Clears their Stale
 /// flags. A picked Query with Enable load off loses its Table instead.
-fn load(doc: &mut Document, pick: impl Fn(&Query) -> bool, limit: usize) -> Result<LoadReport> {
+fn load(
+    doc: &mut Document,
+    pick: impl Fn(&Query) -> bool,
+    limit: usize,
+    progress: &Progress,
+) -> Result<LoadReport> {
     // The new tables (and the merged-from Queries run for them) must fit `limit` together: the
     // cap less everything held, the old tables included. One pass, so each Source is read once.
-    let mut pass = Pass::new(&doc.queries, limit);
+    let mut pass = Pass::watched(&doc.queries, limit, progress);
     let mut fresh: Vec<Table> = Vec::with_capacity(doc.queries.len());
     let mut report = LoadReport::default();
     let mut models = Vec::with_capacity(doc.queries.len());
@@ -507,6 +520,41 @@ mod tests {
             matches!(again, Err(Error::InvalidParams { .. })),
             "{again:?}"
         );
+    }
+
+    #[test]
+    fn a_load_cancelled_from_another_thread_stops_within_100_ms_and_changes_nothing() {
+        let dir = Dir::new();
+        let mut csv = String::from("Id,Name\n");
+        for i in 0..2_000_000 {
+            csv.push_str(&format!("{i},name {i}\n"));
+        }
+        let path = dir.write("big.csv", &csv);
+        let mut app = App::new();
+        let progress = app.load_progress();
+        let watcher = std::thread::spawn(move || {
+            while progress.rows().is_empty() {
+                std::thread::yield_now();
+            }
+            progress.cancel();
+            std::time::Instant::now()
+        });
+        let r = app.run("home.getData", &json!({"kind": "csv", "path": path}));
+        let stopped = std::time::Instant::now();
+        let cancelled = watcher.join().unwrap();
+        assert!(
+            matches!(r, Err(Error::Data(opendash_data::Error::Cancelled))),
+            "{r:?}"
+        );
+        assert!(app.document().queries.is_empty() && app.document().tables.is_empty());
+        assert!(!app.can_undo());
+        assert!(stopped.duration_since(cancelled) < std::time::Duration::from_millis(100));
+
+        // The next load starts afresh.
+        let small = dir.write("small.csv", "A\n1\n");
+        app.run("home.getData", &json!({"kind": "csv", "path": small}))
+            .unwrap();
+        assert_eq!(app.load_progress().rows(), [("small".to_string(), 2)]);
     }
 
     #[test]

@@ -10,7 +10,7 @@ use crate::culture::Culture;
 use crate::merge;
 use crate::source::{SAMPLE_ROWS, Source};
 use crate::step::Step;
-use crate::{Error, Result, Table, TableBuilder};
+use crate::{Error, Progress, Result, Table, TableBuilder};
 
 /// A Query. Its result is loaded as the table with the Query's name.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +63,17 @@ impl Query {
         Pass::new(queries, limit).run(self)
     }
 
+    /// [`Query::run_with`], counting rows read into `progress` and stopping with
+    /// [`Error::Cancelled`] at the first batch after it is cancelled.
+    pub fn run_watched(
+        &self,
+        queries: &[Query],
+        limit: usize,
+        progress: &Progress,
+    ) -> Result<(Table, usize)> {
+        Pass::watched(queries, limit, progress).run(self)
+    }
+
     /// Whether this Query has a Merged Queries step taking in the Query `name`.
     pub fn merges(&self, name: &str) -> bool {
         self.steps
@@ -103,7 +114,7 @@ impl Query {
 
     /// Reads the Source and runs the leading streaming steps batch by batch: the loaded table,
     /// its Cell errors, and the steps left to run on it.
-    fn stream(&self, limit: usize) -> Result<(Table, usize, &[Step])> {
+    fn stream(&self, limit: usize, progress: Option<&Progress>) -> Result<(Table, usize, &[Step])> {
         let streamed = self.steps.iter().take_while(|s| streams(s)).count();
         let (head, tail) = self.steps.split_at(streamed);
         let mut head = Head {
@@ -119,16 +130,17 @@ impl Query {
                 .get_or_insert_with(|| TableBuilder::new(&self.name, batch.schema(), limit))
                 .push(&batch)
         };
-        let source_errors = self.source.read(
-            &self.name,
-            usize::MAX,
-            self.culture,
-            limit,
-            &mut |batch| match head.run(batch, 0, true)? {
-                Some(batch) => push(batch),
-                None => Ok(()),
-            },
-        )?;
+        let source_errors =
+            self.source
+                .read(&self.name, usize::MAX, self.culture, limit, &mut |batch| {
+                    if let Some(p) = progress {
+                        p.read(&self.name, batch.num_rows())?;
+                    }
+                    match head.run(batch, 0, true)? {
+                        Some(batch) => push(batch),
+                        None => Ok(()),
+                    }
+                })?;
         // No row ever reached a Promoted Headers: run the rest of the steps on the empty batch
         // it held, as the whole table would (nothing to promote).
         if let Some((from, batch)) = head.held.take()
@@ -213,6 +225,14 @@ impl<'a> Pass<'a> {
         Self(Ctx::new(queries, limit))
     }
 
+    /// A pass that counts rows read into `progress` and stops once it is cancelled.
+    pub fn watched(queries: &'a [Query], limit: usize, progress: &'a Progress) -> Self {
+        Self(Ctx {
+            progress: Some(progress),
+            ..Ctx::new(queries, limit)
+        })
+    }
+
     /// `q`'s table and Cell errors: run now, unless this pass already ran it (to load it or to
     /// merge it into another). The error is `q`'s own or a merged-from Query's.
     pub fn run(&mut self, q: &'a Query) -> Result<(Table, usize)> {
@@ -239,6 +259,8 @@ pub(crate) struct Ctx<'a> {
     /// Bytes held by runs in progress: the input of the step each is running (a merge's
     /// streamed input stays alive beside its output and the other Query's run).
     busy: usize,
+    /// Rows read and the cancel switch, for a watched pass.
+    progress: Option<&'a Progress>,
 }
 
 impl<'a> Ctx<'a> {
@@ -252,6 +274,7 @@ impl<'a> Ctx<'a> {
             done: HashMap::new(),
             held: 0,
             busy: 0,
+            progress: None,
         }
     }
 
@@ -288,7 +311,7 @@ impl<'a> Ctx<'a> {
 
     /// Runs `q` from its Source.
     fn compute(&mut self, q: &'a Query) -> Result<(Table, usize)> {
-        let (table, mut errors, tail) = q.stream(self.free())?;
+        let (table, mut errors, tail) = q.stream(self.free(), self.progress)?;
         if tail.is_empty() {
             return Ok((table, errors));
         }
@@ -297,6 +320,9 @@ impl<'a> Ctx<'a> {
         let outer = self.busy;
         let r = (|| {
             for step in tail {
+                if let Some(p) = self.progress {
+                    p.check()?;
+                }
                 // The step's input stays alive while it runs: its output gets what's left.
                 self.busy = outer.saturating_add(batch.get_array_memory_size());
                 let (next, n) = self.apply(q, step, &batch)?;
@@ -429,6 +455,33 @@ mod tests {
             steps,
             culture: Culture::get("en-GB").unwrap(),
         }
+    }
+
+    #[test]
+    fn a_watched_run_counts_rows_and_stops_when_cancelled() {
+        let mut text = String::from("N\n");
+        for i in 0..(BATCH_ROWS * 3) {
+            text.push_str(&format!("{i}\n"));
+        }
+        let q = Query {
+            source: source(&text),
+            ..query(vec![Step::PromotedHeaders])
+        };
+        let p = Progress::default();
+        let (t, _) = q.run_watched(&[], usize::MAX, &p).unwrap();
+        assert_eq!(t.rows(), BATCH_ROWS * 3);
+        assert_eq!(
+            p.rows(),
+            [("Sales".to_string(), (BATCH_ROWS * 3 + 1) as u64)]
+        );
+        p.reset();
+        p.cancel();
+        assert_eq!(
+            q.run_watched(&[], usize::MAX, &p).unwrap_err(),
+            Error::Cancelled
+        );
+        // Stopped at the first batch.
+        assert!(p.rows().iter().all(|(_, n)| *n <= BATCH_ROWS as u64));
     }
 
     #[test]

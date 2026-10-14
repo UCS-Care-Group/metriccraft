@@ -643,6 +643,13 @@ impl App {
     pub fn cancel_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancel)
     }
+
+    /// The running load's progress (rows read per Query) and cancel switch (spec U-3): read
+    /// and cancel it from another thread. Each Get Data, Refresh and Close & Apply resets it; a
+    /// cancelled one fails, changing nothing.
+    pub fn load_progress(&self) -> Arc<opendash_data::Progress> {
+        Arc::clone(&self.progress)
+    }
 }
 
 /// Picks `point` of Visual `visual` on Page `page` (see [`App::click`]).

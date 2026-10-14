@@ -89,6 +89,9 @@ enum Closing {
     Saving,
 }
 
+/// The commands that load data, with progress and Cancel (spec U-3).
+const LOADS: [&str; 3] = ["home.getData", "home.refresh", "home.closeApply"];
+
 /// The window.
 pub struct Shell {
     engine: Engine,
@@ -515,6 +518,27 @@ impl Shell {
                         (None, None) => Str::Ready.text().to_string(),
                     };
                     ui.label(RichText::new(text).color(t.muted));
+                    if snap.busy.is_some_and(|id| LOADS.contains(&id)) {
+                        // Rows read so far, per Query; polled while the load runs.
+                        for (query, rows) in self.engine.load_rows() {
+                            let n = opendash_core::format(
+                                &opendash_core::Value::Integer(
+                                    i64::try_from(rows).unwrap_or(i64::MAX),
+                                ),
+                                "#,0",
+                                &opendash_core::EN_US,
+                            )
+                            .unwrap_or_default();
+                            ui.label(
+                                RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
+                            );
+                        }
+                        if ui.button(Str::Cancel.text()).clicked() {
+                            self.engine.cancel_load();
+                        }
+                        ui.ctx()
+                            .request_repaint_after(std::time::Duration::from_millis(100));
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if snap.dirty {
                             ui.label(RichText::new(Str::Unsaved.text()).color(t.muted));

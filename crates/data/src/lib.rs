@@ -11,6 +11,7 @@ mod fuzz;
 pub mod m;
 mod merge;
 mod preview;
+mod progress;
 mod query;
 pub mod source;
 pub mod step;
@@ -18,6 +19,7 @@ mod table;
 
 pub use fold::{assume_folded, fold_case};
 pub use preview::Preview;
+pub use progress::Progress;
 pub use query::{Pass, Query};
 pub use table::{Table, TableBuilder, default_memory_cap};
 
@@ -32,6 +34,8 @@ pub enum Error {
     Source { source: String, message: String },
     /// An Applied Step can't run on its input (a column it names is missing, a name collides…).
     Step { step: &'static str, message: String },
+    /// The load was cancelled ([`Progress::cancel`]); nothing was loaded.
+    Cancelled,
 }
 
 impl std::fmt::Display for Error {
@@ -45,6 +49,7 @@ impl std::fmt::Display for Error {
             Self::Arrow { table, message } => write!(f, "`{table}`: {message}"),
             Self::Source { source, message } => write!(f, "{source}: {message}"),
             Self::Step { step, message } => write!(f, "{step}: {message}"),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }
