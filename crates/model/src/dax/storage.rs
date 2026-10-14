@@ -10,7 +10,8 @@
 //! a 64-row word at a time from the integer codes ([`code_mask`]); a column's distinct values
 //! are its distinct codes, read once each ([`distinct_values`]); `DISTINCTCOUNT` of whole
 //! numbers is a range bitmap (or an integer hash set when the range is sparse); scans under a
-//! mask walk its set bits word by word.
+//! mask walk its set bits word by word. A value filter on whole numbers or dates (M4.7)
+//! compares integers a 64-row word at a time.
 
 use std::collections::HashSet;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -31,7 +32,7 @@ use super::{DaxError, Result};
 pub const CHUNK: usize = 64 * 1024;
 
 /// Days from 1899-12-30 (DAX DateTime's epoch) to 1970-01-01 (Arrow's).
-const UNIX_EPOCH_DAYS: f64 = 25_569.0;
+pub(crate) const UNIX_EPOCH_DAYS: f64 = 25_569.0;
 
 /// The cancel flag, checked by every scan.
 #[derive(Clone, Copy, Default)]
@@ -516,7 +517,9 @@ impl Filter {
                     Allowed::Codes { codes, blank } => {
                         return code_mask(col, t.rows, codes, *blank, cancel);
                     }
-                    Allowed::Values { keys, blank } if col.kind() == Kind::Integer => {
+                    Allowed::Values { keys, blank }
+                        if col.kind() == Kind::Integer || matches!(col, Col::Date(_)) =>
+                    {
                         return int_mask(col, t.rows, keys, *blank, cancel);
                     }
                     Allowed::Values { keys, blank } => scan(t.rows, None, cancel, |r| {
@@ -639,7 +642,7 @@ impl Col {
     }
 
     /// The column's Arrow array (`None` for [`Col::Null`]); for a dictionary column, its codes.
-    fn array(&self) -> Option<&dyn Array> {
+    pub(crate) fn array(&self) -> Option<&dyn Array> {
         Some(match self {
             Col::Dict { codes, .. } => match codes {
                 Codes::I8(a) => a,
@@ -1177,8 +1180,9 @@ fn mask_words<T: ArrowPrimitiveType>(
     Ok(out)
 }
 
-/// The rows of `0..rows` of a whole-number column whose value is in `keys` (BLANK rows: when
-/// `blank`): the keys resolved to integers once, then a word-at-a-time scan of the values.
+/// The rows of `0..rows` of a whole-number (or date) column whose value is in `keys` (BLANK
+/// rows: when `blank`): the keys resolved to integers once, then a word-at-a-time scan of the
+/// values. A date is the whole number of days since 1899-12-30 its [`Key`] is (M4.7).
 fn int_mask(
     col: &Col,
     rows: usize,
@@ -1209,6 +1213,9 @@ fn int_mask(
         Col::I16(a) => mask_words(a, rows, blank, cancel, |v| hit(v.into())),
         Col::I32(a) => mask_words(a, rows, blank, cancel, |v| hit(v.into())),
         Col::I64(a) => mask_words(a, rows, blank, cancel, hit),
+        Col::Date(a) => mask_words(a, rows, blank, cancel, |d| {
+            hit(i64::from(d) + UNIX_EPOCH_DAYS as i64)
+        }),
         _ => {
             cancel.check()?;
             Ok(Bitset::new(rows, blank))
@@ -1218,7 +1225,7 @@ fn int_mask(
 
 /// A hasher for whole numbers (a SplitMix64 finaliser): `DISTINCTCOUNT` over a wide range.
 #[derive(Default)]
-struct IntHasher(u64);
+pub(crate) struct IntHasher(u64);
 
 impl Hasher for IntHasher {
     fn finish(&self) -> u64 {
@@ -1236,6 +1243,10 @@ impl Hasher for IntHasher {
 
     fn write_i64(&mut self, i: i64) {
         self.0 = self.0.rotate_left(32) ^ i as u64;
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.0 = self.0.rotate_left(32) ^ i;
     }
 }
 
