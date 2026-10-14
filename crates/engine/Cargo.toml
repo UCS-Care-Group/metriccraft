@@ -35,3 +35,7 @@ harness = false
 [[bench]]
 name = "dax"
 harness = false
+
+[[bench]]
+name = "page"
+harness = false
