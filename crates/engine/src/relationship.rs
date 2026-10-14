@@ -11,25 +11,6 @@ use serde_json::Value;
 use crate::model::{invalid, text};
 use crate::{App, Document, Error, Result};
 
-/// The `params` docs of the commands here.
-pub(crate) const NEW_PARAMS: &str = "fromTable: text — the many side's Table\n\
-     fromColumn: text — its column\n\
-     toTable: text — the one side's Table\n\
-     toColumn: text — its column: unique, non-blank values\n\
-     active: logical — default true; made inactive (with a notice) if the two Tables already \
-     have an active Relationship";
-pub(crate) const EDIT_PARAMS: &str = "relationship: integer or {fromTable, fromColumn, toTable, \
-     toColumn} — the Relationship: its position (0 = first) or its columns\n\
-     fromTable, fromColumn, toTable, toColumn: text — the new ends (default: as now)\n\
-     active: logical — default as now; made inactive (with a notice) if the two Tables already \
-     have another active Relationship";
-pub(crate) const DELETE_PARAMS: &str = "relationship: integer or {fromTable, fromColumn, \
-     toTable, toColumn} — the Relationship: its position (0 = first) or its columns";
-pub(crate) const ACTIVE_PARAMS: &str = "relationship: integer or {fromTable, fromColumn, \
-     toTable, toColumn} — the Relationship: its position (0 = first) or its columns\n\
-     active: logical — default true; activating fails while the two Tables have another active \
-     Relationship (deactivate it first)";
-
 /// `modeling.newRelationship`.
 pub(crate) fn new_relationship(app: &mut App, params: &Value) -> Result {
     const ID: &str = "modeling.newRelationship";

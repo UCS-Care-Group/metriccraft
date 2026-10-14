@@ -502,10 +502,6 @@ fn dir_param(params: &Value, cmd: &str) -> Result<PathBuf> {
     }
 }
 
-pub(crate) const RECOVER_PARAMS: &str = "id: text — the recovery copy, as listed at launch\n\
-     dir: text — the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)";
-pub(crate) const DISCARD_PARAMS: &str = RECOVER_PARAMS;
-
 /// `file.recover`: opens a recovery copy as the Document.
 pub(crate) fn recover(app: &mut App, params: &Value) -> Result {
     const ID: &str = "file.recover";

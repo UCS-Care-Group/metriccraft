@@ -296,60 +296,6 @@ pub(crate) fn has_visuals(app: &App) -> bool {
         .any(|p| !p.visuals.is_empty())
 }
 
-pub(crate) const NEW_PAGE_PARAMS: &str =
-    "name: text — the Page's name, unique ignoring case (default: Page n, the first free n)";
-pub(crate) const PAGE_PARAMS: &str = "page: text — the Page's id or name";
-pub(crate) const RENAME_PAGE_PARAMS: &str = "page: text — the Page's id or name\n\
-     name: text — its new name, unique among Pages ignoring case";
-pub(crate) const MOVE_PAGE_PARAMS: &str = "page: text — the Page's id or name\n\
-     index: integer — its new position, 0 = first";
-pub(crate) const NEW_VISUAL_PARAMS: &str = "type: text — table, matrix, card, clusteredBar, \
-     clusteredColumn, line or slicer\n\
-     page: text — the Page's id or name (default: the first Page; a report with none gets \
-     `Page 1`)\n\
-     x, y: integer — position in logical pixels, 0 to 100000 (default 0)\n\
-     w, h: integer — size, 1 to 100000 (default 400 × 300)";
-pub(crate) const VISUAL_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id";
-pub(crate) const MOVE_VISUAL_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     x, y: integer — the new position, 0 to 100000";
-pub(crate) const RESIZE_VISUAL_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     w, h: integer — the new size, 1 to 100000";
-pub(crate) const CHANGE_TYPE_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     type: text — the new type; Fields in wells it has are kept, the others dropped";
-pub(crate) const ADD_FIELD_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     well: text — values, rows, columns, axis, legend or field (one the type has)\n\
-     field: {table, column} or {measure} — a Column or Measure of the model; only values takes \
-     a Measure; a one-field well has its Field replaced\n\
-     index: integer — position in the well (default: last)";
-pub(crate) const REMOVE_FIELD_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     well: text — the well\n\
-     index: integer — the Field's position in it (or give field)\n\
-     field: {table, column} or {measure} — the Field (its first occurrence)";
-pub(crate) const MOVE_FIELD_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     well: text — the well it is in\n\
-     index: integer — its position there\n\
-     toWell: text — the well to move it to (default: the same)\n\
-     toIndex: integer — its new position there (default: last)";
-pub(crate) const SORT_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     field: {table, column}, {measure} or null — a Field of the Visual; null: the type's \
-     default sort\n\
-     direction: text — ascending or descending (default descending)";
-pub(crate) const FORMAT_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id\n\
-     option: text — title (text, or null for the automatic title), showTitle, dataLabels \
-     (charts), legend (charts), legendPosition (charts: top, bottom, left or right), \
-     rowSubtotals and columnSubtotals (matrix), slicerStyle (slicer: list or dropdown); the \
-     others are logical\n\
-     value: the option's value";
-
 pub(crate) fn page_mut<'a>(
     doc: &'a mut Document,
     params: &Value,

@@ -158,16 +158,6 @@ const OPEN: &str = "file.open";
 const SAVE: &str = "file.save";
 const SAVE_AS: &str = "file.saveAs";
 
-pub(crate) const OPEN_PARAMS: &str = "path: text — a Project folder, its project.odash.json, or a .odash Package\n\
-     recover: text — after an interrupted save only: staging (the save that was being made) or \
-     lastGood (the state before it)";
-pub(crate) const SAVE_PARAMS: &str =
-    "path: text — save here instead, as Save As does (default: where it was opened or last saved)";
-pub(crate) const SAVE_AS_PARAMS: &str = "path: text — the Project folder or .odash Package to write\n\
-     package: logical — write a .odash Package (default: whether path ends in .odash)\n\
-     data: logical — include the Data cache in a Package (default true; a Project folder always \
-     keeps it)";
-
 impl App {
     /// Where the document was opened from or last saved to.
     pub fn location(&self) -> Option<&Location> {
@@ -545,11 +535,6 @@ fn root_of(folder: &Path) -> PathBuf {
 }
 
 const REMAP: &str = "file.remapSource";
-
-pub(crate) const REMAP_PARAMS: &str = "from: text — a Source file path as the Project's Queries name it (relative to the \
-     Project folder, or absolute)\n\
-     to: text or null — read it from here on this machine instead (relative to the Project \
-     folder, or absolute); null removes the remap. Kept in .local/, never shared";
 
 /// `file.remapSource`: reads a Source file from another path on this machine (Local overrides,
 /// see the module docs). Needs a Project folder. Not undoable; nothing goes Stale.

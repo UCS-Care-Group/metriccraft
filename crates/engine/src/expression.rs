@@ -22,25 +22,6 @@ use serde_json::Value;
 use crate::model::{invalid, text};
 use crate::{App, Document, Error, Result};
 
-pub(crate) const NEW_MEASURE_PARAMS: &str = "table: text — the Measure's home Table\n\
-     name: text — unique among the Model's Measures, not a Column name of the Table (ignoring \
-     case)\n\
-     expression: text — its DAX, kept as written (one that doesn't parse is kept, with its error)\n\
-     formatString: text — optional, e.g. #,0.00\n\
-     description: text — optional";
-pub(crate) const NEW_COLUMN_PARAMS: &str = "table: text — the Table\n\
-     name: text — unique in the Table, not one of its Measures (ignoring case)\n\
-     expression: text — its DAX, evaluated for each row; the data type comes from the values";
-pub(crate) const EDIT_PARAMS: &str = "table: text — the Table\n\
-     name: text — one of its Measures or Calculated columns\n\
-     expression: text — the new DAX";
-pub(crate) const DELETE_PARAMS: &str = "table: text — the Table\n\
-     name: text — one of its Measures or Calculated columns (a Calculated column's \
-     Relationships go too; DAX that used it is kept and shows an error)";
-pub(crate) const RENAME_MEASURE_PARAMS: &str = "table: text — the Measure's home Table\n\
-     measure: text — the Measure\n\
-     name: text — its new name; rewrites every Measure and Calculated column that uses it";
-
 pub(crate) fn has_model_tables(app: &App) -> bool {
     !app.document().model.tables.is_empty()
 }

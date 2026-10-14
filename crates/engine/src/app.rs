@@ -180,6 +180,10 @@ impl App {
         if !(cmd.enabled)(self) {
             return Err(Error::Disabled(id.into()));
         }
+        crate::param::validate(cmd.params, params).map_err(|message| Error::InvalidParams {
+            command: id.into(),
+            message,
+        })?;
         match cmd.run {
             Run::Edit(edit) => self.edit_noting(|doc| edit(doc, params).map(|()| None)),
             Run::App(act) => act(self, params),
@@ -402,7 +406,11 @@ mod tests {
             label: "Add",
             ribbon: "",
             shortcut: None,
-            params: "by: integer — amount to add",
+            params: &[crate::param::req(
+                "by",
+                crate::param::Kind::Integer,
+                "amount to add",
+            )],
             enabled: |_| true,
             run: Run::Edit(add),
         },

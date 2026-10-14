@@ -680,20 +680,6 @@ fn pick(session: &mut Session, page: &str, visual: &Visual, point: Point, add: b
 
 // ---- commands ----
 
-pub(crate) const SLICER_SELECT_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the slicer's id\n\
-     items: list — values of the slicer's Column (text, number, logical; null for BLANK; dates \
-     as their serial number); empty clears the selection\n\
-     add: logical — toggle these items in the selection instead of replacing it (Ctrl; \
-     default false)";
-pub(crate) const SELECT_PARAMS: &str = "page: text — the Page's id or name\n\
-     visual: text — the Visual's id (not a slicer: use slicer.select)\n\
-     point: {row, series} — a row of the Visual's result (and its series: the cell index \
-     j × values + k), or {keys: [{table, column, value}, …]} — the Columns and values\n\
-     add: logical — toggle the point in the selection instead of replacing it (Ctrl; default \
-     false); selecting the only selected point again clears";
-pub(crate) const CLEAR_PARAMS: &str = "page: text — the Page's id or name (default: every Page)";
-
 /// Logical `params[key]`, false if absent.
 fn flag(params: &Value, key: &str, id: &str) -> Result<bool> {
     match params.get(key) {

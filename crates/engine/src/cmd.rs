@@ -4,6 +4,7 @@ use crate::expression;
 use crate::file;
 use crate::load;
 use crate::model::{self, has_tables};
+use crate::param::{Kind, Param, null, opt, req};
 use crate::query::{self, has_queries};
 use crate::recovery;
 use crate::relationship;
@@ -30,9 +31,9 @@ pub struct Command {
     /// Ribbon location, e.g. `"Home > Queries"`; empty if the command isn't on the ribbon.
     pub ribbon: &'static str,
     pub shortcut: Option<&'static str>,
-    /// Params, one per line as `name: type — meaning`; empty if none. Empty params must run with
+    /// What the command takes (spec C-3), checked by [`App::run`]. Empty params must run with
     /// defaults or return [`crate::Error::InvalidParams`], never open a dialog.
-    pub params: &'static str,
+    pub params: &'static [Param],
     pub enabled: fn(&App) -> bool,
     pub run: Run,
 }
@@ -44,7 +45,7 @@ pub static COMMANDS: &[Command] = &[
         label: "Undo",
         ribbon: "",
         shortcut: Some("Ctrl+Z"),
-        params: "",
+        params: &[],
         enabled: App::can_undo,
         run: Run::App(|app, _| app.undo()),
     },
@@ -53,7 +54,7 @@ pub static COMMANDS: &[Command] = &[
         label: "Redo",
         ribbon: "",
         shortcut: Some("Ctrl+Y"),
-        params: "",
+        params: &[],
         enabled: App::can_redo,
         run: Run::App(|app, _| app.redo()),
     },
@@ -63,7 +64,7 @@ pub static COMMANDS: &[Command] = &[
         label: "New",
         ribbon: "File",
         shortcut: Some("Ctrl+N"),
-        params: "",
+        params: &[],
         enabled: |_| true,
         run: Run::App(file::new),
     },
@@ -72,7 +73,18 @@ pub static COMMANDS: &[Command] = &[
         label: "Open",
         ribbon: "File",
         shortcut: Some("Ctrl+O"),
-        params: file::OPEN_PARAMS,
+        params: &[
+            req(
+                "path",
+                Kind::Path,
+                "a Project folder, its project.odash.json, or a .odash Package",
+            ),
+            opt(
+                "recover",
+                Kind::Choice(&["staging", "lastGood"]),
+                "after an interrupted save only: staging (the save that was being made) or lastGood (the state before it)",
+            ),
+        ],
         enabled: |_| true,
         run: Run::App(file::open),
     },
@@ -81,7 +93,11 @@ pub static COMMANDS: &[Command] = &[
         label: "Save",
         ribbon: "File",
         shortcut: Some("Ctrl+S"),
-        params: file::SAVE_PARAMS,
+        params: &[opt(
+            "path",
+            Kind::Path,
+            "save here instead, as Save As does (default: where it was opened or last saved)",
+        )],
         enabled: |_| true,
         run: Run::App(file::save),
     },
@@ -90,7 +106,23 @@ pub static COMMANDS: &[Command] = &[
         label: "Save as",
         ribbon: "File",
         shortcut: None,
-        params: file::SAVE_AS_PARAMS,
+        params: &[
+            req(
+                "path",
+                Kind::Path,
+                "the Project folder or .odash Package to write",
+            ),
+            opt(
+                "package",
+                Kind::Bool,
+                "write a .odash Package (default: whether path ends in .odash)",
+            ),
+            opt(
+                "data",
+                Kind::Bool,
+                "include the Data cache in a Package (default true; a Project folder always keeps it)",
+            ),
+        ],
         enabled: |_| true,
         run: Run::App(file::save_as),
     },
@@ -101,7 +133,18 @@ pub static COMMANDS: &[Command] = &[
         // Like Data source settings > Change Source, but for this user only: not on the ribbon.
         ribbon: "",
         shortcut: None,
-        params: file::REMAP_PARAMS,
+        params: &[
+            req(
+                "from",
+                Kind::Path,
+                "a Source file path as the Project's Queries name it (relative to the Project folder, or absolute)",
+            ),
+            null(req(
+                "to",
+                Kind::Path,
+                "read it from here on this machine instead (relative to the Project folder, or absolute); null removes the remap. Kept in .local/, never shared",
+            )),
+        ],
         enabled: |_| true,
         run: Run::App(file::remap_source),
     },
@@ -111,7 +154,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Recover",
         ribbon: "",
         shortcut: None,
-        params: recovery::RECOVER_PARAMS,
+        params: &[
+            req("id", Kind::Text, "the recovery copy, as listed at launch"),
+            opt(
+                "dir",
+                Kind::Path,
+                "the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)",
+            ),
+        ],
         enabled: |_| true,
         run: Run::App(recovery::recover),
     },
@@ -120,7 +170,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Discard",
         ribbon: "",
         shortcut: None,
-        params: recovery::DISCARD_PARAMS,
+        params: &[
+            req("id", Kind::Text, "the recovery copy, as listed at launch"),
+            opt(
+                "dir",
+                Kind::Path,
+                "the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)",
+            ),
+        ],
         enabled: |_| true,
         run: Run::App(recovery::discard),
     },
@@ -130,15 +187,44 @@ pub static COMMANDS: &[Command] = &[
         label: "Get Data",
         ribbon: "Home > Data",
         shortcut: None,
-        params: "kind: text — csv, parquet or xlsx\n\
-                 path: text — the file\n\
-                 name: text — the Query and table name (default: the file name without its \
-                 extension, or the sheet/table)\n\
-                 culture: text — reads numbers and dates, e.g. en-GB (default: en-US)\n\
-                 delimiter: text — CSV: one character, \\t for tab (default: detected)\n\
-                 encoding: text — CSV: utf-8, windows-1252, utf-16le or utf-16be (default: detected)\n\
-                 item: text — XLSX: the sheet or table to read (required)\n\
-                 itemKind: text — XLSX: sheet or table (default: sheet)",
+        params: &[
+            req(
+                "kind",
+                Kind::Choice(&["csv", "parquet", "xlsx"]),
+                "csv, parquet or xlsx",
+            ),
+            req("path", Kind::Path, "the file"),
+            opt(
+                "name",
+                Kind::Text,
+                "the Query and table name (default: the file name without its extension, or the sheet/table)",
+            ),
+            opt(
+                "culture",
+                Kind::Text,
+                "reads numbers and dates, e.g. en-GB (default: en-US)",
+            ),
+            opt(
+                "delimiter",
+                Kind::Text,
+                "CSV: one character, \\t for tab (default: detected)",
+            ),
+            opt(
+                "encoding",
+                Kind::Choice(&["utf-8", "windows-1252", "utf-16le", "utf-16be"]),
+                "CSV: utf-8, windows-1252, utf-16le or utf-16be (default: detected)",
+            ),
+            opt(
+                "item",
+                Kind::Text,
+                "XLSX: the sheet or table to read (required)",
+            ),
+            opt(
+                "itemKind",
+                Kind::Choice(&["sheet", "table"]),
+                "XLSX: sheet or table (default: sheet)",
+            ),
+        ],
         enabled: |_| true,
         run: Run::App(load::get_data),
     },
@@ -147,7 +233,7 @@ pub static COMMANDS: &[Command] = &[
         label: "Refresh",
         ribbon: "Home > Queries",
         shortcut: None,
-        params: "",
+        params: &[],
         enabled: has_queries,
         run: Run::App(load::refresh),
     },
@@ -156,7 +242,7 @@ pub static COMMANDS: &[Command] = &[
         label: "Close & Apply",
         ribbon: "Power Query Editor: Home > Close",
         shortcut: None,
-        params: "",
+        params: &[],
         enabled: load::has_stale,
         run: Run::App(load::close_apply),
     },
@@ -167,7 +253,7 @@ pub static COMMANDS: &[Command] = &[
         label: "Use First Row as Headers",
         ribbon: "Transform > Table",
         shortcut: None,
-        params: "query: text — the Query",
+        params: &[req("query", Kind::Query, "the Query")],
         enabled: has_queries,
         run: Run::Edit(query::use_first_row_as_headers),
     },
@@ -176,9 +262,23 @@ pub static COMMANDS: &[Command] = &[
         label: "Data Type",
         ribbon: "Transform > Any Column",
         shortcut: None,
-        params: "query: text — the Query\n\
-                 columns: list of text — the columns to change\n\
-                 type: text — text, decimal, fixedDecimal, whole, date, datetime or boolean",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            req("columns", Kind::Texts, "the columns to change"),
+            req(
+                "type",
+                Kind::Choice(&[
+                    "text",
+                    "decimal",
+                    "fixedDecimal",
+                    "whole",
+                    "date",
+                    "datetime",
+                    "boolean",
+                ]),
+                "text, decimal, fixedDecimal, whole, date, datetime or boolean",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::change_type),
     },
@@ -187,9 +287,11 @@ pub static COMMANDS: &[Command] = &[
         label: "Rename",
         ribbon: "Transform > Any Column",
         shortcut: Some("F2"),
-        params: "query: text — the Query\n\
-                 column: text — the column to rename\n\
-                 name: text — its new name, unique in the table",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            req("column", Kind::Text, "the column to rename"),
+            req("name", Kind::Text, "its new name, unique in the table"),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::rename_column),
     },
@@ -198,8 +300,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Remove Columns",
         ribbon: "Home > Manage Columns",
         shortcut: Some("Delete"),
-        params: "query: text — the Query\n\
-                 columns: list of text — the columns to remove (at least one must remain)",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            req(
+                "columns",
+                Kind::Texts,
+                "the columns to remove (at least one must remain)",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::remove_columns),
     },
@@ -208,9 +316,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Move",
         ribbon: "Transform > Any Column",
         shortcut: None,
-        params: "query: text — the Query\n\
-                 columns: list of text — these columns, in this order, fill the positions they \
-                 hold; the others stay put",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            req(
+                "columns",
+                Kind::Texts,
+                "these columns, in this order, fill the positions they hold; the others stay put",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::reorder_columns),
     },
@@ -220,12 +333,19 @@ pub static COMMANDS: &[Command] = &[
         // Power Query's column-header filter menu; not on the ribbon.
         ribbon: "",
         shortcut: None,
-        params: "query: text — the Query\n\
-                 conditions: list of {column: text, op: text, value} — op is equals, notEquals, \
-                 greater, greaterOrEqual, less, lessOrEqual, contains, beginsWith or endsWith; \
-                 value is a number, text, logical or null (equals null = is null); text for a \
-                 date or datetime column is read as one\n\
-                 combine: text — and (default) or or",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            req(
+                "conditions",
+                Kind::Json,
+                "list of {column: text, op: text, value} — op is equals, notEquals, greater, greaterOrEqual, less, lessOrEqual, contains, beginsWith or endsWith; value is a number, text, logical or null (equals null = is null); text for a date or datetime column is read as one",
+            ),
+            opt(
+                "combine",
+                Kind::Choice(&["and", "or"]),
+                "and (default) or or",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::filter_rows),
     },
@@ -234,14 +354,36 @@ pub static COMMANDS: &[Command] = &[
         label: "Merge Queries",
         ribbon: "Home > Combine",
         shortcut: None,
-        params: "query: text — the Query to merge into\n\
-                 keys: list of text — its key columns\n\
-                 with: text — the other Query\n\
-                 withKeys: list of text — the other Query's key columns, paired with keys in order\n\
-                 kind: text — leftOuter (default), inner or fullOuter\n\
-                 column: text — the merged column's name (default: the other Query's name)\n\
-                 expand: list of text — the other Query's columns to add (default: all)\n\
-                 prefix: logical — name added columns `column.name` (default true)",
+        params: &[
+            req("query", Kind::Query, "the Query to merge into"),
+            req("keys", Kind::Texts, "its key columns"),
+            req("with", Kind::Query, "the other Query"),
+            req(
+                "withKeys",
+                Kind::Texts,
+                "the other Query's key columns, paired with keys in order",
+            ),
+            opt(
+                "kind",
+                Kind::Choice(&["leftOuter", "inner", "fullOuter"]),
+                "leftOuter (default), inner or fullOuter",
+            ),
+            opt(
+                "column",
+                Kind::Text,
+                "the merged column's name (default: the other Query's name)",
+            ),
+            opt(
+                "expand",
+                Kind::Texts,
+                "the other Query's columns to add (default: all)",
+            ),
+            opt(
+                "prefix",
+                Kind::Bool,
+                "name added columns `column.name` (default true)",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::merge_queries),
     },
@@ -250,8 +392,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Delete",
         ribbon: "",
         shortcut: None,
-        params: "query: text — the Query\n\
-                 step: integer — the step's position in Applied Steps, 0 = first",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            req(
+                "step",
+                Kind::Integer,
+                "the step's position in Applied Steps, 0 = first",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(query::delete_step),
     },
@@ -261,8 +409,14 @@ pub static COMMANDS: &[Command] = &[
         // Power Query's Queries pane, right-click a query.
         ribbon: "",
         shortcut: None,
-        params: "query: text — the Query\n\
-                 enabled: logical — load it into the model (default: the opposite of now)",
+        params: &[
+            req("query", Kind::Query, "the Query"),
+            opt(
+                "enabled",
+                Kind::Bool,
+                "load it into the model (default: the opposite of now)",
+            ),
+        ],
         enabled: has_queries,
         run: Run::Edit(model::enable_load),
     },
@@ -273,9 +427,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Rename",
         ribbon: "",
         shortcut: None,
-        params: "query: text — the Query (and its Table)\n\
-                 name: text — its new name, unique among Queries ignoring case; rewrites \
-                 Relationships and other Queries' merges (same as modeling.renameTable)",
+        params: &[
+            req("query", Kind::Query, "the Query (and its Table)"),
+            req(
+                "name",
+                Kind::Text,
+                "its new name, unique among Queries ignoring case; rewrites Relationships and other Queries' merges (same as modeling.renameTable)",
+            ),
+        ],
         enabled: has_queries,
         run: Run::App(rename::rename_query),
     },
@@ -284,8 +443,11 @@ pub static COMMANDS: &[Command] = &[
         label: "Delete",
         ribbon: "",
         shortcut: None,
-        params: "query: text — the Query; its Table and Relationships go too (refused while \
-                 another Query merges it)",
+        params: &[req(
+            "query",
+            Kind::Query,
+            "the Query; its Table and Relationships go too (refused while another Query merges it)",
+        )],
         enabled: has_queries,
         run: Run::Edit(rename::delete_query),
     },
@@ -294,8 +456,11 @@ pub static COMMANDS: &[Command] = &[
         label: "Duplicate",
         ribbon: "",
         shortcut: None,
-        params: "query: text — the Query to copy, as `<query> (2)` (the next free number); \
-                 loaded at the next Close & Apply",
+        params: &[req(
+            "query",
+            Kind::Query,
+            "the Query to copy, as `<query> (2)` (the next free number); loaded at the next Close & Apply",
+        )],
         enabled: has_queries,
         run: Run::Edit(rename::duplicate_query),
     },
@@ -305,11 +470,23 @@ pub static COMMANDS: &[Command] = &[
         label: "Data type",
         ribbon: "Column tools > Formatting",
         shortcut: None,
-        params: "table: text — the Table\n\
-                 column: text — the Column\n\
-                 type: text — decimal, fixedDecimal, whole, datetime, date, text or boolean; \
-                 converts the loaded data (a value that doesn't convert fails the change), the \
-                 Query is untouched",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req("column", Kind::Column, "the Column"),
+            req(
+                "type",
+                Kind::Choice(&[
+                    "text",
+                    "decimal",
+                    "fixedDecimal",
+                    "whole",
+                    "date",
+                    "datetime",
+                    "boolean",
+                ]),
+                "decimal, fixedDecimal, whole, datetime, date, text or boolean; converts the loaded data (a value that doesn't convert fails the change), the Query is untouched",
+            ),
+        ],
         enabled: has_tables,
         run: Run::Edit(model::set_data_type),
     },
@@ -318,9 +495,15 @@ pub static COMMANDS: &[Command] = &[
         label: "Format",
         ribbon: "Column tools > Formatting",
         shortcut: None,
-        params: "table: text — the Table\n\
-                 column: text — the Column or Measure\n\
-                 formatString: text — a format string, e.g. #,0.00 (empty: the default)",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req("column", Kind::Column, "the Column or Measure"),
+            req(
+                "formatString",
+                Kind::Text,
+                "a format string, e.g. #,0.00 (empty: the default)",
+            ),
+        ],
         enabled: has_tables,
         run: Run::Edit(model::set_format),
     },
@@ -329,10 +512,23 @@ pub static COMMANDS: &[Command] = &[
         label: "Summarization",
         ribbon: "Column tools > Properties",
         shortcut: None,
-        params: "table: text — the Table\n\
-                 column: text — the Column\n\
-                 summarizeBy: text — none, sum, average, min, max, count or distinctCount \
-                 (sum and average need a number column)",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req("column", Kind::Column, "the Column"),
+            req(
+                "summarizeBy",
+                Kind::Choice(&[
+                    "none",
+                    "sum",
+                    "average",
+                    "min",
+                    "max",
+                    "count",
+                    "distinctCount",
+                ]),
+                "none, sum, average, min, max, count or distinctCount (sum and average need a number column)",
+            ),
+        ],
         enabled: has_tables,
         run: Run::Edit(model::set_summarize_by),
     },
@@ -341,10 +537,15 @@ pub static COMMANDS: &[Command] = &[
         label: "Sort by column",
         ribbon: "Column tools > Sort",
         shortcut: None,
-        params: "table: text — the Table\n\
-                 column: text — the Column to sort\n\
-                 by: text or null — another column of the Table with one value per value of \
-                 this one; null sorts by the column itself",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req("column", Kind::Column, "the Column to sort"),
+            null(req(
+                "by",
+                Kind::Column,
+                "another column of the Table with one value per value of this one; null sorts by the column itself",
+            )),
+        ],
         enabled: has_tables,
         run: Run::Edit(model::set_sort_by),
     },
@@ -354,9 +555,15 @@ pub static COMMANDS: &[Command] = &[
         // The Properties pane, or right-click > Hide in report view.
         ribbon: "",
         shortcut: None,
-        params: "table: text — the Table\n\
-                 column: text — one of its Columns or Measures (default: the Table itself)\n\
-                 hidden: logical — default true",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            opt(
+                "column",
+                Kind::Column,
+                "one of its Columns or Measures (default: the Table itself)",
+            ),
+            opt("hidden", Kind::Bool, "default true"),
+        ],
         enabled: has_tables,
         run: Run::Edit(model::set_hidden),
     },
@@ -366,9 +573,15 @@ pub static COMMANDS: &[Command] = &[
         // The Properties pane.
         ribbon: "",
         shortcut: None,
-        params: "table: text — the Table\n\
-                 column: text — one of its Columns or Measures (default: the Table itself)\n\
-                 description: text — empty clears it",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            opt(
+                "column",
+                Kind::Column,
+                "one of its Columns or Measures (default: the Table itself)",
+            ),
+            req("description", Kind::Text, "empty clears it"),
+        ],
         enabled: has_tables,
         run: Run::Edit(model::set_description),
     },
@@ -378,9 +591,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Rename",
         ribbon: "",
         shortcut: Some("F2"),
-        params: "table: text — the Table (and its Query)\n\
-                 name: text — its new name, unique among Queries ignoring case; rewrites \
-                 Relationships and other Queries' merges (same as query.rename)",
+        params: &[
+            req("table", Kind::Table, "the Table (and its Query)"),
+            req(
+                "name",
+                Kind::Text,
+                "its new name, unique among Queries ignoring case; rewrites Relationships and other Queries' merges (same as query.rename)",
+            ),
+        ],
         enabled: has_tables,
         run: Run::App(rename::rename_table),
     },
@@ -389,11 +607,15 @@ pub static COMMANDS: &[Command] = &[
         label: "Rename",
         ribbon: "",
         shortcut: Some("F2"),
-        params: "table: text — the Table\n\
-                 column: text — the Column\n\
-                 name: text — its new name, unique in the Table ignoring case; adds a Renamed \
-                 Columns step to the Query and rewrites sort by, Relationships and other \
-                 Queries' merges",
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req("column", Kind::Column, "the Column"),
+            req(
+                "name",
+                Kind::Text,
+                "its new name, unique in the Table ignoring case; adds a Renamed Columns step to the Query and rewrites sort by, Relationships and other Queries' merges",
+            ),
+        ],
         enabled: has_tables,
         run: Run::App(rename::rename_column),
     },
@@ -402,8 +624,11 @@ pub static COMMANDS: &[Command] = &[
         label: "Delete from model",
         ribbon: "",
         shortcut: None,
-        params: "table: text — the Table; its Query and Relationships go too (refused while \
-                 another Query merges it)",
+        params: &[req(
+            "table",
+            Kind::Table,
+            "the Table; its Query and Relationships go too (refused while another Query merges it)",
+        )],
         enabled: has_tables,
         run: Run::Edit(rename::delete_table),
     },
@@ -414,7 +639,21 @@ pub static COMMANDS: &[Command] = &[
         label: "New measure",
         ribbon: "Modeling > Calculations",
         shortcut: None,
-        params: expression::NEW_MEASURE_PARAMS,
+        params: &[
+            req("table", Kind::Table, "the Measure's home Table"),
+            req(
+                "name",
+                Kind::Text,
+                "unique among the Model's Measures, not a Column name of the Table (ignoring case)",
+            ),
+            req(
+                "expression",
+                Kind::Text,
+                "its DAX, kept as written (one that doesn't parse is kept, with its error)",
+            ),
+            opt("formatString", Kind::Text, "optional, e.g. #,0.00"),
+            opt("description", Kind::Text, "optional"),
+        ],
         enabled: expression::has_model_tables,
         run: Run::Edit(expression::new_measure),
     },
@@ -423,7 +662,19 @@ pub static COMMANDS: &[Command] = &[
         label: "New column",
         ribbon: "Modeling > Calculations",
         shortcut: None,
-        params: expression::NEW_COLUMN_PARAMS,
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req(
+                "name",
+                Kind::Text,
+                "unique in the Table, not one of its Measures (ignoring case)",
+            ),
+            req(
+                "expression",
+                Kind::Text,
+                "its DAX, evaluated for each row; the data type comes from the values",
+            ),
+        ],
         enabled: has_tables,
         run: Run::Edit(expression::new_column),
     },
@@ -433,7 +684,15 @@ pub static COMMANDS: &[Command] = &[
         // The formula bar.
         ribbon: "",
         shortcut: None,
-        params: expression::EDIT_PARAMS,
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req(
+                "name",
+                Kind::Text,
+                "one of its Measures or Calculated columns",
+            ),
+            req("expression", Kind::Text, "the new DAX"),
+        ],
         enabled: expression::has_model_tables,
         run: Run::Edit(expression::edit_expression),
     },
@@ -442,7 +701,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Delete from model",
         ribbon: "",
         shortcut: Some("Delete"),
-        params: expression::DELETE_PARAMS,
+        params: &[
+            req("table", Kind::Table, "the Table"),
+            req(
+                "name",
+                Kind::Text,
+                "one of its Measures or Calculated columns (a Calculated column's Relationships go too; DAX that used it is kept and shows an error)",
+            ),
+        ],
         enabled: expression::has_model_tables,
         run: Run::Edit(expression::delete),
     },
@@ -451,7 +717,15 @@ pub static COMMANDS: &[Command] = &[
         label: "Rename",
         ribbon: "",
         shortcut: Some("F2"),
-        params: expression::RENAME_MEASURE_PARAMS,
+        params: &[
+            req("table", Kind::Table, "the Measure's home Table"),
+            req("measure", Kind::Measure, "the Measure"),
+            req(
+                "name",
+                Kind::Text,
+                "its new name; rewrites every Measure and Calculated column that uses it",
+            ),
+        ],
         enabled: expression::has_model_tables,
         run: Run::App(expression::rename_measure),
     },
@@ -461,7 +735,21 @@ pub static COMMANDS: &[Command] = &[
         label: "New relationship",
         ribbon: "Modeling > Relationships",
         shortcut: None,
-        params: relationship::NEW_PARAMS,
+        params: &[
+            req("fromTable", Kind::Table, "the many side's Table"),
+            req("fromColumn", Kind::Column, "its column"),
+            req("toTable", Kind::Table, "the one side's Table"),
+            req(
+                "toColumn",
+                Kind::Column,
+                "its column: unique, non-blank values",
+            ),
+            opt(
+                "active",
+                Kind::Bool,
+                "default true; made inactive (with a notice) if the two Tables already have an active Relationship",
+            ),
+        ],
         enabled: has_tables,
         run: Run::App(relationship::new_relationship),
     },
@@ -471,7 +759,22 @@ pub static COMMANDS: &[Command] = &[
         // Manage relationships > Edit.
         ribbon: "",
         shortcut: None,
-        params: relationship::EDIT_PARAMS,
+        params: &[
+            req(
+                "relationship",
+                Kind::Json,
+                "integer or {fromTable, fromColumn, toTable, toColumn} — the Relationship: its position (0 = first) or its columns",
+            ),
+            opt("fromTable", Kind::Table, "the new ends (default: as now)"),
+            opt("fromColumn", Kind::Column, "the new ends (default: as now)"),
+            opt("toTable", Kind::Table, "the new ends (default: as now)"),
+            opt("toColumn", Kind::Column, "the new ends (default: as now)"),
+            opt(
+                "active",
+                Kind::Bool,
+                "default as now; made inactive (with a notice) if the two Tables already have another active Relationship",
+            ),
+        ],
         enabled: has_tables,
         run: Run::App(relationship::edit_relationship),
     },
@@ -481,7 +784,11 @@ pub static COMMANDS: &[Command] = &[
         // Manage relationships > Delete.
         ribbon: "",
         shortcut: None,
-        params: relationship::DELETE_PARAMS,
+        params: &[req(
+            "relationship",
+            Kind::Json,
+            "integer or {fromTable, fromColumn, toTable, toColumn} — the Relationship: its position (0 = first) or its columns",
+        )],
         enabled: has_tables,
         run: Run::Edit(relationship::delete_relationship),
     },
@@ -491,7 +798,18 @@ pub static COMMANDS: &[Command] = &[
         // Manage relationships: the Active check box.
         ribbon: "",
         shortcut: None,
-        params: relationship::ACTIVE_PARAMS,
+        params: &[
+            req(
+                "relationship",
+                Kind::Json,
+                "integer or {fromTable, fromColumn, toTable, toColumn} — the Relationship: its position (0 = first) or its columns",
+            ),
+            opt(
+                "active",
+                Kind::Bool,
+                "default true; activating fails while the two Tables have another active Relationship (deactivate it first)",
+            ),
+        ],
         enabled: has_tables,
         run: Run::Edit(relationship::set_active),
     },
@@ -501,7 +819,7 @@ pub static COMMANDS: &[Command] = &[
         // Manage relationships > Autodetect.
         ribbon: "",
         shortcut: None,
-        params: "",
+        params: &[],
         enabled: has_tables,
         run: Run::App(relationship::autodetect),
     },
@@ -511,7 +829,11 @@ pub static COMMANDS: &[Command] = &[
         label: "New page",
         ribbon: "Insert > Pages",
         shortcut: None,
-        params: report::NEW_PAGE_PARAMS,
+        params: &[opt(
+            "name",
+            Kind::Text,
+            "the Page's name, unique ignoring case (default: Page n, the first free n)",
+        )],
         enabled: |_| true,
         run: Run::Edit(report::new_page),
     },
@@ -521,7 +843,7 @@ pub static COMMANDS: &[Command] = &[
         label: "Delete page",
         ribbon: "",
         shortcut: None,
-        params: report::PAGE_PARAMS,
+        params: &[req("page", Kind::Page, "the Page's id or name")],
         enabled: has_pages,
         run: Run::Edit(report::delete_page),
     },
@@ -530,7 +852,14 @@ pub static COMMANDS: &[Command] = &[
         label: "Rename page",
         ribbon: "",
         shortcut: None,
-        params: report::RENAME_PAGE_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req(
+                "name",
+                Kind::Text,
+                "its new name, unique among Pages ignoring case",
+            ),
+        ],
         enabled: has_pages,
         run: Run::Edit(report::rename_page),
     },
@@ -540,7 +869,10 @@ pub static COMMANDS: &[Command] = &[
         label: "Move page",
         ribbon: "",
         shortcut: None,
-        params: report::MOVE_PAGE_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("index", Kind::Integer, "its new position, 0 = first"),
+        ],
         enabled: has_pages,
         run: Run::Edit(report::move_page),
     },
@@ -549,7 +881,38 @@ pub static COMMANDS: &[Command] = &[
         label: "New visual",
         ribbon: "Insert > Visuals",
         shortcut: None,
-        params: report::NEW_VISUAL_PARAMS,
+        params: &[
+            req(
+                "type",
+                Kind::Choice(&[
+                    "table",
+                    "matrix",
+                    "card",
+                    "clusteredBar",
+                    "clusteredColumn",
+                    "line",
+                    "slicer",
+                ]),
+                "table, matrix, card, clusteredBar, clusteredColumn, line or slicer",
+            ),
+            opt(
+                "page",
+                Kind::Page,
+                "the Page's id or name (default: the first Page; a report with none gets `Page 1`)",
+            ),
+            opt(
+                "x",
+                Kind::Integer,
+                "position in logical pixels, 0 to 100000 (default 0)",
+            ),
+            opt(
+                "y",
+                Kind::Integer,
+                "position in logical pixels, 0 to 100000 (default 0)",
+            ),
+            opt("w", Kind::Integer, "size, 1 to 100000 (default 400 × 300)"),
+            opt("h", Kind::Integer, "size, 1 to 100000 (default 400 × 300)"),
+        ],
         enabled: |_| true,
         run: Run::Edit(report::new_visual),
     },
@@ -559,7 +922,10 @@ pub static COMMANDS: &[Command] = &[
         label: "Delete",
         ribbon: "",
         shortcut: None,
-        params: report::VISUAL_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::delete_visual),
     },
@@ -568,7 +934,12 @@ pub static COMMANDS: &[Command] = &[
         label: "Move",
         ribbon: "",
         shortcut: None,
-        params: report::MOVE_VISUAL_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req("x", Kind::Integer, "the new position, 0 to 100000"),
+            req("y", Kind::Integer, "the new position, 0 to 100000"),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::move_visual),
     },
@@ -577,7 +948,12 @@ pub static COMMANDS: &[Command] = &[
         label: "Resize",
         ribbon: "",
         shortcut: None,
-        params: report::RESIZE_VISUAL_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req("w", Kind::Integer, "the new size, 1 to 100000"),
+            req("h", Kind::Integer, "the new size, 1 to 100000"),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::resize_visual),
     },
@@ -587,7 +963,23 @@ pub static COMMANDS: &[Command] = &[
         label: "Change visual type",
         ribbon: "",
         shortcut: None,
-        params: report::CHANGE_TYPE_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req(
+                "type",
+                Kind::Choice(&[
+                    "table",
+                    "matrix",
+                    "card",
+                    "clusteredBar",
+                    "clusteredColumn",
+                    "line",
+                    "slicer",
+                ]),
+                "the new type; Fields in wells it has are kept, the others dropped",
+            ),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::change_type),
     },
@@ -597,7 +989,25 @@ pub static COMMANDS: &[Command] = &[
         label: "Add field",
         ribbon: "",
         shortcut: None,
-        params: report::ADD_FIELD_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req(
+                "well",
+                Kind::Choice(&["values", "rows", "columns", "axis", "legend", "field"]),
+                "values, rows, columns, axis, legend or field (one the type has)",
+            ),
+            req(
+                "field",
+                Kind::Field,
+                "a Column or Measure of the model; only values takes a Measure; a one-field well has its Field replaced",
+            ),
+            opt(
+                "index",
+                Kind::Integer,
+                "position in the well (default: last)",
+            ),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::add_field),
     },
@@ -606,7 +1016,21 @@ pub static COMMANDS: &[Command] = &[
         label: "Remove field",
         ribbon: "",
         shortcut: None,
-        params: report::REMOVE_FIELD_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req(
+                "well",
+                Kind::Choice(&["values", "rows", "columns", "axis", "legend", "field"]),
+                "the well",
+            ),
+            opt(
+                "index",
+                Kind::Integer,
+                "the Field's position in it (or give field)",
+            ),
+            opt("field", Kind::Field, "the Field (its first occurrence)"),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::remove_field),
     },
@@ -615,7 +1039,26 @@ pub static COMMANDS: &[Command] = &[
         label: "Move field",
         ribbon: "",
         shortcut: None,
-        params: report::MOVE_FIELD_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req(
+                "well",
+                Kind::Choice(&["values", "rows", "columns", "axis", "legend", "field"]),
+                "the well it is in",
+            ),
+            req("index", Kind::Integer, "its position there"),
+            opt(
+                "toWell",
+                Kind::Choice(&["values", "rows", "columns", "axis", "legend", "field"]),
+                "the well to move it to (default: the same)",
+            ),
+            opt(
+                "toIndex",
+                Kind::Integer,
+                "its new position there (default: last)",
+            ),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::move_field),
     },
@@ -625,7 +1068,20 @@ pub static COMMANDS: &[Command] = &[
         label: "Sort by",
         ribbon: "",
         shortcut: None,
-        params: report::SORT_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            null(req(
+                "field",
+                Kind::Field,
+                "a Field of the Visual; null: the type's default sort",
+            )),
+            opt(
+                "direction",
+                Kind::Choice(&["ascending", "descending"]),
+                "ascending or descending (default descending)",
+            ),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::sort),
     },
@@ -635,7 +1091,25 @@ pub static COMMANDS: &[Command] = &[
         label: "Format",
         ribbon: "",
         shortcut: None,
-        params: report::FORMAT_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the Visual's id"),
+            req(
+                "option",
+                Kind::Choice(&[
+                    "title",
+                    "showTitle",
+                    "dataLabels",
+                    "legend",
+                    "legendPosition",
+                    "rowSubtotals",
+                    "columnSubtotals",
+                    "slicerStyle",
+                ]),
+                "title (text, or null for the automatic title), showTitle, dataLabels (charts), legend (charts), legendPosition (charts: top, bottom, left or right), rowSubtotals and columnSubtotals (matrix), slicerStyle (slicer: list or dropdown); the others are logical",
+            ),
+            req("value", Kind::Json, "the option's value"),
+        ],
         enabled: has_visuals,
         run: Run::Edit(report::format),
     },
@@ -645,7 +1119,20 @@ pub static COMMANDS: &[Command] = &[
         label: "Select slicer items",
         ribbon: "",
         shortcut: None,
-        params: selection::SLICER_SELECT_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req("visual", Kind::Visual, "the slicer's id"),
+            req(
+                "items",
+                Kind::Json,
+                "list — values of the slicer's Column (text, number, logical; null for BLANK; dates as their serial number); empty clears the selection",
+            ),
+            opt(
+                "add",
+                Kind::Bool,
+                "toggle these items in the selection instead of replacing it (Ctrl; default false)",
+            ),
+        ],
         enabled: has_visuals,
         run: Run::Edit(selection::slicer_select),
     },
@@ -654,7 +1141,24 @@ pub static COMMANDS: &[Command] = &[
         label: "Select data point",
         ribbon: "",
         shortcut: None,
-        params: selection::SELECT_PARAMS,
+        params: &[
+            req("page", Kind::Page, "the Page's id or name"),
+            req(
+                "visual",
+                Kind::Visual,
+                "the Visual's id (not a slicer: use slicer.select)",
+            ),
+            req(
+                "point",
+                Kind::Json,
+                "{row, series} — a row of the Visual's result (and its series: the cell index j × values + k), or {keys: [{table, column, value}, …]} — the Columns and values",
+            ),
+            opt(
+                "add",
+                Kind::Bool,
+                "toggle the point in the selection instead of replacing it (Ctrl; default false); selecting the only selected point again clears",
+            ),
+        ],
         enabled: has_visuals,
         run: Run::App(selection::select),
     },
@@ -663,7 +1167,11 @@ pub static COMMANDS: &[Command] = &[
         label: "Clear selection",
         ribbon: "",
         shortcut: None,
-        params: selection::CLEAR_PARAMS,
+        params: &[opt(
+            "page",
+            Kind::Page,
+            "the Page's id or name (default: every Page)",
+        )],
         enabled: |_| true,
         run: Run::App(selection::clear),
     },
@@ -673,7 +1181,7 @@ pub static COMMANDS: &[Command] = &[
         // File > Options and settings > Options > Current file > Data Load.
         ribbon: "",
         shortcut: None,
-        params: "enabled: logical — default: the opposite of now",
+        params: &[opt("enabled", Kind::Bool, "default: the opposite of now")],
         enabled: |_| true,
         run: Run::Edit(relationship::set_autodetect),
     },
@@ -684,8 +1192,35 @@ pub static COMMANDS: &[Command] = &[
         // undoable.
         ribbon: "",
         shortcut: None,
-        params: "minutes: integer — 0 (off) to 1440; default 5",
+        params: &[opt("minutes", Kind::Integer, "0 (off) to 1440; default 5")],
         enabled: |_| true,
         run: Run::App(recovery::set_minutes),
     },
 ];
+
+/// Every command as Markdown: id, label, where it is, its shortcut and its params. Kept in
+/// `docs/commands.md`, which a test holds to this.
+pub fn reference() -> String {
+    let mut out = String::from(
+        "# Commands\n\nGenerated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -p \
+         opendash-engine commands_doc`); do not \
+         edit. `?` marks an optional param.\n",
+    );
+    for c in COMMANDS {
+        out.push_str(&format!("\n## `{}` — {}\n\n", c.id, c.label));
+        if !c.ribbon.is_empty() {
+            out.push_str(&format!("- Ribbon: {}\n", c.ribbon));
+        }
+        if let Some(key) = c.shortcut {
+            out.push_str(&format!("- Shortcut: {key}\n"));
+        }
+        if c.params.is_empty() {
+            out.push_str("- No params\n");
+        } else {
+            for line in crate::param::doc(c.params).lines() {
+                out.push_str(&format!("- `{}\n", line.replacen(": ", "`: ", 1)));
+            }
+        }
+    }
+    out
+}
