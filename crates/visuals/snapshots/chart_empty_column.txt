@@ -1,0 +1,9 @@
+scene 300 200
+rect 0 0 300 200 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Region"
+text 22.09 181.31 11 Regular #5c6370 End "0.0"
+line 28.09 104.75 292 104.75 #e3e6eb 1
+text 22.09 108.06 11 Regular #5c6370 End "0.5"
+line 28.09 31.5 292 31.5 #e3e6eb 1
+text 22.09 34.81 11 Regular #5c6370 End "1.0"
+line 28.09 178 292 178 #9aa1ab 1

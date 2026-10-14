@@ -1,0 +1,23 @@
+scene 400 300
+rect 0 0 400 300 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Profit by Region"
+line 29.79 278 392 278 #e3e6eb 1
+text 23.79 281.31 11 Regular #5c6370 End "-40"
+line 29.79 216.38 392 216.38 #e3e6eb 1
+text 23.79 219.68 11 Regular #5c6370 End "-20"
+text 23.79 158.06 11 Regular #5c6370 End "0"
+line 29.79 93.13 392 93.13 #e3e6eb 1
+text 23.79 96.43 11 Regular #5c6370 End "20"
+line 29.79 31.5 392 31.5 #e3e6eb 1
+text 23.79 34.81 11 Regular #5c6370 End "40"
+text 66.01 289.81 11 Regular #5c6370 Middle "Region 0"
+text 138.45 289.81 11 Regular #5c6370 Middle "Region 1"
+text 210.89 289.81 11 Regular #5c6370 Middle "Region 2"
+text 283.34 289.81 11 Regular #5c6370 Middle "Region 3"
+text 355.78 289.81 11 Regular #5c6370 Middle "Region 4"
+rect 37.03 62.31 57.95 92.44 fill #3a6ea5 #0:0
+rect 109.48 154.75 57.95 38.52 fill #3a6ea5 #0:1
+rect 181.92 99.29 57.95 55.46 fill #3a6ea5 #0:2
+rect 254.36 154.75 57.95 123.25 fill #3a6ea5 #0:3
+rect 326.8 139.34 57.95 15.41 fill #3a6ea5 #0:4
+line 29.79 154.75 392 154.75 #9aa1ab 1

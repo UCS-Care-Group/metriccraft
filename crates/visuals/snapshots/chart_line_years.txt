@@ -1,0 +1,33 @@
+scene 400 240
+rect 0 0 400 240 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Total and Count by Region"
+rect 8 27.4 8 8 fill #3a6ea5
+text 20 34.81 11 Regular #1f2430 Start "Total"
+rect 53.6 27.4 8 8 fill #e0812f
+text 65.6 34.81 11 Regular #1f2430 Start "Count"
+text 13.87 221.31 11 Regular #5c6370 End "0"
+line 19.87 175.63 392 175.63 #e3e6eb 1
+text 13.87 178.93 11 Regular #5c6370 End "2"
+line 19.87 133.25 392 133.25 #e3e6eb 1
+text 13.87 136.56 11 Regular #5c6370 End "4"
+line 19.87 90.88 392 90.88 #e3e6eb 1
+text 13.87 94.18 11 Regular #5c6370 End "6"
+line 19.87 48.5 392 48.5 #e3e6eb 1
+text 13.87 51.81 11 Regular #5c6370 End "8"
+line 19.87 218 19.87 221 #9aa1ab 1
+text 19.87 229.81 11 Regular #5c6370 Middle "2021"
+line 143.92 218 143.92 221 #9aa1ab 1
+text 143.92 229.81 11 Regular #5c6370 Middle "2022"
+line 267.96 218 267.96 221 #9aa1ab 1
+text 267.96 229.81 11 Regular #5c6370 Middle "2023"
+line 392 218 392 221 #9aa1ab 1
+text 392 229.81 11 Regular #5c6370 End "2024"
+path #3a6ea5 2 19.87,154.44 267.96,48.5 392,112.06 #0:1
+path #e0812f 2 19.87,175.63 267.96,154.44 392,196.81 #1:1
+rect 15.87 150.44 8 8 #0:1
+rect 263.96 44.5 8 8 #0:2
+rect 388 108.06 8 8 #0:0
+rect 15.87 171.63 8 8 #1:1
+rect 263.96 150.44 8 8 #1:2
+rect 388 192.81 8 8 #1:0
+line 19.87 218 392 218 #9aa1ab 1

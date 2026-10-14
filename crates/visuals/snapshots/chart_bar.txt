@@ -1,0 +1,19 @@
+scene 400 260
+rect 0 0 400 260 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Total by Region"
+text 148.4 249.81 11 Regular #5c6370 Middle "0K"
+line 226.23 26 226.23 238 #e3e6eb 1
+text 226.23 249.81 11 Regular #5c6370 Middle "20K"
+line 304.07 26 304.07 238 #e3e6eb 1
+text 304.07 249.81 11 Regular #5c6370 Middle "40K"
+line 381.9 26 381.9 238 #e3e6eb 1
+text 381.9 249.81 11 Regular #5c6370 Middle "60K"
+text 142.4 55.81 11 Regular #5c6370 End "North"
+text 142.4 108.81 11 Regular #5c6370 End "South"
+text 142.4 161.81 11 Regular #5c6370 End "A region with a very long na…"
+text 142.4 214.81 11 Regular #5c6370 End "(Blank)"
+rect 148.4 31.3 163.45 42.4 fill #3a6ea5 #0:0
+rect 148.4 84.3 138.15 42.4 fill #3a6ea5 #0:1
+rect 148.4 137.3 46.7 42.4 fill #3a6ea5 #0:2
+rect 148.4 190.3 11.68 42.4 fill #3a6ea5 #0:3
+line 148.4 26 148.4 238 #9aa1ab 1
