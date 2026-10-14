@@ -15,9 +15,8 @@
 //!   (`(1, "a")`, parsed as a one-row table), and needs as many values as the table has
 //!   columns.
 //!   As a `CALCULATE` filter argument (`CALCULATE(…, T[C] IN {"a", "b"})`, case 0035
-//!   `InFilter`), `IN` is CALCULATE's to turn into a column filter (M3.4): evaluate the right
-//!   side to a table and filter `T[C]` to its values with strict (`==`) matching. Nothing here
-//!   is needed for that beyond [`in_op`]'s semantics.
+//!   `InFilter`), `IN` is CALCULATE's to turn into a column filter (`calculate::in_filter`):
+//!   it evaluates the right side once and keeps the values of `T[C]` that [`contains`] finds.
 //!
 //! **Stack.** Every argument is a recursive path (eval → call → function → eval), and nesting
 //! to [`super::super::MAX_EVAL_DEPTH`] must fit a 1 MiB stack in debug builds, where every
@@ -29,7 +28,7 @@
 use std::rc::Rc;
 
 use opendash_core::{Value, ValueError};
-use opendash_dax::{Expr, Span};
+use opendash_dax::{Expr, ExprKind, Span};
 
 use super::{Call, Function};
 use crate::dax::eval::{Evaluator, TableVal, Val};
@@ -404,14 +403,12 @@ impl Step for ContainsRow {
 }
 
 /// `l IN r`: whether table `r` has a row strictly equal to `l` (a value or a row tuple). The
-/// evaluator's hook for [`opendash_dax::BinOp::In`]; a [`drive`] loop of its own.
-pub fn in_op(
-    ev: &mut Evaluator<'_, '_>,
-    l: &Expr,
-    r: &Expr,
-    span: Span,
-    fc: &FilterContext,
-) -> Result<Val> {
+/// evaluator's arm for [`opendash_dax::BinOp::In`] (`e`); a [`drive`] loop of its own.
+#[inline(never)]
+pub fn in_op(ev: &mut Evaluator<'_, '_>, e: &Expr, fc: &FilterContext) -> Result<Val> {
+    let (ExprKind::Binary(_, l, r), span) = (&e.kind, e.span) else {
+        return Err(DaxError::new(e.span, "IN needs two sides"));
+    };
     let mut needle = None;
     let mut last = None;
     loop {
@@ -460,7 +457,12 @@ fn one_row(ev: &mut Evaluator<'_, '_>, t: &TableVal, span: Span) -> Result<Vec<V
 }
 
 /// Whether `t` has a row whose values are each strictly equal (`==`) to `needle`'s.
-fn contains(ev: &Evaluator<'_, '_>, t: &TableVal, needle: &[Value], span: Span) -> Result<bool> {
+pub(crate) fn contains(
+    ev: &Evaluator<'_, '_>,
+    t: &TableVal,
+    needle: &[Value],
+    span: Span,
+) -> Result<bool> {
     let width = width(ev, t);
     if width != needle.len() {
         return Err(DaxError::new(

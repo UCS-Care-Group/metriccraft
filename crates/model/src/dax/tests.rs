@@ -598,3 +598,151 @@ fn fuzzed_queries_never_panic() {
     }
     rng.finish();
 }
+
+/// Expression forms that nest: `@` is where the inner expression goes.
+const NESTING_FORMS: &[&str] = &[
+    "(@ + 1)",
+    "(@ - 1)",
+    "(@ * 1)",
+    "(@ / 1)",
+    "(@ ^ 1)",
+    "(@ & 1)",
+    "(@ && 1)",
+    "(@ || 1)",
+    "(@ = 1)",
+    "(@ == 1)",
+    "(@ <> 1)",
+    "(@ < 1)",
+    "(@ <= 1)",
+    "(@ > 1)",
+    "(@ >= 1)",
+    "(1 + @)",
+    "(@ IN {1})",
+    "(1 IN {@})",
+    "NOT (@ IN {1})",
+    "- @",
+    "+@",
+    "NOT @",
+    "VAR v = 1 RETURN @",
+    "VAR v = @ RETURN v",
+    "{@}",
+    "{(1, @)}",
+    "IF(TRUE(), @)",
+    "IF(@, 1)",
+    "SWITCH(@, 1, 2)",
+    "SWITCH(1, @, 2)",
+    "DIVIDE(@, 1)",
+    "ISBLANK(@)",
+    "ISERROR(@)",
+    "IFERROR(@, 1)",
+    "CONTAINSROW({1}, @)",
+    "CALCULATE(@)",
+    "CALCULATE(@, Sales[Region] = \"North\")",
+    "CALCULATE(1, Sales[Region] = @)",
+    "CALCULATE(1, Sales[Region] IN {@})",
+    "COUNTROWS(CALCULATETABLE(ROW(\"a\", @)))",
+    "COUNTROWS(ROW(\"a\", @))",
+    "COUNTROWS(FILTER({1}, @))",
+    "COUNTROWS(FILTER(Sales, @))",
+];
+
+/// Chained Measures, each nesting a form 30 times around the previous one (well past
+/// `MAX_EVAL_DEPTH` in all), evaluated on a 1 MiB thread: the depth cap must come before a stack
+/// overflow for every form, in debug and release builds.
+#[test]
+fn every_form_hits_the_depth_cap_on_a_1_mib_stack() {
+    let handle = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let db = db();
+            for form in NESTING_FORMS {
+                let mut q = String::from("DEFINE MEASURE Sales[m0] = 1\n");
+                for i in 1..21 {
+                    let mut body = format!("[m{}]", i - 1);
+                    for _ in 0..30 {
+                        body = form.replace('@', &body);
+                    }
+                    q.push_str(&format!("MEASURE Sales[m{i}] = {body}\n"));
+                }
+                let e = error(&db, &format!("{q}EVALUATE ROW(\"x\", [m20])"));
+                assert_eq!(e.kind, ErrorKind::Limit, "{form}: {e}");
+                assert!(e.message.contains("nests"), "{form}: {e}");
+                // Operators, VARs, constructors and the M3.5 functions stay small enough per
+                // level to reach the depth cap itself; CALCULATE and the iterators (a deeper
+                // path per level) may stop at the stack budget first in debug builds.
+                if !["CALCULATE", "FILTER", "ROW("]
+                    .iter()
+                    .any(|f| form.contains(f))
+                {
+                    assert!(e.message.contains("levels deep"), "{form}: {e}");
+                }
+            }
+        })
+        .unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn in_is_a_calculate_filter() {
+    let db = db();
+    // Case 0035 `InFilter`: text matches ignoring case ("North" finds "north" too).
+    let sum = |filter: &str| one(&db, &format!("CALCULATE(SUM(Sales[Amount]), {filter})"));
+    assert_eq!(sum("Sales[Region] IN {\"North\", \"West\"}"), "12.5");
+    assert_eq!(sum("Sales[Region] IN {\"nowhere\"}"), "");
+    // NOT keeps the other values, BLANK among them.
+    assert_eq!(sum("NOT (Sales[Region] IN {\"North\", \"West\"})"), "5");
+    // It replaces an outer filter on the column, and ANDs with another argument.
+    assert_eq!(
+        one(
+            &db,
+            "CALCULATE(CALCULATE(SUM(Sales[Amount]), Sales[Region] IN {\"North\", \"South\"}), \
+             Sales[Region] = \"West\")"
+        ),
+        "14.5"
+    );
+    assert_eq!(
+        sum("Sales[Region] IN {\"North\", \"South\"}, Sales[ProductKey] IN {1}"),
+        "14.5"
+    );
+    // The table is evaluated once, in the caller's filter context: MAX sees only South.
+    assert_eq!(
+        one(
+            &db,
+            "CALCULATE(CALCULATE(COUNTROWS(Sales), Sales[ProductKey] IN {MAX(Sales[ProductKey])}), \
+             Sales[Region] = \"South\")"
+        ),
+        "1"
+    );
+    // A table of model values, and strict matching: BLANK is only BLANK.
+    assert_eq!(
+        one(
+            &db,
+            "CALCULATE(COUNTROWS(Sales), Sales[ProductKey] IN FILTER(ALL(Product[Key]), \
+             Product[Key] <> 2))"
+        ),
+        "3"
+    );
+    assert_eq!(sum("Sales[Region] IN {BLANK()}"), "1");
+    // A table reading the column itself takes the general path; so does a tuple.
+    assert_eq!(sum("Sales[Region] IN {Sales[Region]}"), "17.5");
+    assert_eq!(
+        one(
+            &db,
+            "CALCULATE(COUNTROWS(Sales), (Sales[Region], Sales[ProductKey]) IN {(\"north\", 1)})"
+        ),
+        "1"
+    );
+    // Inside FILTER, IN is evaluated per row.
+    assert_eq!(
+        one(
+            &db,
+            "COUNTROWS(FILTER(Sales, Sales[Region] IN {\"north\", \"West\"}))"
+        ),
+        "3"
+    );
+    let e = error(
+        &db,
+        "EVALUATE ROW(\"x\", CALCULATE(1, Sales[Region] IN {(1, 2)}))",
+    );
+    assert!(e.message.contains("IN compares"), "{e}");
+}

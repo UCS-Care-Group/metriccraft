@@ -12,7 +12,7 @@
 //!   becomes equality filters on its columns. A row-set filter (a table filter such as
 //!   `FILTER(T, …)`) also restricts the one side of `T`'s active Relationships (expanded tables).
 //! - **Errors** ([`DaxError`]) carry the span of the failing sub-expression.
-//! - **Bounds**: evaluation depth [`MAX_EVAL_DEPTH`], Measure chains [`MAX_MEASURE_CHAIN`],
+//! - **Bounds**: evaluation depth [`MAX_EVAL_DEPTH`] and stack [`MAX_EVAL_STACK`], Measure chains [`MAX_MEASURE_CHAIN`],
 //!   Relationship paths [`MAX_RELATIONSHIP_DEPTH`]; intermediate tables count against the memory
 //!   cap left after the loaded data; the cancel flag is checked between scans and every
 //!   [`storage::CHUNK`] rows.
@@ -43,6 +43,10 @@ use storage::{Col, DbColumn, DbTable};
 /// Nested evaluation levels (expression nesting plus the Measures it references), so a deep
 /// expression can't overflow the stack.
 pub const MAX_EVAL_DEPTH: usize = 512;
+/// Stack bytes evaluation may use: a backstop to [`MAX_EVAL_DEPTH`] for forms whose levels
+/// cost more stack than usual, so evaluation fits a 1 MiB stack (a wasm build's, a host
+/// thread's) with room left for the work at the deepest level.
+pub const MAX_EVAL_STACK: usize = 640 << 10;
 /// Measures referencing Measures, deepest chain (ADR 0006).
 pub const MAX_MEASURE_CHAIN: usize = 64;
 /// Relationships followed from one Table when propagating filters.
