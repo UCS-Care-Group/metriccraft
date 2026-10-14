@@ -38,3 +38,16 @@ Filter: Sales[Region] = North, West
   "wells": {"values": [{"measure": "Total"}]}
 }
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[Total]
+12.5
+```
+
+Map: Total = Total
+
+Notes: Slicer and card on their own page, so the slicer filters only the card; the query filters through `TREATAS`.

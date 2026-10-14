@@ -33,3 +33,18 @@ West	Plum	Ann	1
   }
 }
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+Sales[Product]	[SumAmount]
+Apple	21.75
+	5
+Plum	1
+Pear	-1
+```
+
+Map: Product = Product
+Map: SumAmount = Sum of Amount

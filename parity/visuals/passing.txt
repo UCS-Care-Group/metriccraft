@@ -1,0 +1,10 @@
+v0001-matrix-subtotals/Region
+v0001-matrix-subtotals/Product
+v0001-matrix-subtotals/Customers
+v0001-matrix-subtotals/Sum of Amount
+v0002-bar-blank-category/Product
+v0002-bar-blank-category/Sum of Amount
+v0003-slicer-card/Total
+v0004-table-total/Region
+v0004-table-total/Sum of Amount
+v0004-table-total/Customers

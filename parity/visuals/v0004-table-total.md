@@ -43,3 +43,19 @@ Sales[Customers] = DISTINCTCOUNT(Sales[Customer])
   }
 }
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+Sales[Region]	[IsGrandTotalRowTotal]	[SumAmount]	[Customers]
+	true	26.75	4
+North	false	11.5	2
+South	false	14.25	2
+West	false	1	1
+```
+
+Map: Region = Region
+Map: SumAmount = Sum of Amount
+Map: Customers = Customers

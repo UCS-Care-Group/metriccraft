@@ -41,3 +41,28 @@ Sales[Customers] = DISTINCTCOUNT(Sales[Customer])
   "format": {"rowSubtotals": true, "columnSubtotals": true}
 }
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+Sales[Region]	Sales[Product]	[IsGrandTotalRowTotal]	[IsDM1Total]	[Customers]	[SumAmount]
+		true	true	4	26.75
+North		false	true	2	11.5
+North	Apple	false	false	2	14.5
+North	Pear	false	false	1	-3
+South		false	true	2	14.25
+South		false	false	1	5
+South	Apple	false	false	1	7.25
+South	Pear	false	false	1	2
+West		false	true	1	1
+West	Plum	false	false	1	1
+```
+
+Map: Region = Region
+Map: Product = Product
+Map: Customers = Customers
+Map: SumAmount = Sum of Amount
+
+Notes: Matrix expanded with "Expand all down one level"; the query has both levels and the subtotals (`IsDM1Total`). The blank Product under South is its own row.
