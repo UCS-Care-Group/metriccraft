@@ -19,6 +19,11 @@
 //! and replace the filters on the expanded Table's columns; a materialised table (`ALL(T[c])`,
 //! `FILTER(ALL(T[c]), …)`) filters the columns its values came from.
 //!
+//! **`T[C] IN table`** (and `NOT (T[C] IN table)`) as an argument (case 0035 `InFilter`) is that
+//! boolean filter too, but `table` is evaluated once, in the caller's filter context, and `T[C]`
+//! keeps the values `IN` finds in it ([`logic::contains`]: strict `==`, text ignoring case). A
+//! `table` that reads `T[C]` itself takes the general path.
+//!
 //! Removing filters from some columns of a row-set filter keeps its projection on the other
 //! columns of its Table (as DAX does), as a value filter (one column) or a row set.
 
@@ -27,10 +32,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use opendash_core::Value;
-use opendash_dax::{Expr, ExprKind, Span};
+use opendash_dax::{BinOp, Expr, ExprKind, Span, UnaryOp};
 
 use super::eval::{Evaluator, RowFrame, Rows, RowsColumn, TableVal, Val, value_error};
-use super::functions::Call;
+use super::functions::{Call, logic};
 use super::storage::{self, Bitset, Filter, Key};
 use super::{DaxError, FilterContext, MAX_EVAL_DEPTH, MAX_RELATIONSHIP_DEPTH, Result};
 
@@ -552,6 +557,9 @@ fn rows_filter(ev: &mut Evaluator<'_, '_>, rows: &Rows, span: Span) -> Result<Ne
 
 /// A boolean `CALCULATE` argument: `FILTER(ALL(columns), e)` over the columns it references.
 fn boolean_filter(ev: &mut Evaluator<'_, '_>, e: &Expr, fc: &FilterContext) -> Result<NewFilter> {
+    if let Some(f) = in_filter(ev, e, fc)? {
+        return Ok(f);
+    }
     let mut refs = Vec::new();
     column_refs(ev, e, &mut refs, 0)?;
     let Some(&(table, _)) = refs.first() else {
@@ -608,6 +616,57 @@ fn boolean_filter(ev: &mut Evaluator<'_, '_>, e: &Expr, fc: &FilterContext) -> R
         },
         filter,
     })
+}
+
+/// `T[C] IN table` or `NOT (T[C] IN table)` as a filter on `T[C]` (see the module doc); `None`
+/// for any other argument.
+fn in_filter(
+    ev: &mut Evaluator<'_, '_>,
+    e: &Expr,
+    fc: &FilterContext,
+) -> Result<Option<NewFilter>> {
+    let (negated, test) = match &e.kind {
+        ExprKind::Unary(UnaryOp::Not, x) => (true, x.as_ref()),
+        _ => (false, e),
+    };
+    let ExprKind::Binary(BinOp::In, l, r) = &test.kind else {
+        return Ok(None);
+    };
+    if !matches!(l.kind, ExprKind::Column { table: Some(_), .. }) {
+        return Ok(None);
+    }
+    let Ok((table, column)) = column_ref(ev, l) else {
+        return Ok(None);
+    };
+    let mut inside = Vec::new();
+    column_refs(ev, r, &mut inside, 0)?;
+    if inside.contains(&(table, column)) {
+        return Ok(None);
+    }
+    let values = ev.table(r, fc)?;
+    let candidates = distinct(ev, table, &[column], None, e.span)?;
+    let mut kept = Vec::new();
+    for (i, mut row) in candidates.into_iter().enumerate() {
+        if i % storage::CHUNK == 0 {
+            ev.cancel.check()?;
+        }
+        if let Some(v) = row.pop()
+            && logic::contains(ev, &values, std::slice::from_ref(&v), test.span)? != negated
+        {
+            kept.push(v);
+        }
+    }
+    Ok(Some(NewFilter {
+        replaces: Removed {
+            columns: vec![(table, column)],
+            ..Removed::default()
+        },
+        filter: ev
+            .db
+            .tables
+            .get(table)
+            .map(|dt| Filter::values(dt, table, column, &kept)),
+    }))
 }
 
 /// The rows of `rows` for which `cond` is TRUE, each evaluated in its row context under `fc`.

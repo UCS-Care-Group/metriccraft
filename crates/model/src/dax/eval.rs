@@ -21,8 +21,8 @@ use opendash_dax::{BinOp, Define, Expr, ExprKind, Query, Span, UnaryOp};
 use super::functions::{self, Call};
 use super::storage::{self, Bitset, Cancel, Filter, Key, and};
 use super::{
-    Database, DaxError, ErrorKind, FilterContext, MAX_EVAL_DEPTH, MAX_MEASURE_CHAIN,
-    MAX_RELATIONSHIP_DEPTH, Options, Result, ResultTable,
+    Database, DaxError, ErrorKind, FilterContext, MAX_EVAL_DEPTH, MAX_EVAL_STACK,
+    MAX_MEASURE_CHAIN, MAX_RELATIONSHIP_DEPTH, Options, Result, ResultTable,
 };
 use crate::same_name;
 
@@ -99,6 +99,8 @@ pub struct Evaluator<'a, 'q> {
     query_vars: usize,
     rows: Vec<RowFrame>,
     depth: usize,
+    /// [`stack_position`] when evaluation started (at depth 0).
+    stack_base: usize,
     /// `RELATED`'s one-side lookups, by Relationship, built on first use.
     pub(super) related_index: HashMap<usize, Rc<HashMap<Key, usize>>>,
 }
@@ -115,6 +117,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
             query_vars: 0,
             rows: Vec::new(),
             depth: 0,
+            stack_base: 0,
             related_index: HashMap::new(),
         }
     }
@@ -287,124 +290,129 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     }
 
     /// Evaluates `e` under `fc`.
-    // Recursion goes eval → (one small arm function) → scalar/eval: every arm is its own
-    // non-inlined function so the frames on the recursive path stay small (MAX_EVAL_DEPTH
-    // levels must fit a 1 MiB stack in debug builds; see the depth test).
+    ///
+    /// **Stack.** Recursion goes eval → (one arm function) → eval, and [`MAX_EVAL_DEPTH`] levels
+    /// of it must fit a 1 MiB stack in debug builds, where every temporary has its own stack
+    /// slot. So `eval` only picks the arm (one call site, one result slot), each arm is its own
+    /// non-inlined function, and the work between evaluations (operators, conversions, errors)
+    /// runs in helpers off the recursive path. As a backstop for forms whose path is inherently
+    /// deep (a `CALCULATE` condition iterates a row context, then evaluates), evaluation also
+    /// stops with a nesting [`ErrorKind::Limit`] error once it has used [`MAX_EVAL_STACK`] bytes
+    /// of stack (measured from a local's address: no `unsafe`, and it works in wasm too).
     pub fn eval(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let here = stack_position();
+        if self.depth == 0 {
+            self.stack_base = here;
+        }
         if self.depth >= MAX_EVAL_DEPTH {
             return Err(too_deep(e.span));
         }
+        if here.abs_diff(self.stack_base) > MAX_EVAL_STACK {
+            return Err(too_deep_for_stack(e.span));
+        }
         self.depth += 1;
-        let span = e.span;
-        let r = match &e.kind {
-            ExprKind::Integer(i) => Ok(Val::Scalar(Value::Integer(*i))),
-            ExprKind::Decimal(d) => Ok(Val::Scalar(Value::Decimal(*d))),
-            ExprKind::Text(s) => Ok(Val::Scalar(Value::text(s))),
-            ExprKind::Name(n) => self.name(n, span, fc),
-            ExprKind::Column { table, column } => self.column(table.as_deref(), column, span, fc),
-            ExprKind::Call { name, args } => self.call(name, args, span, fc),
-            ExprKind::Unary(op, x) => self.unary(*op, x, span, fc),
-            // `IN` skips `binary`'s frame: nested `IN`s must fit the stack too.
-            ExprKind::Binary(BinOp::In, l, r) => functions::logic::in_op(self, l, r, span, fc),
-            ExprKind::Binary(op, l, r) => self.binary(*op, l, r, span, fc),
-            ExprKind::Var { vars, body } => self.var(vars, body, fc),
-            ExprKind::Table(rows) => self.constructor(rows, span, fc),
+        let arm: fn(&mut Self, &Expr, &FilterContext) -> Result<Val> = match &e.kind {
+            ExprKind::Integer(_) | ExprKind::Decimal(_) | ExprKind::Text(_) => Self::literal,
+            ExprKind::Name(_) => Self::name,
+            ExprKind::Column { .. } => Self::column,
+            ExprKind::Call { .. } => Self::call,
+            ExprKind::Unary(..) => Self::unary,
+            ExprKind::Binary(BinOp::In, ..) => |ev, e, fc| functions::logic::in_op(ev, e, fc),
+            ExprKind::Binary(..) => Self::binary,
+            ExprKind::Var { .. } => Self::var,
+            ExprKind::Table(_) => Self::constructor,
         };
+        let r = arm(self, e, fc);
         self.depth -= 1;
         r
     }
 
     #[inline(never)]
-    fn call(&mut self, name: &str, args: &[Expr], span: Span, fc: &FilterContext) -> Result<Val> {
+    fn literal(&mut self, e: &Expr, _: &FilterContext) -> Result<Val> {
+        Ok(Val::Scalar(match &e.kind {
+            ExprKind::Integer(i) => Value::Integer(*i),
+            ExprKind::Decimal(d) => Value::Decimal(*d),
+            ExprKind::Text(s) => Value::text(s),
+            _ => return Err(wrong_arm(e.span)),
+        }))
+    }
+
+    #[inline(never)]
+    fn call(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let ExprKind::Call { name, args } = &e.kind else {
+            return Err(wrong_arm(e.span));
+        };
         let Some(f) = functions::lookup(&name.to_ascii_lowercase()) else {
-            return Err(DaxError::new(
-                span,
-                format!("OpenDash BI doesn't know the function {name} (yet)"),
-            ));
+            return Err(unknown_function(name, e.span));
         };
         f(
             self,
             &Call {
                 name,
                 args,
-                span,
+                span: e.span,
                 fc,
             },
         )
     }
 
     #[inline(never)]
-    fn unary(&mut self, op: UnaryOp, x: &Expr, span: Span, fc: &FilterContext) -> Result<Val> {
-        let v = self.scalar(x, fc)?;
-        let r = match op {
-            UnaryOp::Negate => v.negate(),
-            UnaryOp::Plus => Ok(v),
-            UnaryOp::Not => v.not(),
+    fn unary(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let ExprKind::Unary(op, x) = &e.kind else {
+            return Err(wrong_arm(e.span));
         };
-        r.map(Val::Scalar).map_err(|e| value_error(span, &e))
+        let v = self.eval(x, fc);
+        unary_op(self, *op, v, x.span, e.span)
     }
 
     #[inline(never)]
-    fn var(&mut self, vars: &[(String, Expr)], body: &Expr, fc: &FilterContext) -> Result<Val> {
+    fn var(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let ExprKind::Var { vars, body } = &e.kind else {
+            return Err(wrong_arm(e.span));
+        };
         let base = self.vars.len();
         let mut r = Ok(());
         for (name, x) in vars {
-            match self.eval(x, fc) {
-                Ok(v) => self.vars.push((name.clone(), v)),
-                Err(e) => {
-                    r = Err(e);
-                    break;
-                }
+            let v = self.eval(x, fc);
+            r = self.bind(name, v);
+            if r.is_err() {
+                break;
             }
         }
-        let r = r.and_then(|()| self.eval(body, fc));
+        let r = match r {
+            Ok(()) => self.eval(body, fc),
+            Err(e) => Err(e),
+        };
         self.vars.truncate(base);
         r
     }
 
+    /// Puts an evaluated `VAR` in scope.
     #[inline(never)]
-    fn binary(
-        &mut self,
-        op: BinOp,
-        l: &Expr,
-        r: &Expr,
-        span: Span,
-        fc: &FilterContext,
-    ) -> Result<Val> {
-        if op == BinOp::In {
-            return functions::logic::in_op(self, l, r, span, fc);
-        }
-        let a = self.scalar(l, fc)?;
-        let b = self.scalar(r, fc)?;
-        let ord = |a: &Value, b: &Value, f: fn(Ordering) -> bool| {
-            a.compare(b).map(|o| Value::Boolean(o.is_some_and(f)))
+    fn bind(&mut self, name: &str, v: Result<Val>) -> Result<()> {
+        self.vars.push((name.into(), v?));
+        Ok(())
+    }
+
+    /// A binary operator (but `IN`, [`functions::logic::in_op`]): both sides are evaluated
+    /// here, the operator applied in [`binary_op`].
+    #[inline(never)]
+    fn binary(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let ExprKind::Binary(op, l, r) = &e.kind else {
+            return Err(wrong_arm(e.span));
         };
-        let v = match op {
-            BinOp::Add => a.add(&b),
-            BinOp::Subtract => a.subtract(&b),
-            BinOp::Multiply => a.multiply(&b),
-            BinOp::Divide => a.divide(&b),
-            BinOp::Power => a.power(&b),
-            BinOp::Concat => Ok(a.concat(&b)),
-            BinOp::And => a.and(&b),
-            BinOp::Or => a.or(&b),
-            BinOp::Equal => a.equals(&b).map(Value::Boolean),
-            BinOp::StrictEqual => a.strict_equals(&b).map(Value::Boolean),
-            BinOp::NotEqual => a
-                .compare(&b)
-                .map(|o| Value::Boolean(o != Some(Ordering::Equal))),
-            BinOp::Less => ord(&a, &b, Ordering::is_lt),
-            BinOp::LessEqual => ord(&a, &b, Ordering::is_le),
-            BinOp::Greater => ord(&a, &b, Ordering::is_gt),
-            BinOp::GreaterEqual => ord(&a, &b, Ordering::is_ge),
-            BinOp::In => Ok(Value::Blank),
-        };
-        v.map(Val::Scalar).map_err(|e| value_error(span, &e))
+        let a = self.eval(l, fc);
+        let a = self.to_scalar(a, l.span)?;
+        let b = self.eval(r, fc);
+        binary_op(self, *op, a, b, r.span, e.span)
     }
 
     /// A bare name: a variable, else a Table (its visible rows).
     #[inline(never)]
-    fn name(&mut self, n: &str, span: Span, fc: &FilterContext) -> Result<Val> {
+    fn name(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let (ExprKind::Name(n), span) = (&e.kind, e.span) else {
+            return Err(wrong_arm(e.span));
+        };
         if let Some((_, v)) = self.vars.iter().rev().find(|(name, _)| same_name(name, n)) {
             return Ok(v.clone());
         }
@@ -418,13 +426,11 @@ impl<'a, 'q> Evaluator<'a, 'q> {
 
     /// `T[C]` or `[C]`: a Measure, or a Column's value in the row context.
     #[inline(never)]
-    fn column(
-        &mut self,
-        table: Option<&str>,
-        column: &str,
-        span: Span,
-        fc: &FilterContext,
-    ) -> Result<Val> {
+    fn column(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let (ExprKind::Column { table, column }, span) = (&e.kind, e.span) else {
+            return Err(wrong_arm(e.span));
+        };
+        let table = table.as_deref();
         if table.is_none()
             && let Some(m) = self.find_measure(None, column)
         {
@@ -557,7 +563,34 @@ impl<'a, 'q> Evaluator<'a, 'q> {
 
     /// `{ a, b }` or `{ (a, b), (c, d) }`.
     #[inline(never)]
-    fn constructor(&mut self, rows: &[Vec<Expr>], span: Span, fc: &FilterContext) -> Result<Val> {
+    fn constructor(&mut self, e: &Expr, fc: &FilterContext) -> Result<Val> {
+        let (ExprKind::Table(rows), span) = (&e.kind, e.span) else {
+            return Err(wrong_arm(e.span));
+        };
+        // Not `?` here: its temporaries cost this frame (on the recursive path) a few hundred
+        // bytes in debug builds.
+        #[allow(clippy::question_mark)]
+        let mut out = match self.constructor_start(rows, span) {
+            Ok(out) => out,
+            Err(e) => return Err(e),
+        };
+        for r in rows {
+            let mut values = Vec::with_capacity(r.len());
+            for x in r {
+                let v = self.eval(x, fc);
+                #[allow(clippy::question_mark)]
+                if let Err(e) = self.push_cell(&mut values, v, x.span) {
+                    return Err(e);
+                }
+            }
+            out.push(values);
+        }
+        Ok(constructor_table(out))
+    }
+
+    /// Checks a constructor's rows are one width and charges them: the rows to fill.
+    #[inline(never)]
+    fn constructor_start(&mut self, rows: &[Vec<Expr>], span: Span) -> Result<Vec<Vec<Value>>> {
         let width = rows.first().map_or(1, Vec::len);
         if let Some(bad) = rows.iter().find(|r| r.len() != width) {
             let at = bad.first().map_or(span, |e| e.span);
@@ -571,34 +604,30 @@ impl<'a, 'q> Evaluator<'a, 'q> {
                 .saturating_mul(width.saturating_mul(VALUE_BYTES).saturating_add(ROW_BYTES)),
             span,
         )?;
-        let mut out = Vec::with_capacity(rows.len());
-        for r in rows {
-            let mut values = Vec::with_capacity(width);
-            for x in r {
-                let v = self.scalar(x, fc)?;
-                self.charge(text_bytes(&v), x.span)?;
-                values.push(v);
-            }
-            out.push(values);
-        }
-        let columns = if width == 1 {
-            vec![RowsColumn::new("Value")]
-        } else {
-            (1..=width)
-                .map(|i| RowsColumn::new(&format!("Value{i}")))
-                .collect()
-        };
-        Ok(Val::Table(Rc::new(TableVal::Rows(Rows {
-            columns,
-            rows: out,
-        }))))
+        Ok(Vec::with_capacity(rows.len()))
+    }
+
+    /// Adds an evaluated constructor cell to `values`, charged.
+    #[inline(never)]
+    fn push_cell(&mut self, values: &mut Vec<Value>, v: Result<Val>, span: Span) -> Result<()> {
+        let v = self.to_scalar(v, span)?;
+        self.charge(text_bytes(&v), span)?;
+        values.push(v);
+        Ok(())
     }
 
     /// Evaluates `e` to a scalar: a one-column table of at most one row converts.
     pub fn scalar(&mut self, e: &Expr, fc: &FilterContext) -> Result<Value> {
-        match self.eval(e, fc)? {
+        let r = self.eval(e, fc);
+        self.to_scalar(r, e.span)
+    }
+
+    /// An evaluation's result as a scalar, as [`Self::scalar`] converts it.
+    #[inline(never)]
+    pub fn to_scalar(&self, r: Result<Val>, span: Span) -> Result<Value> {
+        match r? {
             Val::Scalar(v) => Ok(v),
-            Val::Table(t) => self.table_scalar(&t, e.span),
+            Val::Table(t) => self.table_scalar(&t, span),
         }
     }
 
@@ -870,6 +899,102 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     }
 }
 
+/// Where the stack is now (the address of a local): [`Evaluator::eval`] measures how much
+/// stack evaluation has used from it.
+#[inline(always)]
+fn stack_position() -> usize {
+    let marker = 0u8;
+    std::ptr::addr_of!(marker) as usize
+}
+
+/// A unary operator applied to its evaluated operand.
+#[inline(never)]
+fn unary_op(
+    ev: &Evaluator<'_, '_>,
+    op: UnaryOp,
+    x: Result<Val>,
+    x_span: Span,
+    span: Span,
+) -> Result<Val> {
+    let v = ev.to_scalar(x, x_span)?;
+    let r = match op {
+        UnaryOp::Negate => v.negate(),
+        UnaryOp::Plus => Ok(v),
+        UnaryOp::Not => v.not(),
+    };
+    r.map(Val::Scalar).map_err(|e| value_error(span, &e))
+}
+
+/// A binary operator (not `IN`) applied to its evaluated operands.
+#[inline(never)]
+fn binary_op(
+    ev: &Evaluator<'_, '_>,
+    op: BinOp,
+    a: Value,
+    b: Result<Val>,
+    b_span: Span,
+    span: Span,
+) -> Result<Val> {
+    let b = ev.to_scalar(b, b_span)?;
+    let ord = |a: &Value, b: &Value, f: fn(Ordering) -> bool| {
+        a.compare(b).map(|o| Value::Boolean(o.is_some_and(f)))
+    };
+    let v = match op {
+        BinOp::Add => a.add(&b),
+        BinOp::Subtract => a.subtract(&b),
+        BinOp::Multiply => a.multiply(&b),
+        BinOp::Divide => a.divide(&b),
+        BinOp::Power => a.power(&b),
+        BinOp::Concat => Ok(a.concat(&b)),
+        BinOp::And => a.and(&b),
+        BinOp::Or => a.or(&b),
+        BinOp::Equal => a.equals(&b).map(Value::Boolean),
+        BinOp::StrictEqual => a.strict_equals(&b).map(Value::Boolean),
+        BinOp::NotEqual => a
+            .compare(&b)
+            .map(|o| Value::Boolean(o != Some(Ordering::Equal))),
+        BinOp::Less => ord(&a, &b, Ordering::is_lt),
+        BinOp::LessEqual => ord(&a, &b, Ordering::is_le),
+        BinOp::Greater => ord(&a, &b, Ordering::is_gt),
+        BinOp::GreaterEqual => ord(&a, &b, Ordering::is_ge),
+        BinOp::In => return Err(wrong_arm(span)),
+    };
+    v.map(Val::Scalar).map_err(|e| value_error(span, &e))
+}
+
+/// The table a constructor's rows make.
+#[inline(never)]
+fn constructor_table(rows: Vec<Vec<Value>>) -> Val {
+    let width = rows.first().map_or(1, Vec::len);
+    let columns = if width == 1 {
+        vec![RowsColumn::new("Value")]
+    } else {
+        (1..=width)
+            .map(|i| RowsColumn::new(&format!("Value{i}")))
+            .collect()
+    };
+    Val::Table(Rc::new(TableVal::Rows(Rows { columns, rows })))
+}
+
+#[cold]
+#[inline(never)]
+fn unknown_function(name: &str, span: Span) -> DaxError {
+    DaxError::new(
+        span,
+        format!("OpenDash BI doesn't know the function {name} (yet)"),
+    )
+}
+
+/// An arm of [`Evaluator::eval`] given an expression of another kind (never happens).
+#[cold]
+#[inline(never)]
+fn wrong_arm(span: Span) -> DaxError {
+    DaxError::new(
+        span,
+        "internal error: the evaluator mismatched an expression",
+    )
+}
+
 #[cold]
 #[inline(never)]
 fn too_deep(span: Span) -> DaxError {
@@ -878,6 +1003,19 @@ fn too_deep(span: Span) -> DaxError {
         format!(
             "the expression (with the Measures it uses) nests more than {MAX_EVAL_DEPTH} levels \
              deep"
+        ),
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn too_deep_for_stack(span: Span) -> DaxError {
+    DaxError::limit(
+        span,
+        format!(
+            "the expression (with the Measures it uses) nests too deep: its levels need more \
+             than {} KiB of stack",
+            MAX_EVAL_STACK >> 10
         ),
     )
 }
