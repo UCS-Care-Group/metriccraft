@@ -1,0 +1,5 @@
+scene 240 120
+rect 0 0 240 120 fill #ffffff
+rect 70.5 34 98.99 36 #0:0
+text 120 62.82 36 Regular #1f2430 Middle "(Blank)"
+text 120 83.61 12 Regular #5c6370 Middle "Nothing"

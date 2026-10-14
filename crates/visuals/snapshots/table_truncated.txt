@@ -1,0 +1,53 @@
+scene 300 260
+rect 0 0 300 260 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Sum of V by Id"
+text 8 249.81 11 Regular #5c6370 Start "Showing the first 500 of 2,000 rows"
+clip 8 26 284 211
+text 38.78 39.61 12 Bold #1f2430 End "Id"
+text 94.63 39.61 12 Bold #1f2430 End "Sum of V"
+line 8 46 100.63 46 #9aa1ab 1
+rect 8 46 36.78 20 #0:0
+text 38.78 59.61 12 Regular #1f2430 End "0"
+rect 44.78 46 55.85 20 #1:0
+text 94.63 59.61 12 Regular #1f2430 End "0"
+line 8 66 100.63 66 #e3e6eb 1
+rect 8 66 36.78 20 #0:1
+text 38.78 79.61 12 Regular #1f2430 End "1"
+rect 44.78 66 55.85 20 #1:1
+text 94.63 79.61 12 Regular #1f2430 End "1.5"
+line 8 86 100.63 86 #e3e6eb 1
+rect 8 86 36.78 20 #0:2
+text 38.78 99.61 12 Regular #1f2430 End "2"
+rect 44.78 86 55.85 20 #1:2
+text 94.63 99.61 12 Regular #1f2430 End "3"
+line 8 106 100.63 106 #e3e6eb 1
+rect 8 106 36.78 20 #0:3
+text 38.78 119.61 12 Regular #1f2430 End "3"
+rect 44.78 106 55.85 20 #1:3
+text 94.63 119.61 12 Regular #1f2430 End "4.5"
+line 8 126 100.63 126 #e3e6eb 1
+rect 8 126 36.78 20 #0:4
+text 38.78 139.61 12 Regular #1f2430 End "4"
+rect 44.78 126 55.85 20 #1:4
+text 94.63 139.61 12 Regular #1f2430 End "6"
+line 8 146 100.63 146 #e3e6eb 1
+rect 8 146 36.78 20 #0:5
+text 38.78 159.61 12 Regular #1f2430 End "5"
+rect 44.78 146 55.85 20 #1:5
+text 94.63 159.61 12 Regular #1f2430 End "7.5"
+line 8 166 100.63 166 #e3e6eb 1
+rect 8 166 36.78 20 #0:6
+text 38.78 179.61 12 Regular #1f2430 End "6"
+rect 44.78 166 55.85 20 #1:6
+text 94.63 179.61 12 Regular #1f2430 End "9"
+line 8 186 100.63 186 #e3e6eb 1
+rect 8 186 36.78 20 #0:7
+text 38.78 199.61 12 Regular #1f2430 End "7"
+rect 44.78 186 55.85 20 #1:7
+text 94.63 199.61 12 Regular #1f2430 End "0"
+line 8 206 100.63 206 #9aa1ab 1
+rect 8 206 36.78 20 #0:500
+text 14 219.61 12 Bold #1f2430 Start "Total"
+rect 44.78 206 55.85 20 #1:500
+text 94.63 219.61 12 Bold #1f2430 End "8992.5"
+unclip

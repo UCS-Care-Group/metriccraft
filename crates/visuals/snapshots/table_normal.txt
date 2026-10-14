@@ -1,0 +1,70 @@
+scene 400 300
+rect 0 0 400 300 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Sum of Amount and Rows by Region and Product"
+clip 8 26 384 266
+text 14 39.61 12 Bold #1f2430 Start "Region"
+text 59.63 39.61 12 Bold #1f2430 Start "Product"
+text 185.04 39.61 12 Bold #1f2430 End "Sum of Amount"
+text 223.62 39.61 12 Bold #1f2430 End "Rows"
+line 8 46 229.62 46 #9aa1ab 1
+rect 8 46 45.63 20 #0:0
+text 14 59.61 12 Regular #1f2430 Start "North"
+rect 53.63 46 50.44 20 #1:0
+text 59.63 59.61 12 Regular #1f2430 Start "Apple"
+rect 104.07 46 86.96 20 #2:0
+text 185.04 59.61 12 Regular #1f2430 End "1,270.50"
+rect 191.04 46 38.58 20 #3:0
+text 223.62 59.61 12 Regular #1f2430 End "2"
+line 8 66 229.62 66 #e3e6eb 1
+rect 8 66 45.63 20 #0:1
+text 14 79.61 12 Regular #1f2430 Start "North"
+rect 53.63 66 50.44 20 #1:1
+text 59.63 79.61 12 Regular #1f2430 Start "Pear"
+rect 104.07 66 86.96 20 #2:1
+text 185.04 79.61 12 Regular #1f2430 End "5.25"
+rect 191.04 66 38.58 20 #3:1
+text 223.62 79.61 12 Regular #1f2430 End "1"
+line 8 86 229.62 86 #e3e6eb 1
+rect 8 86 45.63 20 #0:2
+text 14 99.61 12 Regular #1f2430 Start "South"
+rect 53.63 86 50.44 20 #1:2
+text 59.63 99.61 12 Regular #1f2430 Start "Apple"
+rect 104.07 86 86.96 20 #2:2
+text 185.04 99.61 12 Regular #1f2430 End "7.00"
+rect 191.04 86 38.58 20 #3:2
+text 223.62 99.61 12 Regular #1f2430 End "1"
+line 8 106 229.62 106 #e3e6eb 1
+rect 8 106 45.63 20 #0:3
+text 14 119.61 12 Regular #1f2430 Start "South"
+rect 53.63 106 50.44 20 #1:3
+text 59.63 119.61 12 Regular #1f2430 Start "Pear"
+rect 104.07 106 86.96 20 #2:3
+text 185.04 119.61 12 Regular #1f2430 End "3.00"
+rect 191.04 106 38.58 20 #3:3
+text 223.62 119.61 12 Regular #1f2430 End "1"
+line 8 126 229.62 126 #e3e6eb 1
+rect 8 126 45.63 20 #0:4
+text 14 139.61 12 Regular #1f2430 Start "South"
+rect 53.63 126 50.44 20 #1:4
+text 59.63 139.61 12 Regular #1f2430 Start "Plum"
+rect 104.07 126 86.96 20 #2:4
+text 185.04 139.61 12 Regular #1f2430 End "30,002.00"
+rect 191.04 126 38.58 20 #3:4
+text 223.62 139.61 12 Regular #1f2430 End "2"
+line 8 146 229.62 146 #e3e6eb 1
+rect 8 146 45.63 20 #0:5
+text 14 159.61 12 Regular #1f2430 Start "West"
+rect 53.63 146 50.44 20 #1:5
+rect 104.07 146 86.96 20 #2:5
+text 185.04 159.61 12 Regular #1f2430 End "4.00"
+rect 191.04 146 38.58 20 #3:5
+text 223.62 159.61 12 Regular #1f2430 End "1"
+line 8 166 229.62 166 #9aa1ab 1
+rect 8 166 45.63 20 #0:6
+text 14 179.61 12 Bold #1f2430 Start "Total"
+rect 53.63 166 50.44 20 #1:6
+rect 104.07 166 86.96 20 #2:6
+text 185.04 179.61 12 Bold #1f2430 End "31,291.75"
+rect 191.04 166 38.58 20 #3:6
+text 223.62 179.61 12 Bold #1f2430 End "8"
+unclip

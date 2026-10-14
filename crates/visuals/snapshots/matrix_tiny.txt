@@ -1,0 +1,3 @@
+scene 60 50
+rect 0 0 60 50 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Sum …"

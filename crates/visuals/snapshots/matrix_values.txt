@@ -1,0 +1,143 @@
+scene 700 400
+rect 0 0 700 400 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Sum of Amount and Rows by Region, Product and Year"
+clip 8 26 684 366
+text 14 59.61 12 Bold #1f2430 Start "Region"
+text 73 39.61 12 Bold #1f2430 Start "2023"
+text 198.54 39.61 12 Bold #1f2430 Start "2024"
+text 324.09 39.61 12 Bold #1f2430 Start "Total"
+text 147.96 59.61 12 Bold #1f2430 End "Sum of Amount"
+text 186.54 59.61 12 Bold #1f2430 End "Rows"
+text 273.51 59.61 12 Bold #1f2430 End "Sum of Amount"
+text 312.09 59.61 12 Bold #1f2430 End "Rows"
+text 399.05 59.61 12 Bold #1f2430 End "Sum of Amount"
+text 437.63 59.61 12 Bold #1f2430 End "Rows"
+line 8 66 443.63 66 #9aa1ab 1
+text 14 79.61 12 Bold #1f2430 Start "North"
+rect 67 66 86.96 20 #0:0
+text 147.96 79.61 12 Bold #1f2430 End "1,255.75"
+rect 153.96 66 38.58 20 #1:0
+text 186.54 79.61 12 Bold #1f2430 End "2"
+rect 192.54 66 86.96 20 #2:0
+text 273.51 79.61 12 Bold #1f2430 End "20.00"
+rect 279.51 66 38.58 20 #3:0
+text 312.09 79.61 12 Bold #1f2430 End "1"
+rect 318.09 66 86.96 20 #4:0
+text 399.05 79.61 12 Bold #1f2430 End "1,275.75"
+rect 405.05 66 38.58 20 #5:0
+text 437.63 79.61 12 Bold #1f2430 End "3"
+line 8 86 443.63 86 #e3e6eb 1
+text 28 99.61 12 Regular #1f2430 Start "Apple"
+rect 67 86 86.96 20 #0:1
+text 147.96 99.61 12 Regular #1f2430 End "1,250.50"
+rect 153.96 86 38.58 20 #1:1
+text 186.54 99.61 12 Regular #1f2430 End "1"
+rect 192.54 86 86.96 20 #2:1
+text 273.51 99.61 12 Regular #1f2430 End "20.00"
+rect 279.51 86 38.58 20 #3:1
+text 312.09 99.61 12 Regular #1f2430 End "1"
+rect 318.09 86 86.96 20 #4:1
+text 399.05 99.61 12 Bold #1f2430 End "1,270.50"
+rect 405.05 86 38.58 20 #5:1
+text 437.63 99.61 12 Bold #1f2430 End "2"
+line 8 106 443.63 106 #e3e6eb 1
+text 28 119.61 12 Regular #1f2430 Start "Pear"
+rect 67 106 86.96 20 #0:2
+text 147.96 119.61 12 Regular #1f2430 End "5.25"
+rect 153.96 106 38.58 20 #1:2
+text 186.54 119.61 12 Regular #1f2430 End "1"
+rect 192.54 106 86.96 20 #2:2
+rect 279.51 106 38.58 20 #3:2
+rect 318.09 106 86.96 20 #4:2
+text 399.05 119.61 12 Bold #1f2430 End "5.25"
+rect 405.05 106 38.58 20 #5:2
+text 437.63 119.61 12 Bold #1f2430 End "1"
+line 8 126 443.63 126 #e3e6eb 1
+text 14 139.61 12 Bold #1f2430 Start "South"
+rect 67 126 86.96 20 #0:3
+text 147.96 139.61 12 Bold #1f2430 End "3.00"
+rect 153.96 126 38.58 20 #1:3
+text 186.54 139.61 12 Bold #1f2430 End "1"
+rect 192.54 126 86.96 20 #2:3
+text 273.51 139.61 12 Bold #1f2430 End "30,009.00"
+rect 279.51 126 38.58 20 #3:3
+text 312.09 139.61 12 Bold #1f2430 End "3"
+rect 318.09 126 86.96 20 #4:3
+text 399.05 139.61 12 Bold #1f2430 End "30,012.00"
+rect 405.05 126 38.58 20 #5:3
+text 437.63 139.61 12 Bold #1f2430 End "4"
+line 8 146 443.63 146 #e3e6eb 1
+text 28 159.61 12 Regular #1f2430 Start "Apple"
+rect 67 146 86.96 20 #0:4
+rect 153.96 146 38.58 20 #1:4
+rect 192.54 146 86.96 20 #2:4
+text 273.51 159.61 12 Regular #1f2430 End "7.00"
+rect 279.51 146 38.58 20 #3:4
+text 312.09 159.61 12 Regular #1f2430 End "1"
+rect 318.09 146 86.96 20 #4:4
+text 399.05 159.61 12 Bold #1f2430 End "7.00"
+rect 405.05 146 38.58 20 #5:4
+text 437.63 159.61 12 Bold #1f2430 End "1"
+line 8 166 443.63 166 #e3e6eb 1
+text 28 179.61 12 Regular #1f2430 Start "Pear"
+rect 67 166 86.96 20 #0:5
+text 147.96 179.61 12 Regular #1f2430 End "3.00"
+rect 153.96 166 38.58 20 #1:5
+text 186.54 179.61 12 Regular #1f2430 End "1"
+rect 192.54 166 86.96 20 #2:5
+rect 279.51 166 38.58 20 #3:5
+rect 318.09 166 86.96 20 #4:5
+text 399.05 179.61 12 Bold #1f2430 End "3.00"
+rect 405.05 166 38.58 20 #5:5
+text 437.63 179.61 12 Bold #1f2430 End "1"
+line 8 186 443.63 186 #e3e6eb 1
+text 28 199.61 12 Regular #1f2430 Start "Plum"
+rect 67 186 86.96 20 #0:6
+rect 153.96 186 38.58 20 #1:6
+rect 192.54 186 86.96 20 #2:6
+text 273.51 199.61 12 Regular #1f2430 End "30,002.00"
+rect 279.51 186 38.58 20 #3:6
+text 312.09 199.61 12 Regular #1f2430 End "2"
+rect 318.09 186 86.96 20 #4:6
+text 399.05 199.61 12 Bold #1f2430 End "30,002.00"
+rect 405.05 186 38.58 20 #5:6
+text 437.63 199.61 12 Bold #1f2430 End "2"
+line 8 206 443.63 206 #e3e6eb 1
+text 14 219.61 12 Bold #1f2430 Start "West"
+rect 67 206 86.96 20 #0:7
+rect 153.96 206 38.58 20 #1:7
+rect 192.54 206 86.96 20 #2:7
+text 273.51 219.61 12 Bold #1f2430 End "4.00"
+rect 279.51 206 38.58 20 #3:7
+text 312.09 219.61 12 Bold #1f2430 End "1"
+rect 318.09 206 86.96 20 #4:7
+text 399.05 219.61 12 Bold #1f2430 End "4.00"
+rect 405.05 206 38.58 20 #5:7
+text 437.63 219.61 12 Bold #1f2430 End "1"
+line 8 226 443.63 226 #e3e6eb 1
+text 28 239.61 12 Regular #1f2430 Start "(Blank)"
+rect 67 226 86.96 20 #0:8
+rect 153.96 226 38.58 20 #1:8
+rect 192.54 226 86.96 20 #2:8
+text 273.51 239.61 12 Regular #1f2430 End "4.00"
+rect 279.51 226 38.58 20 #3:8
+text 312.09 239.61 12 Regular #1f2430 End "1"
+rect 318.09 226 86.96 20 #4:8
+text 399.05 239.61 12 Bold #1f2430 End "4.00"
+rect 405.05 226 38.58 20 #5:8
+text 437.63 239.61 12 Bold #1f2430 End "1"
+line 8 246 443.63 246 #9aa1ab 1
+text 14 259.61 12 Bold #1f2430 Start "Total"
+rect 67 246 86.96 20 #0:9
+text 147.96 259.61 12 Bold #1f2430 End "1,258.75"
+rect 153.96 246 38.58 20 #1:9
+text 186.54 259.61 12 Bold #1f2430 End "3"
+rect 192.54 246 86.96 20 #2:9
+text 273.51 259.61 12 Bold #1f2430 End "30,033.00"
+rect 279.51 246 38.58 20 #3:9
+text 312.09 259.61 12 Bold #1f2430 End "5"
+rect 318.09 246 86.96 20 #4:9
+text 399.05 259.61 12 Bold #1f2430 End "31,291.75"
+rect 405.05 246 38.58 20 #5:9
+text 437.63 259.61 12 Bold #1f2430 End "8"
+unclip

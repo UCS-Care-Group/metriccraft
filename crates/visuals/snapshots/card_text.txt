@@ -1,0 +1,5 @@
+scene 160 100
+rect 0 0 160 100 fill #ffffff
+rect 8 26.52 144 30.96 #0:0
+text 80 51.31 30.96 Regular #1f2430 Middle "Hello, world"
+text 80 71.09 12 Regular #5c6370 Middle "Greeting"

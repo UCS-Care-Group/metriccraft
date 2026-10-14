@@ -1,0 +1,23 @@
+scene 300 200
+rect 0 0 300 200 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Sum of Amount by Region"
+clip 8 26 284 166
+text 14 39.61 12 Bold #1f2430 Start "Region"
+text 134.6 39.61 12 Bold #1f2430 End "Sum of Amount"
+line 8 46 140.6 46 #9aa1ab 1
+text 14 59.61 12 Regular #1f2430 Start "North"
+rect 53.63 46 86.96 20 #0:0
+text 134.6 59.61 12 Regular #1f2430 End "1,275.75"
+line 8 66 140.6 66 #e3e6eb 1
+text 14 79.61 12 Regular #1f2430 Start "South"
+rect 53.63 66 86.96 20 #0:1
+text 134.6 79.61 12 Regular #1f2430 End "30,012.00"
+line 8 86 140.6 86 #e3e6eb 1
+text 14 99.61 12 Regular #1f2430 Start "West"
+rect 53.63 86 86.96 20 #0:2
+text 134.6 99.61 12 Regular #1f2430 End "4.00"
+line 8 106 140.6 106 #9aa1ab 1
+text 14 119.61 12 Bold #1f2430 Start "Total"
+rect 53.63 106 86.96 20 #0:3
+text 134.6 119.61 12 Bold #1f2430 End "31,291.75"
+unclip
