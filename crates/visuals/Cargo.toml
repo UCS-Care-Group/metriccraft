@@ -10,3 +10,12 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+default = ["png"]
+# The PNG renderer (ADR 0007): CLI page renders, snapshots, the N-3 bench.
+png = ["dep:tiny-skia"]
+
+[dependencies]
+ab_glyph = "0.2"
+tiny-skia = { version = "0.12", optional = true, default-features = false, features = ["std", "png-format"] }

@@ -1,0 +1,10 @@
+scene 240 120
+text 8 20 14 Bold #1f2430 Start "Sales by Region"
+rect 30 50 40 60 fill #3a6ea5 #0:0
+rect 90 75 40 35 fill #e0812f #0:1
+rect 150 30 40 80 fill #4e9f6d #0:2
+line 20 110 230 110 #9aa1ab 1
+path #1f2430 2 50,60 110,85 170,40
+clip 150 0 90 30
+text 232 20 11 Regular #5c6370 End "£1.2M clipped text"
+unclip

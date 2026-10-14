@@ -57,13 +57,14 @@ fn main() -> ExitCode {
         "wasm" => wasm(),
         "dataset" => dataset::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
+        "snapshot" => snapshot(std::env::args().any(|a| a == "--update")),
         "parity" if std::env::args().any(|a| a == "--export") => parity_export(),
         "parity" => parity(
             std::env::args().any(|a| a == "--update"),
             std::env::args().any(|a| a == "--pending"),
         ),
         _ => {
-            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]>".into())
+            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]|snapshot [--update]|parity>".into())
         }
     };
     match result {
@@ -132,6 +133,26 @@ fn test_with(args: &[String]) -> Result {
     } else {
         Err(format!("`cargo {}` failed", full.join(" ")))
     }
+}
+
+/// Runs every snapshot test (ADR 0007), writing PNGs to `observations/snapshots/` to look at;
+/// `--update` re-records the committed text snapshots.
+fn snapshot(update: bool) -> Result {
+    let png = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("observations/snapshots");
+    let mut cmd = Command::new("cargo");
+    cmd.args(["test", "--workspace", "snapshot"])
+        .env("ODASH_SNAPSHOT_PNG", &png);
+    if update {
+        cmd.env("ODASH_SNAPSHOT_UPDATE", "1");
+    }
+    let status = cmd.status().map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("snapshot tests failed".into());
+    }
+    println!("PNGs in {}", png.display());
+    Ok(())
 }
 
 fn wasm() -> Result {
