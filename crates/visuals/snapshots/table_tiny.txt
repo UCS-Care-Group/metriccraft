@@ -1,0 +1,3 @@
+scene 30 20
+rect 0 0 30 20 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "…"

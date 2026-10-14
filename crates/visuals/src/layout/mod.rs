@@ -10,6 +10,10 @@ use crate::text;
 use crate::theme::Theme;
 use crate::visual::Visual;
 
+pub mod card;
+pub mod matrix;
+pub mod table;
+
 /// Padding inside a Visual's frame, logical pixels.
 pub const PAD: f32 = 8.0;
 
