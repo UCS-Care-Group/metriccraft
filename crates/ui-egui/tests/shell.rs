@@ -150,3 +150,36 @@ fn canvas_selects_drags_nudges_and_deletes() {
     wait(&mut h, |s| geometry(s).is_none());
     assert!(h.state().selected().is_none());
 }
+
+#[test]
+fn table_view_scrolls_by_keyboard() {
+    let dir = std::env::temp_dir().join(format!("odash-grid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("t.csv");
+    let mut text = String::from("N\n");
+    for i in 0..5000 {
+        text.push_str(&format!("{i}\n"));
+    }
+    std::fs::write(&csv, text).unwrap();
+    let mut h = harness();
+    h.state_mut().run(
+        "home.getData",
+        serde_json::json!({"kind": "csv", "path": csv, "name": "T"}),
+    );
+    wait(&mut h, |s| !s.snapshot().doc.tables.is_empty());
+    h.state_mut().set_view("table");
+    h.run();
+    h.get_by_label("T table").click();
+    h.run();
+    h.key_press(egui::Key::End);
+    h.run();
+    let top = h.state().grid().top;
+    assert!(top > 4900 && top < 5000, "{top}");
+    h.key_press(egui::Key::PageUp);
+    h.run();
+    assert!(h.state().grid().top < top);
+    h.key_press(egui::Key::Home);
+    h.run();
+    assert_eq!(h.state().grid().top, 0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

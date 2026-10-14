@@ -2831,6 +2831,7 @@ dependencies = [
  "egui_kittest",
  "opendash-core",
  "opendash-engine",
+ "opendash-model",
  "opendash-visuals",
  "serde_json",
 ]

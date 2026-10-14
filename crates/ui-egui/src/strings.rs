@@ -74,6 +74,10 @@ pub enum Str {
     NoFilters,
     FitPage,
     FitWidth,
+    RowCount,
+    TableOf,
+    RowScroll,
+    ColumnScroll,
     Zoom,
 }
 
@@ -139,6 +143,10 @@ impl Str {
             Str::WellEmpty => "Add data fields here",
             Str::Remove => "Remove",
             Str::NoFilters => "No slicer selections on this page.",
+            Str::RowCount => "{} rows",
+            Str::TableOf => "{} table",
+            Str::RowScroll => "Scroll rows",
+            Str::ColumnScroll => "Scroll columns",
             Str::FitPage => "Fit to page",
             Str::FitWidth => "Fit to width",
             Str::Zoom => "Zoom",

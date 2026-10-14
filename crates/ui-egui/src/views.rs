@@ -140,19 +140,6 @@ pub fn current_page(doc: &Document) -> Option<&opendash_engine::Page> {
         .or_else(|| pages.first())
 }
 
-/// The Table view until the grid lands (M5.3).
-pub fn table_view(ui: &mut Ui, t: &Tokens, doc: &Document, picked: Option<&str>) {
-    let table = picked.and_then(|n| doc.tables.iter().find(|tb| tb.name() == n));
-    ui.centered_and_justified(|ui| match table {
-        Some(tb) => {
-            ui.label(format!("{} — {}", tb.name(), tb.rows()));
-        }
-        None => {
-            ui.label(RichText::new(Str::TableViewHint.text()).color(t.muted));
-        }
-    });
-}
-
 /// The Model view until the diagram lands (M5.3): the Tables in a grid.
 pub fn model_view(ui: &mut Ui, t: &Tokens, doc: &Document) {
     if doc.model.tables.is_empty() {

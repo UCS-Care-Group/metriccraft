@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 opendash-engine = { path = "../engine", default-features = false }
 opendash-core = { path = "../core" }
+opendash-model = { path = "../model" }
 opendash-visuals = { path = "../visuals", default-features = false }
 egui = { workspace = true }
 egui_dock = { workspace = true }

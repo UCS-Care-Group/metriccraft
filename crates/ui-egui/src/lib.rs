@@ -3,6 +3,7 @@
 //! published [`worker::Snapshot`]. Swappable: nothing below depends on it.
 
 pub mod canvas;
+pub mod grid;
 pub mod icons;
 pub mod painter;
 pub mod palette;
@@ -107,6 +108,7 @@ pub struct Shell {
     /// The Table picked for the Table view.
     table: Option<String>,
     canvas: canvas::Canvas,
+    grid: grid::Grid,
     last_autosave: f64,
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
@@ -150,6 +152,7 @@ impl Shell {
             dock,
             table: None,
             canvas: canvas::Canvas::default(),
+            grid: grid::Grid::default(),
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
@@ -237,6 +240,11 @@ impl Shell {
 
     pub fn zoom(&self) -> canvas::Zoom {
         self.canvas.zoom
+    }
+
+    /// The Table view's grid.
+    pub fn grid(&self) -> &grid::Grid {
+        &self.grid
     }
 
     /// The canvas's selected Visual.
@@ -526,7 +534,7 @@ impl Shell {
                     }
                     self.report(ui, &t, &snap);
                 }
-                View::Table => views::table_view(ui, &t, &snap.doc, self.table.as_deref()),
+                View::Table => self.grid.show(ui, &t, &snap.doc, self.table.as_deref()),
                 View::Model => views::model_view(ui, &t, &snap.doc),
             });
 
