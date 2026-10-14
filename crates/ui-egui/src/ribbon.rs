@@ -55,12 +55,21 @@ pub fn groups(
     commands: &'static [Command],
     tab: Tab,
 ) -> Vec<(&'static str, Vec<&'static Command>)> {
+    groups_at(commands, tab.path_name())
+}
+
+/// The groups of the tab its commands' `ribbon` paths call `tab` (the Power Query editor's
+/// tabs are `"Power Query Editor: Home"` and `"Transform"`).
+pub fn groups_at(
+    commands: &'static [Command],
+    tab: &str,
+) -> Vec<(&'static str, Vec<&'static Command>)> {
     let mut out: Vec<(&'static str, Vec<&'static Command>)> = Vec::new();
     for c in commands {
         let Some((t, group)) = c.ribbon.split_once(" > ") else {
             continue;
         };
-        if t != tab.path_name() {
+        if t != tab {
             continue;
         }
         match out.iter_mut().find(|(g, _)| *g == group) {
@@ -141,9 +150,20 @@ pub fn show(
     commands: &'static [Command],
     tab: Tab,
 ) -> Option<Action> {
+    show_groups(ui, t, snap, commands, groups(commands, tab))
+}
+
+/// The buttons of `groups`, each group labelled under its buttons.
+pub fn show_groups(
+    ui: &mut Ui,
+    t: &Tokens,
+    snap: &Snapshot,
+    commands: &'static [Command],
+    groups: Vec<(&'static str, Vec<&'static Command>)>,
+) -> Option<Action> {
     let mut action = None;
     ui.horizontal(|ui| {
-        for (group, list) in groups(commands, tab) {
+        for (group, list) in groups {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     for c in list {

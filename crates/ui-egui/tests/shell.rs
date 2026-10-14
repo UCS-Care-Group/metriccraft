@@ -326,3 +326,41 @@ fn get_data_picks_a_file_then_shows_its_source_form() {
     assert_eq!(h.state().snapshot().doc.tables[0].name(), "Sales");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn power_query_editor_previews_steps_and_closes() {
+    let dir = std::env::temp_dir().join(format!("odash-pq-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Sales.csv");
+    // 200 good rows (the type detection sample), then a Qty that isn't a number.
+    let mut text = String::from("Region,Qty\n");
+    for i in 0..200 {
+        text.push_str(&format!("North,{i}\n"));
+    }
+    std::fs::write(&path, text + "South,x\n").unwrap();
+    let mut h = harness();
+    h.state_mut().run(
+        "home.getData",
+        serde_json::json!({"kind": "csv", "path": path}),
+    );
+    wait(&mut h, |s| s.snapshot().doc.queries.len() == 1);
+    h.get_by_label("Transform data").click();
+    h.run();
+    assert!(h.state().query_editor_open());
+    h.get_by_label("Applied Steps");
+    h.get_by_label("Promoted Headers");
+    // The Preview comes from the worker; the bad Qty shows as a Cell error.
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.query_by_label("Sales preview").is_none() && Instant::now() < end {
+        h.step();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    h.get_by_label("Sales preview");
+    h.get_by_label("Changed Type");
+    h.get_by_label("Source").click();
+    h.run();
+    h.get_by_label("Close editor").click();
+    h.run();
+    assert!(!h.state().query_editor_open());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

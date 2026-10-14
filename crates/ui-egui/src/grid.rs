@@ -1,7 +1,8 @@
-//! The Table view's grid (spec U-5): any Table's rows, virtual. Only the visible rows are read
+//! The grid of the Table view (spec U-5) and the Power Query editor's Preview: rows, virtual. Only the visible rows are read
 //! and laid out, and the position is a row index rather than a pixel offset, so 10M rows scroll
 //! as smoothly as 10 (egui's f32 scroll offsets lose whole rows past a few million).
 
+use arrow_array::RecordBatch;
 use egui::{Align2, FontId, Key, Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
 use opendash_core::Value;
 use opendash_engine::Document;
@@ -14,10 +15,11 @@ const ROW: f32 = 22.0;
 const WIDTH: f32 = 150.0;
 const PAD: f32 = 6.0;
 
-/// The grid's place in the picked Table.
+/// The grid's place in what it shows.
 #[derive(Default)]
 pub struct Grid {
-    table: String,
+    /// What is shown (a Table's name, a Query's Preview at a step): a new one starts at the top.
+    shown: String,
     /// The first visible row.
     pub top: usize,
     /// The first visible column.
@@ -48,16 +50,48 @@ impl Grid {
             });
             return;
         };
-        if self.table != table.name() {
+        let model = doc.model.tables.iter().find(|m| m.name == table.name());
+        let props = |name: &str| {
+            let c = model.and_then(|m| m.columns.iter().find(|c| c.name == name));
+            c.map_or((String::new(), false), |c| {
+                (c.format_string.clone(), c.hidden)
+            })
+        };
+        let label = Str::TableOf.fill(&[table.name()]);
+        self.show_batch(
+            ui,
+            t,
+            table.name(),
+            &label,
+            table.batch(),
+            &props,
+            &|_, _| None,
+        );
+    }
+
+    /// Shows `batch` as `key` (a new key starts at the top), labelled `label`. `props` gives a
+    /// column's format string and whether it is hidden; `error` a Cell error's message, shown
+    /// as Error in its cell.
+    #[allow(clippy::too_many_arguments)]
+    pub fn show_batch(
+        &mut self,
+        ui: &mut Ui,
+        t: &Tokens,
+        key: &str,
+        label: &str,
+        batch: &RecordBatch,
+        props: &dyn Fn(&str) -> (String, bool),
+        error: &dyn Fn(usize, usize) -> Option<String>,
+    ) {
+        if self.shown != key {
             *self = Grid {
-                table: table.name().to_string(),
+                shown: key.to_string(),
+                column: self.column.take(),
                 ..Grid::default()
             };
         }
-        let model = doc.model.tables.iter().find(|m| m.name == table.name());
-        let batch = table.batch();
         let schema = batch.schema();
-        let rows = table.rows();
+        let rows = batch.num_rows();
         let count = text(
             &Value::Integer(i64::try_from(rows).unwrap_or(i64::MAX)),
             "#,0",
@@ -74,8 +108,7 @@ impl Grid {
 
         let id = ui.id().with("table-grid");
         let r = ui.interact(body, id, Sense::click());
-        let label = Str::TableOf.fill(&[table.name()]);
-        r.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, &label));
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, label));
         if r.clicked() {
             r.request_focus();
         }
@@ -120,8 +153,7 @@ impl Grid {
                 continue;
             };
             let col = Col::new(array);
-            let props = model.and_then(|m| m.columns.iter().find(|mc| &mc.name == field.name()));
-            let format = props.map_or("", |p| p.format_string.as_str());
+            let (format, hidden) = props(field.name());
             let x = body.left() + n as f32 * WIDTH;
             let head = Rect::from_min_size(egui::pos2(x, body.top()), Vec2::new(WIDTH, ROW));
             let picked = self.column.as_deref() == Some(field.name().as_str());
@@ -132,7 +164,6 @@ impl Grid {
             }
             painter.rect_filled(head, 0.0, if picked { t.hover } else { t.panel });
             let cell = painter.with_clip_rect(head.shrink(1.0).intersect(body));
-            let hidden = props.is_some_and(|p| p.hidden);
             let color = if hidden { t.muted } else { t.text };
             cell.text(
                 head.left_center() + Vec2::new(PAD, 0.0),
@@ -150,14 +181,23 @@ impl Grid {
             for i in 0..visible.min(rows.saturating_sub(self.top)) {
                 let row = self.top + i;
                 let v = col.value(row);
-                let s = text(&v, format);
+                let failed = error(row, c);
+                let s = match &failed {
+                    Some(_) => Str::CellError.text().to_string(),
+                    None => text(&v, &format),
+                };
                 let y = body.top() + ROW * (i as f32 + 1.0);
                 let rect = Rect::from_min_size(egui::pos2(x, y), Vec2::new(WIDTH, ROW));
                 if picked {
                     painter.rect_filled(rect, 0.0, t.hover);
                 }
                 let cell = painter.with_clip_rect(rect.shrink(1.0).intersect(body));
-                if matches!(v, Value::Text(_) | Value::Boolean(_)) {
+                if let Some(message) = failed {
+                    let at = rect.left_center() + Vec2::new(PAD, 0.0);
+                    cell.text(at, Align2::LEFT_CENTER, s, font.clone(), t.danger);
+                    let er = ui.interact(rect, id.with(("error", row, c)), Sense::hover());
+                    er.on_hover_text(message);
+                } else if matches!(v, Value::Text(_) | Value::Boolean(_)) {
                     cell.text(
                         rect.left_center() + Vec2::new(PAD, 0.0),
                         Align2::LEFT_CENTER,

@@ -298,7 +298,7 @@ pub static COMMANDS: &[Command] = &[
     Command {
         id: "home.removeColumns",
         label: "Remove Columns",
-        ribbon: "Home > Manage Columns",
+        ribbon: "Power Query Editor: Home > Manage Columns",
         shortcut: Some("Delete"),
         params: &[
             req("query", Kind::Query, "the Query"),
@@ -331,7 +331,7 @@ pub static COMMANDS: &[Command] = &[
         id: "transform.filterRows",
         label: "Filter Rows",
         // Power Query's column-header filter menu; not on the ribbon.
-        ribbon: "",
+        ribbon: "Power Query Editor: Home > Reduce Rows",
         shortcut: None,
         params: &[
             req("query", Kind::Query, "the Query"),
@@ -352,7 +352,7 @@ pub static COMMANDS: &[Command] = &[
     Command {
         id: "home.mergeQueries",
         label: "Merge Queries",
-        ribbon: "Home > Combine",
+        ribbon: "Power Query Editor: Home > Combine",
         shortcut: None,
         params: &[
             req("query", Kind::Query, "the Query to merge into"),

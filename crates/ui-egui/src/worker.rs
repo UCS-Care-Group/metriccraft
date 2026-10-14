@@ -79,8 +79,19 @@ pub enum Event {
     },
 }
 
+/// A Query's Preview at an Applied Step, made on the worker for the Power Query editor.
+pub struct PreviewOut {
+    pub query: String,
+    /// The step (0 = first), or `None` for the Source.
+    pub step: Option<usize>,
+    /// The snapshot `seq` it was made after.
+    pub seq: u64,
+    pub result: Result<opendash_engine::Preview, String>,
+}
+
 enum Job {
     Run(String, Value),
+    Preview(String, Option<usize>),
     /// A click in a Visual at its logical `x`, `y` (`App::click`).
     Click {
         page: String,
@@ -96,6 +107,7 @@ enum Job {
 struct Shared {
     snap: Arc<Snapshot>,
     events: Vec<Event>,
+    preview: Option<Arc<PreviewOut>>,
 }
 
 /// Locks `m`, carrying on past a poisoned lock (the worker never panics; if it did, the last
@@ -106,6 +118,17 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
     let event = match job {
+        Job::Preview(query, step) => {
+            let result = app.preview(&query, step).map_err(|e| e.to_string());
+            let out = PreviewOut {
+                query,
+                step,
+                seq: *seq,
+                result,
+            };
+            lock(shared).preview = Some(Arc::new(out));
+            return;
+        }
         Job::Run(id, params) => match app.run(&id, &params) {
             Ok(()) => Event::Done {
                 notice: app.notice().map(str::to_string),
@@ -173,6 +196,7 @@ impl Engine {
         let shared = Arc::new(Mutex::new(Shared {
             snap: Arc::new(Snapshot::of(&mut app, 0)),
             events: Vec::new(),
+            preview: None,
         }));
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -257,6 +281,21 @@ impl Engine {
             &mut self.seq,
             Job::Autosave(now_ms),
         );
+    }
+
+    /// Asks for `query`'s Preview at `step` (`None`: its Source); read it with
+    /// [`Engine::preview`].
+    pub fn request_preview(&mut self, query: &str, step: Option<usize>) {
+        let job = Job::Preview(query.into(), step);
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = self.jobs.send(job);
+        #[cfg(target_arch = "wasm32")]
+        run(&mut self.app, &self.shared, &mut self.seq, job);
+    }
+
+    /// The last Preview made.
+    pub fn preview(&self) -> Option<Arc<PreviewOut>> {
+        lock(&self.shared).preview.clone()
     }
 
     /// Rows read per Query by the load running now (Get Data, Refresh, Close & Apply).

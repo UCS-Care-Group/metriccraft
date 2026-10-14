@@ -97,7 +97,7 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 
 ## `home.removeColumns` — Remove Columns
 
-- Ribbon: Home > Manage Columns
+- Ribbon: Power Query Editor: Home > Manage Columns
 - Shortcut: Delete
 - `query`: Query — the Query
 - `columns`: list of text — the columns to remove (at least one must remain)
@@ -110,13 +110,14 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 
 ## `transform.filterRows` — Filter Rows
 
+- Ribbon: Power Query Editor: Home > Reduce Rows
 - `query`: Query — the Query
 - `conditions`: JSON — list of {column: text, op: text, value} — op is equals, notEquals, greater, greaterOrEqual, less, lessOrEqual, contains, beginsWith or endsWith; value is a number, text, logical or null (equals null = is null); text for a date or datetime column is read as one
 - `combine?`: and | or — and (default) or or
 
 ## `home.mergeQueries` — Merge Queries
 
-- Ribbon: Home > Combine
+- Ribbon: Power Query Editor: Home > Combine
 - `query`: Query — the Query to merge into
 - `keys`: list of text — its key columns
 - `with`: Query — the other Query

@@ -10,6 +10,7 @@ pub mod icons;
 pub mod painter;
 pub mod palette;
 pub mod panes;
+pub mod pq;
 pub mod ribbon;
 pub mod strings;
 pub mod theme;
@@ -121,6 +122,10 @@ pub struct Shell {
     formula: Option<formula::Formula>,
     /// Focus the formula bar next frame.
     focus_formula: bool,
+    /// The Power Query editor.
+    pq: pq::QueryEditor,
+    /// The open form belongs to the Power Query editor's window.
+    form_in_pq: bool,
     last_autosave: f64,
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
@@ -175,6 +180,8 @@ impl Shell {
             diagram: diagram::Diagram::default(),
             formula: None,
             focus_formula: false,
+            pq: pq::QueryEditor::default(),
+            form_in_pq: false,
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
@@ -301,6 +308,19 @@ impl Shell {
 
     pub fn zoom(&self) -> canvas::Zoom {
         self.canvas.zoom
+    }
+
+    /// Opens the Power Query editor (scripts, tests), at Query `query` if given.
+    pub fn open_query_editor(&mut self, query: Option<&str>) {
+        self.pq.open = true;
+        if let Some(q) = query {
+            self.pq.query = Some(q.to_string());
+            self.pq.selected = None;
+        }
+    }
+
+    pub fn query_editor_open(&self) -> bool {
+        self.pq.open
     }
 
     /// The Table view's grid.
@@ -545,8 +565,19 @@ impl Shell {
                             self.set_theme(ui.ctx(), mode);
                         }
                     });
-                } else if let Some(a) = ribbon::show(ui, &t, &snap, self.commands, self.tab) {
-                    action = Some(a);
+                } else {
+                    ui.horizontal(|ui| {
+                        if self.tab == Tab::Home {
+                            let icon = icons::Icon::Table;
+                            let label = Str::TransformData.text();
+                            if icons::big_button(ui, icon, label, true, &t).clicked() {
+                                self.pq.open = true;
+                            }
+                        }
+                        if let Some(a) = ribbon::show(ui, &t, &snap, self.commands, self.tab) {
+                            action = Some(a);
+                        }
+                    });
                 }
             });
 
@@ -709,7 +740,11 @@ impl Shell {
         {
             action = Some(a);
         }
-        if let Some(f) = &mut self.form
+        if self.pq.open {
+            self.query_editor(ui, &t, &snap);
+        }
+        if !self.form_in_pq
+            && let Some(f) = &mut self.form
             && let Some(a) = f.show(ui, &t, &snap.doc)
         {
             action = Some(a);
@@ -740,6 +775,60 @@ impl Shell {
                 canvas::Request::Click { visual, x, y, add } => {
                     self.engine.click(&page.id, &visual, x, y, add)
                 }
+            }
+        }
+    }
+
+    /// The Power Query editor in its own window (embedded where there is one window only).
+    fn query_editor(&mut self, ui: &mut Ui, t: &Tokens, snap: &Snapshot) {
+        let id = egui::ViewportId::from_hash_of("power-query-editor");
+        let builder = egui::ViewportBuilder::default()
+            .with_title(Str::QueryEditor.text())
+            .with_inner_size([1100.0, 700.0]);
+        let preview = self.engine.preview();
+        let (requests, form_action, close) =
+            ui.ctx().show_viewport_immediate(id, builder, |ui, _| {
+                let mut close = ui.input(|i| i.viewport().close_requested());
+                egui::Panel::top("pq-close").show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            close |= ui.button(Str::Close.text()).clicked();
+                        });
+                    });
+                });
+                let requests = self.pq.show(ui, t, snap, self.commands, preview.as_deref());
+                let mut form_action = None;
+                if self.form_in_pq
+                    && let Some(f) = &mut self.form
+                {
+                    form_action = f.show(ui, t, &snap.doc);
+                }
+                (requests, form_action, close)
+            });
+        for r in requests {
+            match r {
+                pq::Request::Run(id, params) => {
+                    if id == "home.closeApply" {
+                        self.pq.open = false;
+                    }
+                    self.engine.run(id, params);
+                }
+                pq::Request::Form(f) => {
+                    self.form = Some(f);
+                    self.form_in_pq = true;
+                }
+                pq::Request::Preview(q, step) => self.engine.request_preview(&q, step),
+            }
+        }
+        if let Some(a) = form_action {
+            self.form_in_pq = false;
+            self.act(a);
+        }
+        if close {
+            self.pq.open = false;
+            if self.form_in_pq {
+                self.form = None;
+                self.form_in_pq = false;
             }
         }
     }

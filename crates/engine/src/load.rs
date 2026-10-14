@@ -170,6 +170,18 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
     })
 }
 
+/// Query `name`'s M, as Power Query's Advanced Editor shows it (spec Q-3); `None` if there is no
+/// such Query. The culture shows only when it isn't the Project's default.
+pub fn query_m(doc: &Document, name: &str) -> Option<String> {
+    let q = doc.queries.iter().find(|q| q.name == name)?;
+    let default = opendash_file::project::DEFAULT_CULTURE;
+    Some(opendash_data::m::print(&opendash_data::m::MQuery {
+        source: q.source.clone(),
+        steps: q.steps.clone(),
+        culture: (q.culture.name != default).then_some(q.culture),
+    }))
+}
+
 /// The sheets and tables of the workbook at `path`, as `(name, "sheet" | "table")`: what Get
 /// Data's `item` and `itemKind` can name (Power BI's Navigator).
 pub fn excel_items(path: &str) -> Result<Vec<(String, &'static str)>> {
@@ -577,6 +589,21 @@ mod tests {
         app.run("home.getData", &json!({"kind": "csv", "path": small}))
             .unwrap();
         assert_eq!(app.load_progress().rows(), [("small".to_string(), 2)]);
+    }
+
+    #[test]
+    fn query_m_is_the_advanced_editor_text() {
+        let dir = Dir::new();
+        let path = dir.write("Sales.csv", "Region,Qty\nNorth,3\n");
+        let mut app = App::new();
+        app.run("home.getData", &json!({"kind": "csv", "path": path}))
+            .unwrap();
+        let m = super::query_m(app.document(), "Sales").unwrap();
+        assert!(
+            m.starts_with("let") && m.contains("Csv.Document") && m.contains("in"),
+            "{m}"
+        );
+        assert!(super::query_m(app.document(), "Nope").is_none());
     }
 
     #[test]

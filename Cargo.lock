@@ -2826,6 +2826,7 @@ dependencies = [
 name = "opendash-ui-egui"
 version = "0.0.0"
 dependencies = [
+ "arrow-array",
  "egui",
  "egui_dock",
  "egui_kittest",
