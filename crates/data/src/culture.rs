@@ -333,12 +333,8 @@ pub(crate) fn days_from_civil(y: u32, m: u32, d: u32) -> Option<i32> {
     if y == 0 || d == 0 || d > days_in_month {
         return None;
     }
-    let (y, m, d) = (i64::from(y), i64::from(m), i64::from(d));
-    let y = if m <= 2 { y - 1 } else { y };
-    let (era, yoe) = (y.div_euclid(400), y.rem_euclid(400));
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    i32::try_from(era * 146_097 + doe - 719_468).ok()
+    let days = opendash_core::date::days_from_civil(i64::from(y), i64::from(m), i64::from(d));
+    i32::try_from(days).ok()
 }
 
 #[cfg(test)]
