@@ -120,9 +120,10 @@ pub fn frame(visual: &Visual, result: Option<&QueryResult>, cx: &Context<'_>) ->
         Some(r) => title(visual, r),
         None => visual.format.title.clone().unwrap_or_default(),
     };
-    if visual.format.show_title && !t.is_empty() {
-        let size = cx.theme.title_size;
-        let (ascent, descent) = text::ascent_descent(size, Weight::Bold);
+    let size = cx.theme.title_size;
+    let (ascent, descent) = text::ascent_descent(size, Weight::Bold);
+    // A title that doesn't fit the Visual's height isn't drawn.
+    if visual.format.show_title && !t.is_empty() && top + ascent + descent <= h {
         s.push(Cmd::Text {
             x: PAD,
             y: top + ascent,
