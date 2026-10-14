@@ -771,6 +771,11 @@ pub static COMMANDS: &[Command] = &[
                 Kind::Bool,
                 "default true; made inactive (with a notice) if the two Tables already have an active Relationship",
             ),
+            opt(
+                "orient",
+                Kind::Bool,
+                "default false; true swaps the ends when only that way round is valid (as dragging a column onto another in the Model view does)",
+            ),
         ],
         enabled: has_tables,
         run: Run::App(relationship::new_relationship),

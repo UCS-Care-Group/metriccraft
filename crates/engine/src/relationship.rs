@@ -16,10 +16,22 @@ pub(crate) fn new_relationship(app: &mut App, params: &Value) -> Result {
     const ID: &str = "modeling.newRelationship";
     let mut r = ends(params, ID)?;
     r.active = flag(params, "active", ID)?.unwrap_or(true);
+    let orient = flag(params, "orient", ID)?.unwrap_or(false);
     app.edit_noting(|doc| {
-        doc.model
-            .add_relationship(r, &doc.tables)
-            .map_err(Error::Model)
+        let reversed = Relationship {
+            from_table: r.to_table.clone(),
+            from_column: r.to_column.clone(),
+            to_table: r.from_table.clone(),
+            to_column: r.from_column.clone(),
+            ..r.clone()
+        };
+        match doc.model.add_relationship(r, &doc.tables) {
+            Err(e) if orient => doc
+                .model
+                .add_relationship(reversed, &doc.tables)
+                .map_err(|_| Error::Model(e)),
+            out => out.map_err(Error::Model),
+        }
     })
 }
 

@@ -1,5 +1,5 @@
-//! The Views (Report, Table, Model) and the Data pane. The Report view is the canvas
-//! (`canvas.rs`); the grid and diagram fill the others in M5.3.
+//! The Views (Report, Table, Model) and the Data pane. The Views themselves are `canvas.rs`,
+//! `grid.rs` and `diagram.rs`.
 
 use egui::{Color32, RichText, Ui};
 use opendash_engine::Document;
@@ -138,27 +138,4 @@ pub fn current_page(doc: &Document) -> Option<&opendash_engine::Page> {
         .as_deref()
         .and_then(|id| pages.iter().find(|p| p.id == id))
         .or_else(|| pages.first())
-}
-
-/// The Model view until the diagram lands (M5.3): the Tables in a grid.
-pub fn model_view(ui: &mut Ui, t: &Tokens, doc: &Document) {
-    if doc.model.tables.is_empty() {
-        ui.centered_and_justified(|ui| {
-            ui.label(RichText::new(Str::NoTables.text()).color(t.muted));
-        });
-        return;
-    }
-    ui.horizontal_wrapped(|ui| {
-        for table in &doc.model.tables {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.set_min_width(160.0);
-                    ui.strong(table.name.as_str());
-                    for c in table.columns.iter().take(12) {
-                        ui.label(c.name.as_str());
-                    }
-                });
-            });
-        }
-    });
 }

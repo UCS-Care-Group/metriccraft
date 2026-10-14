@@ -256,6 +256,7 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 - `toTable`: Table — the one side's Table
 - `toColumn`: Column — its column: unique, non-blank values
 - `active?`: logical — default true; made inactive (with a notice) if the two Tables already have an active Relationship
+- `orient?`: logical — default false; true swaps the ends when only that way round is valid (as dragging a column onto another in the Model view does)
 
 ## `modeling.editRelationship` — Edit relationship
 

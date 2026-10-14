@@ -3,6 +3,7 @@
 //! published [`worker::Snapshot`]. Swappable: nothing below depends on it.
 
 pub mod canvas;
+pub mod diagram;
 pub mod grid;
 pub mod icons;
 pub mod painter;
@@ -109,6 +110,7 @@ pub struct Shell {
     table: Option<String>,
     canvas: canvas::Canvas,
     grid: grid::Grid,
+    diagram: diagram::Diagram,
     last_autosave: f64,
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
@@ -153,6 +155,7 @@ impl Shell {
             table: None,
             canvas: canvas::Canvas::default(),
             grid: grid::Grid::default(),
+            diagram: diagram::Diagram::default(),
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
@@ -535,7 +538,11 @@ impl Shell {
                     self.report(ui, &t, &snap);
                 }
                 View::Table => self.grid.show(ui, &t, &snap.doc, self.table.as_deref()),
-                View::Model => views::model_view(ui, &t, &snap.doc),
+                View::Model => {
+                    for (id, params) in self.diagram.show(ui, &t, &snap.doc) {
+                        self.engine.run(id, params);
+                    }
+                }
             });
 
         self.show_toasts(ui, &t);

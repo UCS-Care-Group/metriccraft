@@ -87,6 +87,27 @@ fn geometry(s: &Shell) -> Option<(i32, i32, i32, i32)> {
     Some((v.x, v.y, v.w, v.h))
 }
 
+/// Drags with the primary button from `from` to `to` in a few steps.
+fn drag(h: &mut Harness<'_, Shell>, from: egui::Pos2, to: egui::Pos2) {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    h.input_mut().events.push(egui::Event::PointerMoved(from));
+    h.step();
+    h.input_mut().events.push(button(from, true));
+    h.step();
+    for i in 1..=5 {
+        let at = from + (to - from) * (i as f32 / 5.0);
+        h.input_mut().events.push(egui::Event::PointerMoved(at));
+        h.step();
+    }
+    h.input_mut().events.push(button(to, false));
+    h.run();
+}
+
 #[test]
 fn canvas_selects_drags_nudges_and_deletes() {
     let mut h = harness();
@@ -105,32 +126,7 @@ fn canvas_selects_drags_nudges_and_deletes() {
 
     // A drag is one command, sent on release.
     let r = h.get_by_label("Card visual").rect();
-    let (from, to) = (r.center(), r.center() + egui::vec2(50.0, 0.0));
-    for e in [
-        egui::Event::PointerMoved(from),
-        egui::Event::PointerButton {
-            pos: from,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        },
-    ] {
-        h.input_mut().events.push(e);
-        h.step();
-    }
-    for i in 1..=5 {
-        h.input_mut().events.push(egui::Event::PointerMoved(
-            from + (to - from) * (i as f32 / 5.0),
-        ));
-        h.step();
-    }
-    h.input_mut().events.push(egui::Event::PointerButton {
-        pos: to,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: egui::Modifiers::NONE,
-    });
-    h.run();
+    drag(&mut h, r.center(), r.center() + egui::vec2(50.0, 0.0));
     wait(&mut h, |s| {
         geometry(s).is_some_and(|g| g.0 > 100 && g.1 == 100)
     });
@@ -181,5 +177,46 @@ fn table_view_scrolls_by_keyboard() {
     h.key_press(egui::Key::Home);
     h.run();
     assert_eq!(h.state().grid().top, 0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn model_view_moves_tables_and_relates_columns_dragged_either_way() {
+    let dir = std::env::temp_dir().join(format!("odash-model-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness();
+    h.state_mut().run(
+        "options.autodetectRelationships",
+        serde_json::json!({"enabled": false}),
+    );
+    for (name, text) in [
+        ("Facts", "Key,Val\n1,10\n1,20\n2,5\n"),
+        ("Keys", "Key,Size\n1,3\n2,4\n"),
+    ] {
+        let path = dir.join(format!("{name}.csv"));
+        std::fs::write(&path, text).unwrap();
+        h.state_mut().run(
+            "home.getData",
+            serde_json::json!({"kind": "csv", "path": path, "name": name}),
+        );
+    }
+    wait(&mut h, |s| s.snapshot().doc.model.tables.len() == 2);
+    h.state_mut().set_view("model");
+    h.run();
+
+    let head = h.get_by_label("Keys table").rect().center();
+    drag(&mut h, head, head + egui::vec2(0.0, 120.0));
+    wait(&mut h, |s| s.snapshot().doc.diagram.contains_key("Keys"));
+
+    // From the one side to the many side: the ends are swapped.
+    let from = h.get_by_label("Key column of Keys").rect().center();
+    let to = h.get_by_label("Key column of Facts").rect().center();
+    drag(&mut h, from, to);
+    wait(&mut h, |s| s.snapshot().doc.model.relationships.len() == 1);
+    let r = &h.state().snapshot().doc.model.relationships[0];
+    assert_eq!(
+        (r.from_table.as_str(), r.to_table.as_str()),
+        ("Facts", "Keys")
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }

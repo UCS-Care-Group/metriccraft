@@ -331,3 +331,16 @@ fn the_autodetect_switch_toggles_and_undoes() {
     app.run("edit.undo", &Value::Null).unwrap();
     assert!(app.document().model.autodetect_relationships);
 }
+
+#[test]
+fn orient_swaps_ends_dragged_the_other_way() {
+    let dir = Dir::new();
+    let mut app = app(&dir, false);
+    let backwards = json!({"fromTable": "Regions", "fromColumn": "Region", "toTable": "Sales",
+        "toColumn": "Region"});
+    assert!(app.run("modeling.newRelationship", &backwards).is_err());
+    let mut oriented = backwards;
+    oriented["orient"] = json!(true);
+    app.run("modeling.newRelationship", &oriented).unwrap();
+    assert_eq!(shown(&app), ["Sales[Region] -> Regions[Region]"]);
+}
