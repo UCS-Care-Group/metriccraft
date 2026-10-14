@@ -2,8 +2,11 @@
 //! the user does goes to the engine as a command ([`worker::Engine::run`]); panels only read the
 //! published [`worker::Snapshot`]. Swappable: nothing below depends on it.
 
+pub mod canvas;
 pub mod icons;
+pub mod painter;
 pub mod palette;
+pub mod panes;
 pub mod ribbon;
 pub mod strings;
 pub mod theme;
@@ -103,6 +106,7 @@ pub struct Shell {
     dock: egui_dock::DockState<Pane>,
     /// The Table picked for the Table view.
     table: Option<String>,
+    canvas: canvas::Canvas,
     last_autosave: f64,
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
@@ -145,6 +149,7 @@ impl Shell {
             quit_requested: false,
             dock,
             table: None,
+            canvas: canvas::Canvas::default(),
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
@@ -208,6 +213,12 @@ impl Shell {
         if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
             list.insert(0, "Inter".into());
         }
+        // The canvas paints Scenes in the Inter faces their layout measured with.
+        for name in [painter::REGULAR, painter::BOLD] {
+            fonts
+                .families
+                .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
+        }
         ctx.set_fonts(fonts);
         ctx.set_visuals(self.tokens.visuals());
     }
@@ -222,6 +233,20 @@ impl Shell {
         if let Some(v) = View::from_key(key) {
             self.prefs.view = v;
         }
+    }
+
+    pub fn zoom(&self) -> canvas::Zoom {
+        self.canvas.zoom
+    }
+
+    /// The canvas's selected Visual.
+    pub fn selected(&self) -> Option<&str> {
+        self.canvas.selected.as_deref()
+    }
+
+    /// Selects Visual `id` on the canvas (scripts, tests).
+    pub fn select(&mut self, id: &str) {
+        self.canvas.selected = Some(id.to_string());
     }
 
     fn set_theme(&mut self, ctx: &egui::Context, mode: Mode) {
@@ -478,6 +503,8 @@ impl Shell {
                     t,
                     snap: &snap,
                     table: &mut self.table,
+                    selected: self.canvas.selected.as_deref(),
+                    out: Vec::new(),
                 };
                 egui_dock::DockArea::new(&mut self.dock)
                     .id(egui::Id::new("panes-dock"))
@@ -485,6 +512,9 @@ impl Shell {
                     .show_close_buttons(false)
                     .show_leaf_close_all_buttons(false)
                     .show_inside(ui, &mut viewer);
+                for (id, params) in viewer.out {
+                    self.engine.run(id, params);
+                }
             });
 
         egui::CentralPanel::default()
@@ -494,7 +524,7 @@ impl Shell {
                     if let Some(a) = self.page_tabs(ui, &t, &snap) {
                         action = Some(a);
                     }
-                    views::report_view(ui, &t, &snap.doc);
+                    self.report(ui, &t, &snap);
                 }
                 View::Table => views::table_view(ui, &t, &snap.doc, self.table.as_deref()),
                 View::Model => views::model_view(ui, &t, &snap.doc),
@@ -517,6 +547,28 @@ impl Shell {
         }
         if let Some(a) = action {
             self.act(a);
+        }
+    }
+
+    /// The Report view: the canvas over the current Page.
+    fn report(&mut self, ui: &mut Ui, t: &Tokens, snap: &Snapshot) {
+        let Some(page) = views::current_page(&snap.doc) else {
+            views::report_view(ui, t, &snap.doc);
+            return;
+        };
+        let (drawn, scenes) = &*snap.scenes;
+        let scenes = if drawn == &page.id {
+            scenes.as_slice()
+        } else {
+            &[]
+        };
+        for r in self.canvas.show(ui, t, page, scenes) {
+            match r {
+                canvas::Request::Command(id, params) => self.engine.run(id, params),
+                canvas::Request::Click { visual, x, y, add } => {
+                    self.engine.click(&page.id, &visual, x, y, add)
+                }
+            }
         }
     }
 
@@ -545,9 +597,38 @@ impl Shell {
                             action = Some(palette::invoke(c));
                         }
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.zoom_controls(ui);
+                    });
                 });
             });
         action
+    }
+
+    /// Fit page, fit width and a zoom slider (10 % to 400 %).
+    fn zoom_controls(&mut self, ui: &mut Ui) {
+        use canvas::Zoom;
+        let mut pct = (self.canvas.last_scale * 100.0).clamp(10.0, 400.0).round();
+        // Rounded and in range, so the slider sees no change of its own making.
+        let z = &mut self.canvas.zoom;
+        let slider = egui::Slider::new(&mut pct, 10.0..=400.0)
+            .suffix(" %")
+            .fixed_decimals(0);
+        if ui.add(slider).on_hover_text(Str::Zoom.text()).changed() {
+            *z = Zoom::Fixed(pct / 100.0);
+        }
+        if ui
+            .selectable_label(*z == Zoom::FitWidth, Str::FitWidth.text())
+            .clicked()
+        {
+            *z = Zoom::FitWidth;
+        }
+        if ui
+            .selectable_label(*z == Zoom::FitPage, Str::FitPage.text())
+            .clicked()
+        {
+            *z = Zoom::FitPage;
+        }
     }
 
     fn recovery_banner(&mut self, ui: &mut Ui, t: &Tokens) -> Option<Action> {
@@ -658,6 +739,9 @@ struct PaneViewer<'a> {
     t: Tokens,
     snap: &'a Snapshot,
     table: &'a mut Option<String>,
+    /// The canvas's selected Visual.
+    selected: Option<&'a str>,
+    out: Vec<panes::Request>,
 }
 
 impl egui_dock::TabViewer for PaneViewer<'_> {
@@ -672,10 +756,28 @@ impl egui_dock::TabViewer for PaneViewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Pane) {
+        let page = views::current_page(&self.snap.doc);
+        let visual = page.and_then(|p| {
+            let id = self.selected?;
+            p.visuals.iter().find(|v| v.id == id)
+        });
         match tab {
-            Pane::Data => views::data_pane(ui, &self.t, &self.snap.doc, self.table),
-            Pane::Filters | Pane::Visualizations => {
-                ui.label(RichText::new(Str::SelectVisual.text()).color(self.t.muted));
+            Pane::Data => {
+                let field = views::data_pane(ui, &self.t, &self.snap.doc, self.table);
+                if let (Some(f), Some(p), Some(v)) = (field, page, visual)
+                    && let Some(well) = panes::well_for(v, &f)
+                {
+                    let params = json!({"page": p.id, "visual": v.id, "well": well.id(), "field": panes::field_json(&f)});
+                    self.out.push(("visual.addField", params));
+                }
+            }
+            Pane::Visualizations => {
+                let r = panes::visualizations(ui, &self.t, page, visual);
+                self.out.extend(r);
+            }
+            Pane::Filters => {
+                let r = panes::filters(ui, &self.t, page);
+                self.out.extend(r);
             }
         }
     }

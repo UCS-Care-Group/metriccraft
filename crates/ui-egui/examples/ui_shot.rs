@@ -5,7 +5,9 @@
 //!
 //! The script is JSON lines, run in order: `{"run": "<command>", "params": {…}}` runs a command
 //! and waits for it; `{"dark": true}` switches to the dark App theme; `{"view": "table"}` picks a
-//! View; `{"shot": "/abs/out.png"}` saves a PNG there too. The window is 1440×900 pt at 2×.
+//! View; `{"select": "$1"}` selects a Visual on the canvas; `{"shot": "/abs/out.png"}` saves a
+//! PNG there too. A string `"$N"` anywhere stands for the id of the Nth Visual the script
+//! created (ids are random). The window is 1440×900 pt at 2×.
 
 use std::time::{Duration, Instant};
 
@@ -38,6 +40,32 @@ fn shot(h: &mut Harness<'_>, path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `v` with each `"$N"` string replaced by the Nth created Visual's id.
+fn ids(seen: &[String], v: Value) -> Value {
+    match v {
+        Value::String(s) if s.starts_with('$') => {
+            let n: usize = s[1..].parse().unwrap_or(0);
+            seen.get(n.wrapping_sub(1))
+                .cloned()
+                .map_or(Value::String(s), Value::String)
+        }
+        Value::Array(a) => Value::Array(a.into_iter().map(|x| ids(seen, x)).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, x)| (k, ids(seen, x))).collect()),
+        v => v,
+    }
+}
+
+/// Records Visuals not seen before, in creation order.
+fn track(h: &Harness<'_>, seen: &mut Vec<String>) {
+    for p in &h.state().snapshot().doc.report.pages {
+        for v in &p.visuals {
+            if !seen.contains(&v.id) {
+                seen.push(v.id.clone());
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let out = args.next().ok_or("usage: ui_shot OUT.png [SCRIPT.jsonl]")?;
@@ -60,19 +88,25 @@ fn main() -> Result<(), String> {
         );
     h.state().setup(&h.ctx);
     settle(&mut h, None);
+    let mut seen = Vec::new();
     for line in script.lines().filter(|l| !l.trim().is_empty()) {
         let l: Value = serde_json::from_str(line).map_err(|e| format!("{line}: {e}"))?;
+        let l = ids(&seen, l);
         if let Some(id) = l.get("run").and_then(Value::as_str) {
             let seq = h.state().snapshot().seq + 1;
             let params = l.get("params").cloned().unwrap_or(Value::Null);
             h.state_mut().run(id, params);
             settle(&mut h, Some(seq));
+            track(&h, &mut seen);
         } else if l.get("dark").and_then(Value::as_bool) == Some(true) {
             let ctx = h.ctx.clone();
             h.state_mut().set_dark(&ctx);
             settle(&mut h, None);
         } else if let Some(v) = l.get("view").and_then(Value::as_str) {
             h.state_mut().set_view(v);
+            settle(&mut h, None);
+        } else if let Some(v) = l.get("select").and_then(Value::as_str) {
+            h.state_mut().select(v);
             settle(&mut h, None);
         } else if let Some(p) = l.get("shot").and_then(Value::as_str) {
             shot(&mut h, p)?;

@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use opendash_engine::{App, Command, Document, Location, RecoveryInfo};
+use opendash_visuals::Scene;
+use opendash_visuals::layout::Context;
 use serde_json::Value;
 
 /// What the window shows of the engine: a copy taken after the last command.
@@ -19,18 +21,21 @@ pub struct Snapshot {
     pub location: Option<Location>,
     /// The command running now, if any.
     pub busy: Option<&'static str>,
+    /// The current Page's id and its Visuals' Scenes, drawn after the last command.
+    pub scenes: Arc<(String, Vec<(String, Scene)>)>,
     /// Bumped on every publish.
     pub seq: u64,
 }
 
 impl Snapshot {
-    fn of(app: &App, seq: u64) -> Self {
+    fn of(app: &mut App, seq: u64) -> Self {
         Snapshot {
             doc: app.document().clone(),
             enabled: app.commands().iter().map(|c| (c.enabled)(app)).collect(),
             dirty: app.is_dirty(),
             location: app.location().cloned(),
             busy: None,
+            scenes: Arc::new(draw(app)),
             seq,
         }
     }
@@ -43,6 +48,21 @@ impl Snapshot {
             .and_then(|i| self.enabled.get(i).copied())
             .unwrap_or(false)
     }
+}
+
+/// The current Page drawn with the default Report theme.
+// ponytail: en-US formatting until Projects carry a Culture (spec R-4).
+fn draw(app: &mut App) -> (String, Vec<(String, Scene)>) {
+    let Some(page) = crate::views::current_page(app.document()).map(|p| p.id.clone()) else {
+        return Default::default();
+    };
+    let theme = opendash_visuals::Theme::light();
+    let cx = Context {
+        theme: &theme,
+        locale: &opendash_core::EN_US,
+    };
+    let scenes = app.page_scene(&page, &cx).unwrap_or_default();
+    (page, scenes)
 }
 
 /// How a command ended, for the toasts and status bar.
@@ -61,6 +81,14 @@ pub enum Event {
 
 enum Job {
     Run(String, Value),
+    /// A click in a Visual at its logical `x`, `y` (`App::click`).
+    Click {
+        page: String,
+        visual: String,
+        x: f32,
+        y: f32,
+        add: bool,
+    },
     /// Writes a recovery copy if autosave is due (`now`: ms since 1970).
     Autosave(u64),
 }
@@ -85,6 +113,22 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
             },
             Err(e) => Event::Failed {
                 id,
+                error: e.to_string(),
+            },
+        },
+        Job::Click {
+            page,
+            visual,
+            x,
+            y,
+            add,
+        } => match app.click(&page, &visual, x, y, add) {
+            Ok(()) => Event::Done {
+                id: "selection.select".into(),
+                notice: None,
+            },
+            Err(e) => Event::Failed {
+                id: "selection.select".into(),
                 error: e.to_string(),
             },
         },
@@ -122,17 +166,16 @@ pub struct Engine {
 
 impl Engine {
     /// Starts the engine on `app`; `repaint` wakes the window when a command finishes.
-    pub fn new(app: App, repaint: impl Fn() + Send + 'static) -> Self {
+    pub fn new(mut app: App, repaint: impl Fn() + Send + 'static) -> Self {
         let commands = app.commands();
         let shared = Arc::new(Mutex::new(Shared {
-            snap: Arc::new(Snapshot::of(&app, 0)),
+            snap: Arc::new(Snapshot::of(&mut app, 0)),
             events: Vec::new(),
         }));
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (jobs, rx) = std::sync::mpsc::channel::<Job>();
             let worker = Arc::clone(&shared);
-            let mut app = app;
             // ponytail: an unnamed detached thread; it ends when the window drops `jobs`.
             std::thread::spawn(move || {
                 let mut seq = 0;
@@ -180,6 +223,21 @@ impl Engine {
                 error: "the engine stopped".into(),
             });
         }
+        #[cfg(target_arch = "wasm32")]
+        run(&mut self.app, &self.shared, &mut self.seq, job);
+    }
+
+    /// A click in Visual `visual` at its logical `x`, `y`; `add` is Ctrl (cross-filter).
+    pub fn click(&mut self, page: &str, visual: &str, x: f32, y: f32, add: bool) {
+        let job = Job::Click {
+            page: page.into(),
+            visual: visual.into(),
+            x,
+            y,
+            add,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = self.jobs.send(job);
         #[cfg(target_arch = "wasm32")]
         run(&mut self.app, &self.shared, &mut self.seq, job);
     }

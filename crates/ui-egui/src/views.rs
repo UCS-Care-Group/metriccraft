@@ -1,8 +1,9 @@
-//! The Views (Report, Table, Model) and the Panes (Filters, Visualizations, Data). M5.1 gives
-//! each its frame; the canvas, grid and diagram fill them in M5.3–M5.4.
+//! The Views (Report, Table, Model) and the Data pane. The Report view is the canvas
+//! (`canvas.rs`); the grid and diagram fill the others in M5.3.
 
 use egui::{Color32, RichText, Ui};
 use opendash_engine::Document;
+use opendash_visuals::FieldRef;
 
 use crate::strings::Str;
 use crate::theme::Tokens;
@@ -59,11 +60,17 @@ impl Pane {
 }
 
 /// The Data pane: every Table with its Columns and Measures. Clicking a Table picks it for the
-/// Table view.
-pub fn data_pane(ui: &mut Ui, t: &Tokens, doc: &Document, picked: &mut Option<String>) {
+/// Table view; clicking a Field returns it (the Report view adds it to the selected Visual).
+pub fn data_pane(
+    ui: &mut Ui,
+    t: &Tokens,
+    doc: &Document,
+    picked: &mut Option<String>,
+) -> Option<FieldRef> {
+    let mut clicked = None;
     if doc.model.tables.is_empty() {
         ui.label(RichText::new(Str::NoTables.text()).color(t.muted));
-        return;
+        return None;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
         for table in &doc.model.tables {
@@ -77,14 +84,25 @@ pub fn data_pane(ui: &mut Ui, t: &Tokens, doc: &Document, picked: &mut Option<St
                 })
                 .body(|ui| {
                     for c in table.columns.iter().filter(|c| !c.hidden) {
-                        ui.label(c.name.as_str());
+                        if ui.selectable_label(false, c.name.as_str()).clicked() {
+                            clicked = Some(FieldRef::Column {
+                                table: table.name.clone(),
+                                column: c.name.clone(),
+                            });
+                        }
                     }
                     for m in table.measures.iter().filter(|m| !m.hidden) {
-                        ui.label(RichText::new(m.name.as_str()).italics());
+                        let label = RichText::new(m.name.as_str()).italics();
+                        if ui.selectable_label(false, label).clicked() {
+                            clicked = Some(FieldRef::Measure {
+                                name: m.name.clone(),
+                            });
+                        }
                     }
                 });
         }
     });
+    clicked
 }
 
 /// The Report view until the canvas lands (M5.4): the current Page as a blank sheet at its
