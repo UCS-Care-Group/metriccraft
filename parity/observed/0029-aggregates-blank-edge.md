@@ -40,3 +40,14 @@ ROW(
     "SumZeroQty",      CALCULATE(SUM(Sales[Qty]), Sales[Region] = "West")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[SumQty]	[AvgQty]	[MinAmount]	[MaxQty]	[CountQty]	[CountAProduct]	[SumAllBlank]	[AvgAllBlank]	[CountAllBlank]	[RowsNone]	[RowsNoneIsBlank]	[MinNone]	[SumZeroQty]
+11	2.2	-3	5	5	5					true		0
+```
+
+Notes: No errors.

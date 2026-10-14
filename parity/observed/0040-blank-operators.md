@@ -23,3 +23,14 @@ ROW(
     "NotBlank",      NOT BLANK()
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[MinusBlank]	[BlankMinus]	[NegBlank]	[BlankMinusBlank]	[DivBlank]	[ConcatBlanks]	[LessOne]	[GreaterNeg]	[EqFalse]	[AndTrue]	[OrTrue]	[NotBlank]
+5	-5	true	true			true	true	true	false	true	true
+```
+
+Notes: No errors.

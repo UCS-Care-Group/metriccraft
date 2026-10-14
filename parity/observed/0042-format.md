@@ -16,11 +16,15 @@ Things to look at while copying (our guesses, see `crates/core/src/format.rs`):
 
 ## Dataset
 
+Empty cells are blanks.
+
 Table: Days — Day: date, At: datetime
 
 ```tsv
 Day	At
-2026-10-14	2026-10-14 15:04:05
+2026-01-01	2026-01-01 06:00:00
+2026-01-31	2026-01-02 18:30:00
+2024-02-29	
 ```
 
 ## Query
@@ -105,3 +109,15 @@ ROW(
     "DayDE",           FORMAT(MIN(Days[At]), "ddd", "de-DE")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[GeneralNumber]	[GeneralThird]	[GeneralSum]	[GeneralBig]	[GeneralSmall]	[GeneralNeg]	[Currency]	[CurrencyNeg]	[Fixed]	[Standard]	[StandardNeg]	[Percent]	[Scientific]	[YesNo]	[YesNoZero]	[TrueFalse]	[OnOff]	[Grouped]	[Placeholders]	[NoLeadingZero]	[Thousands]	[Millions]	[PercentCode]	[ExpCode]	[ExpLower]	[Escaped]	[Quoted]	[SectionPos]	[SectionNeg]	[SectionZero]	[EmptyNegSection]	[RoundHalf]	[RoundNegHalf]	[RoundDecimal]	[NegToZero]	[Blank]	[BlankIsBlank]	[Infinity]	[Text]	[TextNumber]	[GeneralDate]	[MidnightDate]	[LongDate]	[MediumDate]	[ShortDate]	[LongTime]	[MediumTime]	[ShortTime]	[DateLong]	[DateShort]	[DateIso]	[DateSlashes]	[TimeAmPm]	[MinSec]	[Quarter]	[DayWeek]	[NumberAsDate]	[CurrencyUS]	[CurrencyUSNeg]	[CurrencyDE]	[CurrencyDENeg]	[CurrencyFR]	[StandardDE]	[StandardFR]	[GeneralDE]	[ShortDateUS]	[ShortDateDE]	[ShortDateFR]	[LongDateUS]	[LongDateDE]	[LongDateFR]	[LongTimeUS]	[GeneralDateUS]	[MonthFR]	[DayDE]
+1234.5	0.333333333333333	0.3	1.5E+20	0.00001	-42	£1,234.50	-£1,234.50	1234.57	1,234.57	-1,234.57	25.60%	1.23E+03	Yes	No	True	Off	1,234,567.89	005.0	.5	1,235	1234567.0	50%	1.23E+05	1.2e-3	42k	42 units	1.50	(1.50)	zero	-1.50	3	-3	2.68	0.00		false	inf	abc	1.5	01/01/2026 06:00:00	29/02/2024	01 January 2026	01-Jan-26	01/01/2026	06:00:00	06:00 AM	06:00	Thursday 1 January 2026	Thu 01 Jan 26	2026-01-01 06:00:00	1/1/2026	6:00 AM	01:00	Q1 2026	1 4 1	31/12/1899	$1,234.50	($1,234.50)	1.234,50 €	-1.234,50 €	1 234,50 €	1.234.567,89	1 234 567,89	1234,5	1/1/2026	01.01.2026	01/01/2026	Thursday, January 1, 2026	Donnerstag, 1. Januar 2026	jeudi 1 janvier 2026	6:00:00 AM	1/1/2026 6:00:00 AM	janv	Do
+```
+
+Notes: No errors. All 75 columns copied. Observed on the three-row Days table of case 0041 (the
+original one-row table was replaced to match what was run).

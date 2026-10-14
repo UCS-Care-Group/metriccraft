@@ -21,3 +21,14 @@ ROW(
     "SwitchBlank",     SWITCH(BLANK(), 0, "zero", "other")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[IfTrue]	[IfNoElse]	[IfBlankCond]	[IfZeroCond]	[IfUntaken]	[SwitchMatch]	[SwitchDefault]	[SwitchNoDefault]	[SwitchTrue]	[SwitchBlank]
+yes	true	no	no	1	two	other	true	b	other
+```
+
+Notes: No errors. The grid shows booleans as `True`/`False`; the copy gives `true`/`false`.

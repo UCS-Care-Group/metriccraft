@@ -47,3 +47,22 @@ SUMMARIZECOLUMNS(
 )
 ORDER BY Regions[Region], Sales[Product]
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+Regions[Region]	Sales[Product]	[One]	[Rows]
+North	Apple	1	2
+North	Pear	1	1
+North	Plum	1	
+South	Apple	1	1
+South	Pear	1	1
+South	Plum	1	1
+West	Apple	1	
+West	Pear	1	
+West	Plum	1	
+```
+
+Notes: No errors. Same auto-detected relationship as 0043.

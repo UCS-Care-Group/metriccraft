@@ -34,3 +34,15 @@ ROW(
     "MeasureFiltered", CALCULATE([Total Qty], Sales[Region] = "South")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[NoTransition]	[Transition]	[MeasureRef]	[MeasureTotal]	[MeasureFiltered]
+6	1	1	11	6
+```
+
+Notes: No errors. The DAX query view offers an *Update model: Add new measure* link above the DEFINE
+line; not used.

@@ -88,7 +88,7 @@ The case folder's `README.txt` lists these steps with the names filled in.
    dialog reports (`0` when there are none; note whether it counts rows or cells, if it says).
 7. **DAX query view**: paste `query.dax`, Run, copy the whole result, and paste it as the
    ```` ```tsv ```` block, as for any case. Headers may copy as `Sales[Id]` or `[Id]`; both parse.
-8. On the host: `cargo xtask parity` shows the new Checks; `cargo xtask parity --update` records
+8. On the host: `cargo xtask parity` shows the new Checks (`--pending` lists each failing one with why); `cargo xtask parity --update` records
    the ones that pass, committed with the observation.
 
 An Observed block for a shaping case looks like:

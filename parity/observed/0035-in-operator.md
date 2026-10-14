@@ -33,3 +33,14 @@ ROW(
     "InFilter",      CALCULATE(SUM(Sales[Qty]), Sales[Region] IN {"North", "West"})
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[InList]	[NotInList]	[TextCase]	[BlankZero]	[Tuple]	[InFilter]
+true	true	true	false	true	5
+```
+
+Notes: No errors. `BLANK() IN {0}` is false: IN compares strictly.

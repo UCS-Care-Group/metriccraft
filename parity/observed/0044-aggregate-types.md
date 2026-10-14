@@ -46,3 +46,21 @@ ROW(
     "MinTwoText",     IFERROR(MIN("b", "a"), "error")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[CountText]	[CountAText]	[MinText]	[MaxText]	[CountAFlag]	[DistinctFlag]	[CountDay]	[MinDay]	[SumDayErr]	[AvgDay]	[MinTwoBlank]	[MaxTwoBlank]	[MinTwoText]
+3	3	A	c	3	3	3	Thu, 01 Jan 2026 00:00:00	138072	46024			a
+```
+
+Notes: Six columns fail the whole query before it runs (type checks, so ISERROR/IFERROR never see
+them); they were removed so the rest could be copied, and stay Pending:
+- SumTextErr: `The function SUM cannot work with values of type String.`
+- AvgTextErr, AvgTextBlank: `The function AVERAGE cannot work with values of type String.`
+- CountFlag: `The function COUNT cannot work with values of type Boolean.`
+- SumFlagErr: `The function SUM cannot work with values of type Boolean.`
+- MinFlag: `The function MIN cannot work with values of type Boolean.`
+Each message is prefixed `Query (line, col)`. COUNT over text counts non-blank text (3).

@@ -21,3 +21,16 @@ ROW(
     "NumConcat",     3 & 4
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[MaxPlusOne]	[MaxTimesTwo]	[BigLiteral]	[IntDivide]	[IntEqDecimal]	[Power]	[PowerHalf]	[NegZero]	[TextPlusNum]	[NumConcat]
+-9223372036854776000	-2	9223372036854776000	3.5	true	1024	2	0	7	34
+```
+
+Notes: No errors. **Whole-number overflow wraps silently** instead of raising an error: MaxPlusOne is
+-2^63 and MaxTimesTwo is -2. The copy prints large whole numbers through a double
+(`-9223372036854776000`); the grid shows the same digits.

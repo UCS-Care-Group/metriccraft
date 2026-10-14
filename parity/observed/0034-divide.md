@@ -20,3 +20,14 @@ ROW(
     "Negative",      DIVIDE(-1, 4)
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[Normal]	[Integers]	[ZeroDen]	[ZeroZero]	[BlankDen]	[BlankNum]	[BlankNumAlt]	[AltText]	[Negative]
+3.5	2	true	true	true	true		none	-0.25
+```
+
+Notes: No errors.

@@ -18,3 +18,15 @@ ROW(
     "CompareConcat", "a" & "b" = "ab"
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[NegPower]	[PowerChain]	[NotAnd]	[OrAnd]	[ConcatPlus]	[MinusChain]	[CompareConcat]
+-4	512	false	true	15	3	true
+```
+
+Notes: No errors. `-2 ^ 2` is -4 (unary minus binds looser than `^`); `2 ^ 3 ^ 2` is 512 (`^` is
+right-associative).

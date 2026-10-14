@@ -21,3 +21,14 @@ ROW(
     "NotEqual",      "x" <> "X"
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[CaseEq]	[CaseStrict]	[AccentEq]	[AccentVsPlain]	[SharpS]	[Order]	[Digits]	[EmptyBlank]	[EmptyStrict]	[NotEqual]
+true	true	true	false	true	true	true	true	false	false
+```
+
+Notes: No errors. `==` is case-insensitive too; `ß` = `SS`; accents are significant.

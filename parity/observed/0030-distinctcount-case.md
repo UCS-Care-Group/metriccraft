@@ -36,3 +36,15 @@ ROW(
     "DistinctNone",      CALCULATE(DISTINCTCOUNT(Sales[Product]), Sales[Region] = "Nowhere")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[DistinctProduct]	[DistinctRegion]	[DistinctAmount]	[DistinctQty]	[ApplesUpper]	[ApplesLower]	[MinProduct]	[MaxProduct]	[DistinctNone]
+3	4	5	6	3	3	Apple	pear	
+```
+
+Notes: No errors. Text differing only by case is one value: DISTINCTCOUNT(Product) is 3 (Apple,
+pear and blank), and MAX(Product) keeps the first casing loaded (`pear`).

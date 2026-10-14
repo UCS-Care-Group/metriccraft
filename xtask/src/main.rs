@@ -58,7 +58,10 @@ fn main() -> ExitCode {
         "dataset" => dataset::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
         "parity" if std::env::args().any(|a| a == "--export") => parity_export(),
-        "parity" => parity(std::env::args().any(|a| a == "--update")),
+        "parity" => parity(
+            std::env::args().any(|a| a == "--update"),
+            std::env::args().any(|a| a == "--pending"),
+        ),
         _ => {
             Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|wasm|bench [--save]>".into())
         }
@@ -455,9 +458,14 @@ fn machine_info(id: &str) -> serde_json::Value {
 
 /// Scoreboard of parity Checks per covered tag (ADR 0004). `--update` rewrites
 /// `parity/passing.txt` after an intended change; the gate itself is the `opendash-model` test.
-fn parity(update: bool) -> Result {
+fn parity(update: bool, pending: bool) -> Result {
     let root = Path::new("parity");
     let run = opendash_model::parity::run(root)?;
+    if pending {
+        for c in run.checks.iter().filter(|c| !c.pass) {
+            eprintln!("PENDING {}: {}", c.key(), c.detail);
+        }
+    }
     let tags = run.by_tag();
     for (tag, (pass, total)) in &tags {
         eprintln!("  {tag:<10} {pass:>3} / {total:<3} Checks");

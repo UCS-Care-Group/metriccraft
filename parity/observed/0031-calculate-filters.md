@@ -37,3 +37,14 @@ ROW(
     "NoMatch",        CALCULATE(SUM(Sales[Qty]), Sales[Region] = "North", Sales[Region] = "South")
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[InnerWins]	[TwoArgs]	[OrSameColumn]	[FilterTable]	[FilterRows]	[AllRows]	[AllColumn]	[AllExcept]	[AllOtherColumn]	[NoMatch]
+5	5	5	7.5	3	2	11	6	6	
+```
+
+Notes: No errors.

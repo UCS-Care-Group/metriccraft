@@ -18,3 +18,14 @@ ROW(
     "IfErrorOk",     IFERROR(2 * 3, -1)
 )
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+[TypeError]	[NoError]	[Infinity]	[BlankIsError]	[IfErrorType]	[IfErrorInf]	[IfErrorOk]
+true	false	true	false	-1	-1	6
+```
+
+Notes: No errors.

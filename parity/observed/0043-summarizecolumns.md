@@ -47,3 +47,17 @@ SUMMARIZECOLUMNS(
 )
 ORDER BY Regions[Region] DESC, Sales[Product]
 ```
+
+## Observed
+
+Power BI Desktop version: 2.158.1304.0 64-bit (September 2026) · Date: 2026-10-14 · Regional settings: English (United Kingdom)
+
+```tsv
+Regions[Region]	Sales[Product]	[Total]	[Big Orders]
+South	Pear	7.25	1
+North	Apple	14.5	
+North	Pear	-3	1
+```
+
+Notes: No errors. Power BI auto-detected Sales[Region] many-to-one Regions[Region], single direction.
+Combinations where every measure is blank are left out (South/Apple, South/Plum, West).
