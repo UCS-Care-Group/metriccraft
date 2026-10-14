@@ -9,6 +9,8 @@ pub mod png;
 pub mod snapshot;
 pub mod text;
 pub mod theme;
+pub mod visual;
 
 pub use draw::{Align, Cmd, Color, Scene, Tag, Weight};
 pub use theme::Theme;
+pub use visual::{FieldRef, Format, Sort, SortDirection, Visual, VisualType, Well};
