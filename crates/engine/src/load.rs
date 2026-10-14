@@ -170,6 +170,28 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
     })
 }
 
+/// The sheets and tables of the workbook at `path`, as `(name, "sheet" | "table")`: what Get
+/// Data's `item` and `itemKind` can name (Power BI's Navigator).
+pub fn excel_items(path: &str) -> Result<Vec<(String, &'static str)>> {
+    let file = std::fs::File::open(path).map_err(|e| {
+        Error::Data(opendash_data::Error::Source {
+            source: path.into(),
+            message: e.to_string(),
+        })
+    })?;
+    let reader = std::io::BufReader::new(file);
+    let wb = opendash_data::source::xlsx::Workbook::open(
+        path,
+        reader,
+        opendash_data::default_memory_cap(),
+    )
+    .map_err(Error::Data)?;
+    let sheets = wb.sheets().into_iter().map(|s| (s, "sheet"));
+    Ok(sheets
+        .chain(wb.tables().into_iter().map(|t| (t, "table")))
+        .collect())
+}
+
 pub(crate) fn refresh(app: &mut App, _params: &Value) -> Result {
     let estimate = loaded(&app.document().tables);
     let progress = app.load_progress();
@@ -555,6 +577,11 @@ mod tests {
         app.run("home.getData", &json!({"kind": "csv", "path": small}))
             .unwrap();
         assert_eq!(app.load_progress().rows(), [("small".to_string(), 2)]);
+    }
+
+    #[test]
+    fn listing_a_missing_workbook_is_an_error() {
+        assert!(super::excel_items("/no/such/book.xlsx").is_err());
     }
 
     #[test]

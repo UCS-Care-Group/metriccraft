@@ -39,6 +39,7 @@ pub enum Str {
     Optional,
     Browse,
     OpenDashFiles,
+    DataFiles,
     // Recovery and closing (spec U-7).
     RecoveryFound,
     RecoveryUnsaved,
@@ -121,6 +122,7 @@ impl Str {
             Str::Optional => "optional",
             Str::Browse => "Browse…",
             Str::OpenDashFiles => "OpenDash projects and packages",
+            Str::DataFiles => "CSV, Excel and Parquet files",
             Str::RecoveryFound => "Unsaved work from an earlier session can be recovered: {}",
             Str::RecoveryUnsaved => "a document never saved",
             Str::Recover => "Recover",

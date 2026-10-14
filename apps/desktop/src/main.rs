@@ -80,6 +80,14 @@ impl Dialogs {
                     Box::pin(dialog.add_filter(filter, &["odash", "json"]).pick_file())
                 }
                 FileAsk::SaveAs { name } => Box::pin(dialog.set_file_name(name).save_file()),
+                FileAsk::Data => Box::pin(
+                    dialog
+                        .add_filter(
+                            Str::DataFiles.text(),
+                            &["csv", "txt", "tsv", "xlsx", "parquet"],
+                        )
+                        .pick_file(),
+                ),
             };
             let ctx = self.ctx.clone();
             std::thread::spawn(move || {

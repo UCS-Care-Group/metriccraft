@@ -125,12 +125,16 @@ struct Field {
     set: bool,
     text: String,
     on: bool,
+    /// Values to pick from, instead of the document's names or a text box.
+    choices: Option<Vec<String>>,
 }
 
 /// A form for one command's params.
 pub struct Form {
     pub command: &'static Command,
     fields: Vec<Field>,
+    /// Get Data from a workbook: its sheets and tables. Picking one as `item` sets `itemKind`.
+    excel: Vec<(String, &'static str)>,
 }
 
 impl Form {
@@ -143,9 +147,33 @@ impl Form {
                 set: p.required,
                 text: String::new(),
                 on: false,
+                choices: None,
             })
             .collect();
-        Form { command, fields }
+        Form {
+            command,
+            fields,
+            excel: Vec::new(),
+        }
+    }
+
+    /// Sets param `name` to `text` (and marks it given).
+    pub fn with_value(mut self, name: &str, text: &str) -> Self {
+        if let Some(f) = self.fields.iter_mut().find(|f| f.param.name == name) {
+            f.text = text.to_string();
+            f.set = true;
+        }
+        self
+    }
+
+    /// Get Data from a workbook: `item` picks among its sheets and tables (`itemKind` follows).
+    pub fn with_excel_items(mut self, items: Vec<(String, &'static str)>) -> Self {
+        let first = items.first().map(|(n, _)| n.clone()).unwrap_or_default();
+        if let Some(f) = self.fields.iter_mut().find(|f| f.param.name == "item") {
+            f.choices = Some(items.iter().map(|(n, _)| n.clone()).collect());
+        }
+        self.excel = items;
+        self.with_value("item", &first)
     }
 
     /// The params as JSON, or the first field's problem.
@@ -179,6 +207,11 @@ impl Form {
                 _ => Value::String(text.into()),
             };
             m.insert(p.name.into(), v);
+        }
+        if let Some(Value::String(item)) = m.get("item")
+            && let Some((_, kind)) = self.excel.iter().find(|(n, _)| n == item)
+        {
+            m.insert("itemKind".into(), Value::String((*kind).into()));
         }
         let v = Value::Object(m);
         opendash_engine::param::validate(self.command.params, &v)?;
@@ -253,6 +286,7 @@ impl Form {
 fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page: Option<&str>) {
     let p = f.param;
     let names: Option<Vec<String>> = match p.kind {
+        _ if f.choices.is_some() => f.choices.clone(),
         Kind::Choice(words) => Some(words.iter().map(|w| (*w).to_string()).collect()),
         Kind::Table => Some(doc.model.tables.iter().map(|t| t.name.clone()).collect()),
         Kind::Query => Some(doc.queries.iter().map(|q| q.name.clone()).collect()),
@@ -309,6 +343,23 @@ mod tests {
 
     fn command(id: &str) -> &'static Command {
         COMMANDS.iter().find(|c| c.id == id).unwrap_or(&COMMANDS[0])
+    }
+
+    #[test]
+    fn picking_a_workbook_table_sets_item_kind() {
+        let items = vec![
+            ("Sheet1".to_string(), "sheet"),
+            ("Sales".to_string(), "table"),
+        ];
+        let form = Form::new(command("home.getData"))
+            .with_value("kind", "xlsx")
+            .with_value("path", "/b.xlsx")
+            .with_excel_items(items);
+        let v = form.params().unwrap_or_default();
+        assert_eq!(v["item"], "Sheet1");
+        assert_eq!(v["itemKind"], "sheet");
+        let form = form.with_value("item", "Sales");
+        assert_eq!(form.params().unwrap_or_default()["itemKind"], "table");
     }
 
     #[test]

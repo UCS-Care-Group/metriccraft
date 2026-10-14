@@ -289,3 +289,40 @@ fn a_running_load_shows_rows_read_and_cancels() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn get_data_picks_a_file_then_shows_its_source_form() {
+    let dir = std::env::temp_dir().join(format!("odash-getdata-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Sales.csv");
+    std::fs::write(&path, "Region,Qty\nNorth,3\n").unwrap();
+    let picked = path.clone();
+    let shell = Shell::new(
+        Engine::new(App::new(), || {}),
+        Prefs::default(),
+        (None, Vec::new()),
+    )
+    .with_file_dialogs(Box::new(move |_| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Some(picked.clone())).unwrap();
+        rx
+    }));
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_ui_state(
+            |ui, shell: &mut Shell| {
+                shell.logic(ui.ctx());
+                shell.ui(ui);
+            },
+            shell,
+        );
+    h.run();
+    h.get_by_label("Get Data").click();
+    h.run();
+    // The form opens with the file and its kind filled in.
+    h.get_by_label("Run").click();
+    h.run();
+    wait(&mut h, |s| s.snapshot().doc.tables.len() == 1);
+    assert_eq!(h.state().snapshot().doc.tables[0].name(), "Sales");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

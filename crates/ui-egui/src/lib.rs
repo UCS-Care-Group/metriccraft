@@ -75,6 +75,8 @@ pub enum FileAsk {
     Open,
     /// Pick where to save; a name ending `.odash` saves a Package, any other a Project folder.
     SaveAs { name: String },
+    /// Pick a CSV, Excel or Parquet file to get data from.
+    Data,
 }
 
 /// Shows a dialog and answers through the receiver: the path, or `None` if cancelled.
@@ -123,7 +125,14 @@ pub struct Shell {
     file_hook: Option<FileHook>,
     /// A dialog shown for this command; its path becomes the command's `path`.
     picking: Option<(&'static Command, std::sync::mpsc::Receiver<Option<PathBuf>>)>,
+    /// A workbook's sheets and tables being listed for Get Data: its path and the answer.
+    listing: Option<(
+        String,
+        std::sync::mpsc::Receiver<Result<ExcelItems, String>>,
+    )>,
 }
+
+type ExcelItems = Vec<(String, &'static str)>;
 
 impl Shell {
     /// A window over `engine`, offering the recovery copies `recovery` (from
@@ -169,10 +178,48 @@ impl Shell {
             last_autosave: 0.0,
             file_hook: None,
             picking: None,
+            listing: None,
         }
     }
 
-    /// Native file dialogs for Open and Save as; without them those commands use their forms.
+    /// Get Data's form for the file at `path`: its kind from the extension; a workbook's sheets
+    /// and tables are listed first (off the window's thread, where there are threads).
+    fn get_data_form(&mut self, c: &'static Command, path: String) {
+        let ext = std::path::Path::new(&path)
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let kind = match ext.as_str() {
+            "csv" | "txt" | "tsv" => "csv",
+            "xlsx" => "xlsx",
+            "parquet" => "parquet",
+            _ => "",
+        };
+        if kind != "xlsx" {
+            let form = Form::new(c).with_value("path", &path);
+            self.form = Some(if kind.is_empty() {
+                form
+            } else {
+                form.with_value("kind", kind)
+            });
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let list = {
+            let path = path.clone();
+            move || {
+                let items = opendash_engine::excel_items(&path).map_err(|e| e.to_string());
+                let _ = tx.send(items);
+            }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::spawn(list);
+        #[cfg(target_arch = "wasm32")]
+        list();
+        self.listing = Some((path, rx));
+    }
+
+    /// Native file dialogs for Open, Save as and Get Data; without them those commands use their forms.
     pub fn with_file_dialogs(mut self, hook: FileHook) -> Self {
         self.file_hook = Some(hook);
         self
@@ -182,6 +229,7 @@ impl Shell {
     fn ask_path(&mut self, c: &'static Command) -> bool {
         let ask = match c.id {
             "file.open" => FileAsk::Open,
+            "home.getData" => FileAsk::Data,
             "file.saveAs" => {
                 let name = match &self.snap.location {
                     Some(
@@ -364,12 +412,38 @@ impl Shell {
                 }
             }
         }
+        if let Some((path, rx)) = &self.listing
+            && let Ok(answer) = rx.try_recv()
+        {
+            let path = path.clone();
+            self.listing = None;
+            match (
+                answer,
+                self.commands.iter().find(|c| c.id == "home.getData"),
+            ) {
+                (Ok(items), Some(c)) => {
+                    let form = Form::new(c)
+                        .with_value("kind", "xlsx")
+                        .with_value("path", &path);
+                    self.form = Some(form.with_excel_items(items));
+                }
+                (Err(error), _) => self.toasts.push(Toast {
+                    text: error,
+                    error: true,
+                }),
+                (Ok(_), None) => {}
+            }
+        }
         if let Some((c, rx)) = &self.picking {
             match rx.try_recv() {
                 Ok(Some(path)) => {
-                    let (id, path) = (c.id, path.display().to_string());
+                    let (c, path) = (*c, path.display().to_string());
                     self.picking = None;
-                    self.engine.run(id, json!({"path": path}));
+                    if c.id == "home.getData" {
+                        self.get_data_form(c, path);
+                    } else {
+                        self.engine.run(c.id, json!({"path": path}));
+                    }
                 }
                 Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.picking = None;
