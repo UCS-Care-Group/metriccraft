@@ -13,6 +13,9 @@
 //! [`Evaluator::charge`] to count an intermediate table against the memory cap. Errors take the
 //! span of the argument (or `call.span`) that failed.
 
+#[path = "format_fn.rs"]
+mod format_fn;
+
 use std::rc::Rc;
 
 use opendash_core::Value;
@@ -75,6 +78,7 @@ pub fn lookup(lower: &str) -> Option<Function> {
         "false" => false_,
         "row" => row,
         "countrows" => countrows,
+        "format" => format_fn::format,
         _ => return None,
     })
 }

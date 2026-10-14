@@ -9,4 +9,5 @@
 0002-division-by-zero/NegLtMillion
 0002-division-by-zero/AsText
 0002-division-by-zero/NegAsText
+0002-division-by-zero/Formatted
 0002-division-by-zero/ZeroZeroText
