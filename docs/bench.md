@@ -21,6 +21,32 @@ buffers (`/table`). `engine/idle/steady` is a new App's RSS (the floor under N-8
 Generated files are cached by size; delete `target/bench-data/` after changing the generator
 (or bump `dataset::VERSION`).
 
+## DAX benches (M3.10; spec N-3)
+
+`crates/engine/benches/dax.rs` loads each `import/parquet_<n>` file once (Get Data, as above),
+then times DAX query evaluation only (parse + evaluate, not the load or building the
+evaluator's `Database`), median of 5, on the reference dataset's columns:
+
+| Case                       | Query                                                                                                                      |
+|----------------------------|----------------------------------------------------------------------------------------------------------------------------|
+| `dax/sum_<n>`              | `ROW("v", SUM(T[SalesAmount]))`: a full decimal-column scan                                                                |
+| `dax/calculate_filter_<n>` | `ROW("v", CALCULATE(SUM(T[SalesAmount]), T[Channel] = "Store"))`: a text-column filter (4 values, ~30% match) then the sum |
+| `dax/distinctcount_<n>`    | `ROW("v", DISTINCTCOUNT(T[CustomerID]))`: 100,000 distinct whole numbers                                                   |
+
+`<n>` is `1m` (`cargo xtask bench`) and `10m` (`cargo xtask bench --reference`). Budget (N-3):
+a slicer change refreshes every visual on the page in < 100 ms on 10M rows, so one visual's
+measure must be well under that.
+
+First run (2026-10-14, busy host, load average 8–14; ranges over three 1M and two 10M runs):
+
+| Case                       | 1M          | 10M         |
+|----------------------------|-------------|-------------|
+| `dax/sum`                  | 2.7–11 ms   | 27–39 ms    |
+| `dax/calculate_filter`     | 106–435 ms  | 0.87–2.1 s  |
+| `dax/distinctcount`        | 42–416 ms   | 1.0–1.3 s   |
+
+`CALCULATE` and `DISTINCTCOUNT` are far over N-3 (risk row in `docs/plan/0001-mvp.md` §4).
+
 ## Reference dataset
 
 `cargo xtask dataset [--rows N] [--out DIR] [--csv]` writes `sales_10m.parquet` (and with
