@@ -4,6 +4,7 @@
 //! draw commands in logical pixels; renderers (egui in M5, [`png`] headless) consume it.
 
 pub mod draw;
+pub mod layout;
 #[cfg(feature = "png")]
 pub mod png;
 pub mod query;
