@@ -395,3 +395,32 @@ fn calculated_columns_are_recomputed_on_open_not_cached() {
     assert_eq!(other.document().model, app.document().model);
     assert_eq!(ints(&other, "Double"), [Some(6), Some(8), Some(10)]);
 }
+
+#[test]
+fn calculated_columns_use_measures_and_related() {
+    let mut app = app();
+    run(
+        &mut app,
+        "modeling.newRelationship",
+        json!({"fromTable": "Sales", "fromColumn": "Region", "toTable": "Regions", "toColumn": "Region"}),
+    );
+    run(
+        &mut app,
+        "modeling.newMeasure",
+        json!({"table": "Sales", "name": "Total", "expression": "SUM(Sales[Qty])"}),
+    );
+    // Context transition: each row's Measure sees only that row.
+    run(
+        &mut app,
+        "modeling.newColumn",
+        json!({"table": "Sales", "name": "RowTotal", "expression": "[Total] * 10"}),
+    );
+    run(
+        &mut app,
+        "modeling.newColumn",
+        json!({"table": "Sales", "name": "Rank", "expression": "RELATED(Regions[Rank])"}),
+    );
+    assert_eq!(ints(&app, "RowTotal"), [Some(30), Some(40), Some(50)]);
+    assert_eq!(ints(&app, "Rank"), [Some(1), Some(2), Some(1)]);
+    assert!(app.document().formula_errors.is_empty());
+}
