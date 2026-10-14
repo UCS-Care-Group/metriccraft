@@ -647,3 +647,38 @@ fn random_clicks_and_selections_never_panic() {
         }
     }
 }
+
+/// The whole test Page composed (M4.7 / spec C-2's page render), after a bar click: the slicer,
+/// card and table filtered to Ink, the bar dimmed except Ink.
+#[test]
+fn page_snapshot_after_a_bar_click() {
+    let (mut app, ids) = setup();
+    let grid = [
+        (&ids.slicer, 0, 0),
+        (&ids.card, 400, 0),
+        (&ids.bar, 0, 320),
+        (&ids.table, 400, 320),
+    ];
+    for (v, x, y) in grid {
+        run(
+            &mut app,
+            "visual.move",
+            json!({"page": ids.page, "visual": v, "x": x, "y": y}),
+        );
+    }
+    draw(&mut app, &ids.page);
+    click_bar(&mut app, &ids, "Ink", false);
+    let scenes = draw(&mut app, &ids.page);
+    let page = app.document().report.page(&ids.page).unwrap();
+    let parts: Vec<(f32, f32, &Scene)> = page
+        .draw_order()
+        .into_iter()
+        .filter_map(|v| {
+            let s = scenes.iter().find(|(id, _)| *id == v.id)?;
+            Some((v.x as f32, v.y as f32, &s.1))
+        })
+        .collect();
+    let composed = Scene::compose(820.0, 640.0, &parts);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots");
+    opendash_visuals::snapshot::check(&dir, "page_bar_click", &composed).unwrap();
+}

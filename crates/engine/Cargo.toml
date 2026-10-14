@@ -21,6 +21,8 @@ arrow-schema.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# Snapshot PNGs for eyeballing (`cargo xtask snapshot`).
+opendash-visuals = { path = "../visuals" }
 arrow-array.workspace = true
 arrow-cast.workspace = true
 

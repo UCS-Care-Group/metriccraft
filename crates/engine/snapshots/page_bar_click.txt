@@ -1,0 +1,57 @@
+scene 820 640
+clip 0 0 400 300
+rect 0 0 400 300 fill #ffffff
+text 8 19.21 14 Bold #1f2430 Start "Region"
+clip 0 26 400 274
+rect 0 26 400 19 #0:0
+rect 8 29.5 12 12 fill #ffffff stroke #5c6370 1 #0:0
+text 26 38.81 11 Regular #1f2430 Start "North" #0:0
+rect 0 45 400 19 #0:1
+rect 8 48.5 12 12 fill #ffffff stroke #5c6370 1 #0:1
+text 26 57.81 11 Regular #1f2430 Start "South" #0:1
+unclip
+unclip
+clip 400 0 400 300
+rect 400 0 400 300 fill #ffffff
+rect 590.77 124 18.45 36 #0:0
+text 600 152.82 36 Regular #1f2430 Middle "9"
+text 600 173.61 12 Regular #5c6370 Middle "Total"
+unclip
+clip 0 320 400 300
+rect 0 320 400 300 fill #ffffff
+text 8 339.21 14 Bold #1f2430 Start "Total by Product"
+text 30.48 609.81 11 Regular #5c6370 Middle "0"
+line 100.76 346 100.76 598 #e3e6eb 1
+text 100.76 609.81 11 Regular #5c6370 Middle "2"
+line 171.05 346 171.05 598 #e3e6eb 1
+text 171.05 609.81 11 Regular #5c6370 Middle "4"
+line 241.33 346 241.33 598 #e3e6eb 1
+text 241.33 609.81 11 Regular #5c6370 Middle "6"
+line 311.62 346 311.62 598 #e3e6eb 1
+text 311.62 609.81 11 Regular #5c6370 Middle "8"
+line 381.9 346 381.9 598 #e3e6eb 1
+text 381.9 609.81 11 Regular #5c6370 Middle "10"
+text 24.48 412.31 11 Regular #5c6370 End "Ink"
+text 24.48 538.31 11 Regular #5c6370 End "Pen"
+rect 30.48 358.6 316.28 100.8 fill #3a6ea5 #0:0
+rect 30.48 484.6 175.71 100.8 fill #3a6ea559 #0:1
+line 30.48 346 30.48 598 #9aa1ab 1
+unclip
+clip 400 320 400 300
+rect 400 320 400 300 fill #ffffff
+text 408 339.21 14 Bold #1f2430 Start "Region and Product"
+clip 408 346 384 266
+text 414 359.61 12 Bold #1f2430 Start "Region"
+text 459.63 359.61 12 Bold #1f2430 Start "Product"
+line 408 366 504.07 366 #9aa1ab 1
+rect 408 366 45.63 20 #0:0
+text 414 379.61 12 Regular #1f2430 Start "North"
+rect 453.63 366 50.44 20 #1:0
+text 459.63 379.61 12 Regular #1f2430 Start "Ink"
+line 408 386 504.07 386 #e3e6eb 1
+rect 408 386 45.63 20 #0:1
+text 414 399.61 12 Regular #1f2430 Start "South"
+rect 453.63 386 50.44 20 #1:1
+text 459.63 399.61 12 Regular #1f2430 Start "Ink"
+unclip
+unclip

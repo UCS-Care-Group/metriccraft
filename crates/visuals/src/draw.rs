@@ -209,6 +209,106 @@ impl Scene {
     }
 }
 
+impl Scene {
+    /// A Page: each Visual's Scene placed at its (x, y) and clipped to its own size, in order
+    /// (later on top). Tags keep their values; hit-test a Visual's own Scene, not the Page.
+    pub fn compose(width: f32, height: f32, parts: &[(f32, f32, &Scene)]) -> Scene {
+        let mut page = Scene::new(width, height);
+        for (dx, dy, s) in parts {
+            let (dx, dy) = (*dx, *dy);
+            page.push(Cmd::PushClip {
+                x: dx,
+                y: dy,
+                w: s.width,
+                h: s.height,
+            });
+            for c in &s.cmds {
+                page.push(match c.clone() {
+                    Cmd::Rect {
+                        x,
+                        y,
+                        w,
+                        h,
+                        fill,
+                        stroke,
+                        tag,
+                    } => Cmd::Rect {
+                        x: x + dx,
+                        y: y + dy,
+                        w,
+                        h,
+                        fill,
+                        stroke,
+                        tag,
+                    },
+                    Cmd::Line {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        color,
+                        width,
+                    } => Cmd::Line {
+                        x1: x1 + dx,
+                        y1: y1 + dy,
+                        x2: x2 + dx,
+                        y2: y2 + dy,
+                        color,
+                        width,
+                    },
+                    Cmd::Path {
+                        points,
+                        color,
+                        width,
+                        tag,
+                    } => Cmd::Path {
+                        points: points.iter().map(|(x, y)| (x + dx, y + dy)).collect(),
+                        color,
+                        width,
+                        tag,
+                    },
+                    Cmd::Text {
+                        x,
+                        y,
+                        text,
+                        size,
+                        weight,
+                        color,
+                        align,
+                        tag,
+                    } => Cmd::Text {
+                        x: x + dx,
+                        y: y + dy,
+                        text,
+                        size,
+                        weight,
+                        color,
+                        align,
+                        tag,
+                    },
+                    Cmd::PushClip { x, y, w, h } => Cmd::PushClip {
+                        x: x + dx,
+                        y: y + dy,
+                        w,
+                        h,
+                    },
+                    Cmd::PopClip => Cmd::PopClip,
+                });
+            }
+            // Close any clips the part left open, then its own.
+            let opened = s.cmds.iter().fold(0i64, |n, c| match c {
+                Cmd::PushClip { .. } => n + 1,
+                Cmd::PopClip => (n - 1).max(0),
+                _ => n,
+            });
+            for _ in 0..=opened {
+                page.push(Cmd::PopClip);
+            }
+        }
+        page
+    }
+}
+
 fn tag_text(out: &mut String, tag: Option<Tag>) {
     if let Some(t) = tag {
         let _ = write!(out, " #{}:{}", t.series, t.point);
@@ -236,6 +336,30 @@ fn col(c: Color) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compose_offsets_and_clips_each_part() {
+        let mut a = Scene::new(10.0, 10.0);
+        a.push(Cmd::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 5.0,
+            h: 5.0,
+        });
+        a.push(Cmd::Line {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            color: Color::hex(0),
+            width: 1.0,
+        });
+        let page = Scene::compose(100.0, 50.0, &[(20.0, 30.0, &a)]);
+        assert_eq!(
+            page.to_text(),
+            "scene 100 50\nclip 20 30 10 10\nclip 20 30 5 5\nline 20 30 21 31 #000000 1\nunclip\nunclip\n"
+        );
+    }
 
     #[test]
     fn text_form_is_stable() {
