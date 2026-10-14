@@ -145,6 +145,21 @@ fn sum_scan(s: &Scan<'_>, call: &Call<'_>, cancel: storage::Cancel<'_>) -> Resul
         return Err(wrong_kind(call, s, "numbers or dates"));
     }
     let (mut int, mut float, mut any) = (0i64, 0f64, false);
+    if matches!(kind, Kind::Decimal | Kind::DateTime) {
+        // Floats only: a loop without the overflow checks (the same additions, in order).
+        storage::each_number(s.col, s.rows, s.mask.as_ref(), cancel, |n| {
+            if let Number::Float(f) = n {
+                any = true;
+                float += f;
+            }
+            Ok(())
+        })?;
+        return Ok(match (any, kind) {
+            (false, _) => Value::Blank,
+            (true, Kind::DateTime) => Value::DateTime(float),
+            (true, _) => Value::Decimal(float),
+        });
+    }
     storage::each_number(s.col, s.rows, s.mask.as_ref(), cancel, |n| {
         any = true;
         match n {

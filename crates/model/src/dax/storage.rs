@@ -5,8 +5,15 @@
 //! Columns are read in their loaded encoding (ADR 0005): dictionary text by code (filters on
 //! text are code bitsets, a Relationship key match is decided once per dictionary entry), narrow
 //! integers and fixed decimals widened per value.
+//!
+//! Fast paths (M3.11), each tested against the per-row path: a text filter's row mask is built
+//! a 64-row word at a time from the integer codes ([`code_mask`]); a column's distinct values
+//! are its distinct codes, read once each ([`distinct_values`]); `DISTINCTCOUNT` of whole
+//! numbers is a range bitmap (or an integer hash set when the range is sparse); scans under a
+//! mask walk its set bits word by word.
 
 use std::collections::HashSet;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use arrow_array::cast::AsArray;
@@ -58,6 +65,24 @@ impl Bitset {
             *last = (1u64 << (len % 64)) - 1;
         }
         Self { words, len }
+    }
+
+    /// `len` bits from `words` (bit `i` is bit `i % 64` of word `i / 64`): missing words are
+    /// off, extra words and bits past `len` dropped.
+    pub fn from_words(mut words: Vec<u64>, len: usize) -> Self {
+        let n = len.div_ceil(64);
+        words.resize(n, 0);
+        if !len.is_multiple_of(64)
+            && let Some(last) = words.last_mut()
+        {
+            *last &= (1u64 << (len % 64)) - 1;
+        }
+        Self { words, len }
+    }
+
+    /// The bits as 64-bit words (bit `i` is bit `i % 64` of word `i / 64`).
+    pub fn words(&self) -> &[u64] {
+        &self.words
     }
 
     pub fn len(&self) -> usize {
@@ -149,8 +174,20 @@ pub fn scan(
                 }
             }
             Some(m) => {
-                for r in m.ones_in(start, end) {
-                    f(r)?;
+                // `start` is a multiple of 64 (CHUNK is), so chunks are whole words.
+                let first = start / 64;
+                let words = m.words().get(first..end.div_ceil(64)).unwrap_or(&[]);
+                for (k, &word) in words.iter().enumerate() {
+                    let base = (first + k) * 64;
+                    let mut w = word;
+                    while w != 0 {
+                        let r = base + w.trailing_zeros() as usize;
+                        if r >= end {
+                            break;
+                        }
+                        w &= w - 1;
+                        f(r)?;
+                    }
                 }
             }
         }
@@ -475,16 +512,12 @@ impl Filter {
                     return Ok(out);
                 };
                 match allowed {
-                    Allowed::Codes { codes, blank } => scan(t.rows, None, cancel, |r| {
-                        let keep = match col.code(r) {
-                            Some(c) => codes.get(c),
-                            None => *blank,
-                        };
-                        if keep {
-                            out.set(r);
-                        }
-                        Ok(())
-                    })?,
+                    Allowed::Codes { codes, blank } => {
+                        return code_mask(col, t.rows, codes, *blank, cancel);
+                    }
+                    Allowed::Values { keys, blank } if col.kind() == Kind::Integer => {
+                        return int_mask(col, t.rows, keys, *blank, cancel);
+                    }
                     Allowed::Values { keys, blank } => scan(t.rows, None, cancel, |r| {
                         let keep = match Key::of(&col.value(r), false) {
                             Some(k) => keys.contains(&k),
@@ -508,8 +541,8 @@ pub fn key_set(t: &DbTable, col: &Col, mask: &Bitset, cancel: Cancel<'_>) -> Res
     match col.dictionary() {
         Some(dict) => {
             let mut seen = Bitset::new(dict.len(), false);
-            scan(t.rows, Some(mask), cancel, |r| {
-                if let Some(c) = col.code(r) {
+            each_code(col, t.rows, Some(mask), cancel, |_, c| {
+                if let Some(c) = c {
                     seen.set(c);
                 }
                 Ok(())
@@ -544,12 +577,7 @@ pub fn semijoin(t: &DbTable, col: &Col, keys: &HashSet<Key>, cancel: Cancel<'_>)
                     hit.set(i);
                 }
             }
-            scan(t.rows, None, cancel, |r| {
-                if col.code(r).is_some_and(|c| hit.get(c)) {
-                    out.set(r);
-                }
-                Ok(())
-            })?;
+            return code_mask(col, t.rows, &hit, false, cancel);
         }
         None => scan(t.rows, None, cancel, |r| {
             if Key::of(&col.value(r), true).is_some_and(|k| keys.contains(&k)) {
@@ -645,8 +673,23 @@ fn each_native<T: ArrowPrimitiveType>(
     f: &mut impl FnMut(Number) -> Result<()>,
 ) -> Result<()> {
     let values = a.values();
-    let nulls = a.nulls();
-    scan(rows.min(a.len()), mask, cancel, |r| {
+    let nulls = a.nulls().filter(|n| n.null_count() > 0);
+    let n = rows.min(values.len());
+    if mask.is_none() && nulls.is_none() {
+        // Every row: the values a chunk at a time.
+        cancel.check()?;
+        let mut start = 0;
+        while start < n {
+            cancel.check()?;
+            let end = start.saturating_add(CHUNK).min(n);
+            for &v in values.get(start..end).unwrap_or(&[]) {
+                f(map(v))?;
+            }
+            start = end;
+        }
+        return Ok(());
+    }
+    scan(n, mask, cancel, |r| {
         if nulls.is_some_and(|n| n.is_null(r)) {
             return Ok(());
         }
@@ -668,7 +711,7 @@ pub fn each_number(
     mut f: impl FnMut(Number) -> Result<()>,
 ) -> Result<()> {
     let f = &mut f;
-    let scaled = |raw: i64, scale: i8| raw as f64 / 10f64.powi(i32::from(scale));
+    let divisor = |scale: i8| 10f64.powi(i32::from(scale));
     match col {
         Col::I8(a) => each_native(a, rows, mask, cancel, |v| Number::Int(v.into()), f),
         Col::I16(a) => each_native(a, rows, mask, cancel, |v| Number::Int(v.into()), f),
@@ -679,19 +722,19 @@ pub fn each_number(
         Col::D32(a, 4) => each_native(a, rows, mask, cancel, |v| Number::Currency(v.into()), f),
         Col::D64(a, 4) => each_native(a, rows, mask, cancel, Number::Currency, f),
         Col::D32(a, s) => {
-            let s = *s;
+            let d = divisor(*s);
             each_native(
                 a,
                 rows,
                 mask,
                 cancel,
-                |v| Number::Float(scaled(v.into(), s)),
+                |v| Number::Float(f64::from(v) / d),
                 f,
             )
         }
         Col::D64(a, s) => {
-            let s = *s;
-            each_native(a, rows, mask, cancel, |v| Number::Float(scaled(v, s)), f)
+            let d = divisor(*s);
+            each_native(a, rows, mask, cancel, |v| Number::Float(v as f64 / d), f)
         }
         Col::Date(a) => each_native(
             a,
@@ -730,8 +773,8 @@ pub fn count_values(
     let rows = rows.min(array.len());
     let mut n = 0usize;
     match col {
-        Col::Dict { .. } => scan(rows, mask, cancel, |r| {
-            if col.code(r).is_some() {
+        Col::Dict { .. } => each_code(col, rows, mask, cancel, |_, c| {
+            if c.is_some() {
                 n += 1;
             }
             Ok(())
@@ -765,8 +808,8 @@ pub fn distinct_count(
     let n = match col {
         Col::Dict { values, .. } => {
             let mut seen = Bitset::new(values.len(), false);
-            scan(rows, mask, cancel, |r| {
-                match col.code(r) {
+            each_code(col, rows, mask, cancel, |_, c| {
+                match c {
                     Some(c) => seen.set(c),
                     None => blank = true,
                 }
@@ -778,6 +821,12 @@ pub fn distinct_count(
                 .collect();
             distinct.len()
         }
+        Col::I8(a) => int_distinct(a, rows, mask, cancel, &mut blank)?,
+        Col::I16(a) => int_distinct(a, rows, mask, cancel, &mut blank)?,
+        Col::I32(a) => int_distinct(a, rows, mask, cancel, &mut blank)?,
+        Col::I64(a) => int_distinct(a, rows, mask, cancel, &mut blank)?,
+        // Dates are whole days: distinct days are distinct values.
+        Col::Date(a) => int_distinct(a, rows, mask, cancel, &mut blank)?,
         _ => {
             let mut keys = HashSet::new();
             scan(rows, mask, cancel, |r| {
@@ -813,8 +862,8 @@ pub fn text_extreme(
     match col {
         Col::Dict { values, .. } => {
             let mut seen = Bitset::new(values.len(), false);
-            scan(rows, mask, cancel, |r| {
-                if let Some(c) = col.code(r) {
+            each_code(col, rows, mask, cancel, |_, c| {
+                if let Some(c) = c {
                     seen.set(c);
                 }
                 Ok(())
@@ -844,3 +893,451 @@ pub fn text_extreme(
         _ => cancel.check().map(|()| None),
     }
 }
+
+/// Calls `f(row, code)` for every row of `0..rows` in `mask`, in order, with the row's
+/// dictionary code: `None` for BLANK (a null, a code out of range or naming a null entry, a row
+/// past the column). A column without a dictionary visits nothing.
+pub fn each_code(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+    mut f: impl FnMut(usize, Option<usize>) -> Result<()>,
+) -> Result<()> {
+    let Col::Dict { codes, values } = col else {
+        return cancel.check();
+    };
+    let f = &mut f;
+    match codes {
+        Codes::I8(a) => each_code_native(a, values, rows, mask, cancel, f),
+        Codes::I16(a) => each_code_native(a, values, rows, mask, cancel, f),
+        Codes::I32(a) => each_code_native(a, values, rows, mask, cancel, f),
+    }
+}
+
+fn each_code_native<T: ArrowPrimitiveType>(
+    a: &PrimitiveArray<T>,
+    dict: &StringArray,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+    f: &mut impl FnMut(usize, Option<usize>) -> Result<()>,
+) -> Result<()>
+where
+    T::Native: Into<i64>,
+{
+    let keys = a.values();
+    let nulls = a.nulls().filter(|n| n.null_count() > 0);
+    let dict_nulls = dict.nulls().filter(|n| n.null_count() > 0);
+    let len = dict.len();
+    scan(rows, mask, cancel, |r| {
+        if nulls.is_some_and(|n| r >= n.len() || n.is_null(r)) {
+            return f(r, None);
+        }
+        let code = keys
+            .get(r)
+            .and_then(|&k| usize::try_from(k.into()).ok())
+            .filter(|&c| c < len && dict_nulls.is_none_or(|n| n.is_valid(c)));
+        f(r, code)
+    })
+}
+
+/// The distinct dictionary codes of `col` over the rows of `0..rows` in `mask`, in first-seen
+/// order, `None` standing for BLANK (see [`each_code`]). Without a mask, the scan stops once
+/// every code has been seen and BLANK has been seen or can't occur.
+fn first_codes(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+) -> Result<Vec<Option<usize>>> {
+    let mut order = Vec::new();
+    let Col::Dict { codes, values } = col else {
+        return cancel.check().map(|()| order);
+    };
+    if mask.is_none() {
+        return match codes {
+            Codes::I8(a) => first_codes_native(a, values, rows, cancel),
+            Codes::I16(a) => first_codes_native(a, values, rows, cancel),
+            Codes::I32(a) => first_codes_native(a, values, rows, cancel),
+        };
+    }
+    let mut seen = Bitset::new(values.len(), false);
+    let mut blank = false;
+    each_code(col, rows, mask, cancel, |_, code| {
+        match code {
+            Some(c) if !seen.get(c) => {
+                seen.set(c);
+                order.push(Some(c));
+            }
+            None if !blank => {
+                blank = true;
+                order.push(None);
+            }
+            _ => {}
+        }
+        Ok(())
+    })?;
+    Ok(order)
+}
+
+fn first_codes_native<T: ArrowPrimitiveType>(
+    a: &PrimitiveArray<T>,
+    dict: &StringArray,
+    rows: usize,
+    cancel: Cancel<'_>,
+) -> Result<Vec<Option<usize>>>
+where
+    T::Native: Into<i64>,
+{
+    let keys = a.values();
+    let n = rows.min(keys.len());
+    let len = dict.len();
+    let nulls = a.nulls().filter(|b| b.null_count() > 0);
+    // Per code: 0 unseen, 1 seen, 2 BLANK (a null entry).
+    let mut state: Vec<u8> = (0..len).map(|c| u8::from(dict.is_null(c)) * 2).collect();
+    let mut left = state.iter().filter(|&&s| s == 0).count();
+    let mut order = Vec::new();
+    let mut blank = false;
+    // BLANK can occur only through null keys, null entries, out-of-range codes or a short
+    // column; the last is checked when the scan stops early.
+    let blank_possible = nulls.is_some() || left < len || n < rows;
+    let mut stopped = None;
+    cancel.check()?;
+    let mut start = 0;
+    'scan: while start < n {
+        cancel.check()?;
+        let end = start.saturating_add(CHUNK).min(n);
+        for (i, &k) in keys.get(start..end).unwrap_or(&[]).iter().enumerate() {
+            let r = start + i;
+            let null = nulls.is_some_and(|b| b.is_null(r));
+            let slot = if null {
+                None
+            } else {
+                usize::try_from(k.into())
+                    .ok()
+                    .and_then(|c| Some((c, state.get_mut(c)?)))
+            };
+            match slot {
+                Some((_, 1)) => {}
+                Some((c, s @ 0)) => {
+                    *s = 1;
+                    order.push(Some(c));
+                    left -= 1;
+                }
+                _ => {
+                    if !blank {
+                        blank = true;
+                        order.push(None);
+                    }
+                }
+            }
+            if left == 0 && (blank || !blank_possible) {
+                stopped = Some(r + 1);
+                break 'scan;
+            }
+        }
+        start = end;
+    }
+    if let Some(from) = stopped
+        && !blank
+    {
+        // Every code is seen; BLANK only if a later code is out of range.
+        let rest = keys.get(from..n).unwrap_or(&[]);
+        let out_of_range = rest
+            .iter()
+            .any(|&k| usize::try_from(k.into()).map_or(true, |c| c >= len));
+        if out_of_range {
+            order.push(None);
+        }
+    } else if n < rows && !blank {
+        order.push(None);
+    }
+    Ok(order)
+}
+
+/// The rows of `0..rows` whose dictionary code is in `allowed` (BLANK rows, see [`each_code`]:
+/// when `blank`): a scan building the mask a word at a time from the integer codes. A column
+/// without a dictionary is all BLANK.
+pub fn code_mask(
+    col: &Col,
+    rows: usize,
+    allowed: &Bitset,
+    blank: bool,
+    cancel: Cancel<'_>,
+) -> Result<Bitset> {
+    let Col::Dict { codes, values } = col else {
+        cancel.check()?;
+        return Ok(Bitset::new(rows, blank));
+    };
+    // Per code: allowed, or (a null entry) BLANK.
+    let mut keep = Bitset::new(values.len(), false);
+    for c in 0..values.len() {
+        let on = if values.is_valid(c) {
+            allowed.get(c)
+        } else {
+            blank
+        };
+        if on {
+            keep.set(c);
+        }
+    }
+    match codes {
+        Codes::I8(a) => code_mask_native(a, rows, &keep, blank, cancel),
+        Codes::I16(a) => code_mask_native(a, rows, &keep, blank, cancel),
+        Codes::I32(a) => code_mask_native(a, rows, &keep, blank, cancel),
+    }
+}
+
+fn code_mask_native<T: ArrowPrimitiveType>(
+    a: &PrimitiveArray<T>,
+    rows: usize,
+    keep: &Bitset,
+    blank: bool,
+    cancel: Cancel<'_>,
+) -> Result<Bitset>
+where
+    T::Native: Into<i64>,
+{
+    let (len, kw) = (keep.len(), keep.words());
+    let lookup = |c: i64| match usize::try_from(c) {
+        Ok(c) if c < len => kw.get(c / 64).is_some_and(|w| (w >> (c % 64)) & 1 == 1),
+        _ => blank,
+    };
+    // Narrow codes (Int8, Int16) index a table of every possible code, offset to be positive.
+    let width = std::mem::size_of::<T::Native>();
+    let (lut, offset): (Vec<u64>, i64) = if width <= 2 {
+        let half = 1i64 << (8 * width - 1);
+        ((-half..half).map(|c| u64::from(lookup(c))).collect(), half)
+    } else {
+        (Vec::new(), 0)
+    };
+    let test = |k: T::Native| -> u64 {
+        let c: i64 = k.into();
+        if lut.is_empty() {
+            u64::from(lookup(c))
+        } else {
+            usize::try_from(c.wrapping_add(offset))
+                .ok()
+                .and_then(|i| lut.get(i))
+                .copied()
+                .unwrap_or(u64::from(blank))
+        }
+    };
+    mask_words(a, rows, blank, cancel, test)
+}
+
+/// The rows of `0..rows` for which `test` of the value is 1 (null rows and rows past the
+/// column: `blank`): a scan building the mask a 64-row word at a time.
+fn mask_words<T: ArrowPrimitiveType>(
+    a: &PrimitiveArray<T>,
+    rows: usize,
+    blank: bool,
+    cancel: Cancel<'_>,
+    test: impl Fn(T::Native) -> u64,
+) -> Result<Bitset> {
+    let keys = a.values();
+    let n = rows.min(keys.len());
+    // Validity as words aligned with the rows (a null row is BLANK).
+    let valid: Option<Vec<u64>> = a.nulls().filter(|b| b.null_count() > 0).map(|b| {
+        let chunks = b.inner().bit_chunks();
+        chunks
+            .iter()
+            .chain(std::iter::once(chunks.remainder_bits()))
+            .collect()
+    });
+    let blank_word = if blank { u64::MAX } else { 0 };
+    let mut words = Vec::with_capacity(rows.div_ceil(64));
+    cancel.check()?;
+    let mut start = 0;
+    while start < n {
+        cancel.check()?;
+        let end = start.saturating_add(CHUNK).min(n);
+        for block in keys.get(start..end).unwrap_or(&[]).chunks(64) {
+            let mut w = 0u64;
+            for (i, &k) in block.iter().enumerate() {
+                w |= test(k) << i;
+            }
+            if let Some(v) = &valid {
+                let v = v.get(words.len()).copied().unwrap_or(0);
+                w = (w & v) | (!v & blank_word);
+            }
+            words.push(w);
+        }
+        start = end;
+    }
+    let mut out = Bitset::from_words(words, rows);
+    if blank {
+        // Rows past the column are BLANK.
+        for r in n..rows {
+            out.set(r);
+        }
+    }
+    Ok(out)
+}
+
+/// The rows of `0..rows` of a whole-number column whose value is in `keys` (BLANK rows: when
+/// `blank`): the keys resolved to integers once, then a word-at-a-time scan of the values.
+fn int_mask(
+    col: &Col,
+    rows: usize,
+    keys: &HashSet<Key>,
+    blank: bool,
+    cancel: Cancel<'_>,
+) -> Result<Bitset> {
+    // Only `Key::Int`s can equal a whole number.
+    let mut ints: Vec<i64> = keys
+        .iter()
+        .filter_map(|k| match k {
+            Key::Int(i) => Some(*i),
+            _ => None,
+        })
+        .collect();
+    ints.sort_unstable();
+    let set: HashSet<i64, BuildHasherDefault<IntHasher>> = ints.iter().copied().collect();
+    let small = ints.len() <= 16;
+    let hit = |v: i64| -> u64 {
+        u64::from(if small {
+            ints.binary_search(&v).is_ok()
+        } else {
+            set.contains(&v)
+        })
+    };
+    match col {
+        Col::I8(a) => mask_words(a, rows, blank, cancel, |v| hit(v.into())),
+        Col::I16(a) => mask_words(a, rows, blank, cancel, |v| hit(v.into())),
+        Col::I32(a) => mask_words(a, rows, blank, cancel, |v| hit(v.into())),
+        Col::I64(a) => mask_words(a, rows, blank, cancel, hit),
+        _ => {
+            cancel.check()?;
+            Ok(Bitset::new(rows, blank))
+        }
+    }
+}
+
+/// A hasher for whole numbers (a SplitMix64 finaliser): `DISTINCTCOUNT` over a wide range.
+#[derive(Default)]
+struct IntHasher(u64);
+
+impl Hasher for IntHasher {
+    fn finish(&self) -> u64 {
+        let mut z = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = self.0.rotate_left(8) ^ u64::from(b);
+        }
+    }
+
+    fn write_i64(&mut self, i: i64) {
+        self.0 = self.0.rotate_left(32) ^ i as u64;
+    }
+}
+
+/// Most bits a `DISTINCTCOUNT` range bitmap may take per visible value (beyond a floor of
+/// 2^16): wider ranges hash instead.
+const RANGE_BITS_PER_VALUE: u64 = 16;
+
+/// The distinct non-null whole numbers of `a` over the rows of `0..rows` in `mask` (setting
+/// `blank` when a visible row is BLANK): a range bitmap when the values are dense enough
+/// (a min/max pass, then a set-bits pass), else a hash set.
+fn int_distinct<T: ArrowPrimitiveType>(
+    a: &PrimitiveArray<T>,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+    blank: &mut bool,
+) -> Result<usize>
+where
+    T::Native: Into<i64>,
+{
+    let values = a.values();
+    let n = rows.min(values.len());
+    if n < rows && mask.is_none_or(|m| m.ones_in(n, rows).next().is_some()) {
+        *blank = true;
+    }
+    let nulls = a.nulls().filter(|b| b.null_count() > 0);
+    let null = |r: usize| nulls.is_some_and(|b| r >= b.len() || b.is_null(r));
+    let (mut lo, mut hi, mut visible) = (i64::MAX, i64::MIN, 0u64);
+    scan(n, mask, cancel, |r| {
+        if null(r) {
+            *blank = true;
+        } else if let Some(&v) = values.get(r) {
+            let v: i64 = v.into();
+            lo = lo.min(v);
+            hi = hi.max(v);
+            visible += 1;
+        }
+        Ok(())
+    })?;
+    if visible == 0 {
+        return Ok(0);
+    }
+    let span = u64::try_from(i128::from(hi) - i128::from(lo) + 1).unwrap_or(u64::MAX);
+    let cap = visible
+        .saturating_mul(RANGE_BITS_PER_VALUE)
+        .clamp(1 << 16, 1 << 32);
+    if let Ok(bits) = usize::try_from(span)
+        && span <= cap
+    {
+        let mut seen = Bitset::new(bits, false);
+        scan(n, mask, cancel, |r| {
+            if !null(r)
+                && let Some(&v) = values.get(r)
+                && let Ok(i) = usize::try_from(v.into().wrapping_sub(lo) as u64)
+            {
+                seen.set(i);
+            }
+            Ok(())
+        })?;
+        return Ok(seen.count());
+    }
+    let mut seen: HashSet<i64, BuildHasherDefault<IntHasher>> = HashSet::default();
+    scan(n, mask, cancel, |r| {
+        if !null(r)
+            && let Some(&v) = values.get(r)
+        {
+            seen.insert(v.into());
+        }
+        Ok(())
+    })?;
+    Ok(seen.len())
+}
+
+/// The distinct values of `col` over the rows of `0..rows` in `mask`, in first-seen order
+/// (text ignoring case: the first spelling seen wins), BLANK among them: a scan. A dictionary
+/// column collects codes ([`first_codes`]), then reads each code's value once.
+pub fn distinct_values(
+    col: &Col,
+    rows: usize,
+    mask: Option<&Bitset>,
+    cancel: Cancel<'_>,
+) -> Result<Vec<Value>> {
+    let mut keys: HashSet<Option<Key>> = HashSet::new();
+    let mut out = Vec::new();
+    if let Some(dict) = col.dictionary() {
+        for code in first_codes(col, rows, mask, cancel)? {
+            let v = code.map_or(Value::Blank, |c| Value::text(dict.value(c)));
+            if keys.insert(Key::of(&v, false)) {
+                out.push(v);
+            }
+        }
+        return Ok(out);
+    }
+    scan(rows, mask, cancel, |r| {
+        let v = col.value(r);
+        if keys.insert(Key::of(&v, false)) {
+            out.push(v);
+        }
+        Ok(())
+    })?;
+    Ok(out)
+}
+
+#[cfg(test)]
+#[path = "storage_tests.rs"]
+mod tests;

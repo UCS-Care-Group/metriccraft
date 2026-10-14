@@ -45,7 +45,25 @@ First run (2026-10-14, busy host, load average 8–14; ranges over three 1M and 
 | `dax/calculate_filter`     | 106–435 ms  | 0.87–2.1 s  |
 | `dax/distinctcount`        | 42–416 ms   | 1.0–1.3 s   |
 
-`CALCULATE` and `DISTINCTCOUNT` are far over N-3 (risk row in `docs/plan/0001-mvp.md` §4).
+`CALCULATE` and `DISTINCTCOUNT` were far over N-3 (risk row in `docs/plan/0001-mvp.md` §4).
+
+After M3.11's fast paths (2026-10-14, load average 2–7; same file, two runs of each, ranges):
+
+| Case                       | 1M             | 10M            |
+|----------------------------|----------------|----------------|
+| `dax/sum`                  | 0.70–0.74 ms   | 6.6 ms         |
+| `dax/calculate_filter`     | 1.2–1.3 ms     | 12.3–12.7 ms   |
+| `dax/distinctcount`        | 1.2 ms         | 12.1–12.2 ms   |
+
+Measured on the same host just before the change (load average ~6): 2.6 / 106 / 42 ms at 1M,
+26 / 880 / 414 ms at 10M. Where the time went: the boolean filter's `FILTER(ALL(T[c]), …)`
+materialised a `Value` and a folded text key per row to find the column's distinct values
+(95% of `CALCULATE`); `DISTINCTCOUNT` hashed a `Key` per row; `SUM` of a decimal column paid
+for the integer overflow checks per value. Now: distinct values come from distinct dictionary
+codes (stopping once every code is seen), the filter's mask is built a 64-row word at a time
+from the integer codes, `DISTINCTCOUNT` of whole numbers or dates is a range bitmap (an integer
+hash set when the range is sparse), whole-number value filters compare integers, and a float
+`SUM` is a plain loop (the same additions in the same order).
 
 ## Reference dataset
 
