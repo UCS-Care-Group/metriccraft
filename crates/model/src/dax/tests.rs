@@ -667,10 +667,12 @@ fn every_form_hits_the_depth_cap_on_a_1_mib_stack() {
                 assert!(e.message.contains("nests"), "{form}: {e}");
                 // Operators, VARs, constructors and the M3.5 functions stay small enough per
                 // level to reach the depth cap itself; CALCULATE and the iterators (a deeper
-                // path per level) may stop at the stack budget first in debug builds.
-                if !["CALCULATE", "FILTER", "ROW("]
-                    .iter()
-                    .any(|f| form.contains(f))
+                // path per level) may stop at the stack budget first in debug builds, as may every
+                // form where debug frames are larger (macOS aarch64).
+                if !cfg!(target_os = "macos")
+                    && !["CALCULATE", "FILTER", "ROW("]
+                        .iter()
+                        .any(|f| form.contains(f))
                 {
                     assert!(e.message.contains("levels deep"), "{form}: {e}");
                 }

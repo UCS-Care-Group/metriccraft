@@ -772,7 +772,13 @@ mod tests {
                         chain(|inner| format!("{}{inner}{}", open.repeat(60), close.repeat(60)));
                     let e = run(&db, &format!("{q}EVALUATE ROW(\"x\", [m9])")).expect_err(open);
                     assert_eq!(e.kind, ErrorKind::Limit, "{open}: {e}");
-                    assert!(e.message.contains(&MAX_EVAL_DEPTH.to_string()), "{e}");
+                    // The depth cap, or the stack budget first where frames are larger (macOS
+                    // aarch64 debug builds): either way a Limit error, never a stack overflow.
+                    assert!(
+                        e.message.contains(&MAX_EVAL_DEPTH.to_string())
+                            || e.message.contains("of stack"),
+                        "{e}"
+                    );
                     // One Measure that deep is within the cap (it may still be a DAX error).
                     let r = run(&db, &format!("{q}EVALUATE ROW(\"x\", [m1])"));
                     assert!(

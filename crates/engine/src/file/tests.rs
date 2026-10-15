@@ -560,7 +560,13 @@ fn a_remapped_project_loads_its_sources_without_touching_tracked_files() {
     let files = metriccraft_file::unpack(&again.package_bytes().unwrap()).unwrap();
     assert!(files.keys().all(|k| !k.starts_with(".local")));
     let mcq = String::from_utf8(files["queries/Sales.mcq"].clone()).unwrap();
-    let path = dir.0.join("B/data/Sales.csv").display().to_string();
+    let path = dir
+        .0
+        .join("B")
+        .join("data")
+        .join("Sales.csv")
+        .display()
+        .to_string();
     assert!(mcq.contains(&path), "{mcq}");
 }
 
