@@ -24,6 +24,25 @@ editor, models relationships, evaluates DAX and draws six visual types. Scope:
 files, and supports only file data sources, a subset of DAX and M, and six visuals. There is no
 publishing or sharing (the Power BI Service half). Parity is measured only by the cases in this repo.
 
+## Try it
+
+There are no release builds yet; build from source. Install Rust with [rustup](https://rustup.rs)
+(the toolchain is pinned in `rust-toolchain.toml` and installs itself), then:
+
+```bash
+git clone https://github.com/UCS-Care-Group/metriccraft
+cd metriccraft
+cargo run --release -p metriccraft             # empty window: Home > Get Data to load a CSV, XLSX or Parquet file
+cargo run --release -p metriccraft -- PROJECT  # open a Project folder or .mcraft Package
+```
+
+On Linux the app needs a Wayland or X11 session. If OpenGL misbehaves, try the wgpu renderer:
+`cargo run --release -p metriccraft --no-default-features --features wgpu`.
+
+Found a bug or a DAX result that differs from Power BI? Please
+[open an issue](https://github.com/UCS-Care-Group/metriccraft/issues). See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) before sending code.
+
 ## Milestones
 
 | Milestone | Scope                                                              | State                                                                 |

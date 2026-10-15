@@ -48,4 +48,4 @@ Find the frontier — open, unassigned, no open blockers:
 one-line pointer to the map's *Decisions so far* section
 (`gh issue edit 1 --body-file <edited>`).
 
-Note: commands handed to Martin to paste are Bash — see the root `CLAUDE.md`.
+Note: commands handed to a maintainer to paste are Bash.
