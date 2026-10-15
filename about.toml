@@ -1,0 +1,30 @@
+# cargo-about: third-party licence texts in each release archive (`cargo xtask dist`, plan M6.1).
+# Only what ships: dev and build dependencies are left out. Where a crate offers a choice, the
+# first accepted licence in this list is the one we take.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "MPL-2.0",
+]
+ignore-dev-dependencies = true
+ignore-build-dependencies = true
+# Our own crates (publish = false) are covered by LICENSE-MIT, LICENSE-APACHE and NOTICE.
+private = { ignore = true }
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]

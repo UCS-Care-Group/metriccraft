@@ -1,0 +1,68 @@
+name: release
+
+# A `v*` tag (matching the workspace version) builds the archives and publishes a GitHub Release;
+# `-preview`/`-rc` tags are prereleases. Run by hand to build and size-check without publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GH_REPO: ${{ github.repository }}
+  GH_TOKEN: ${{ github.token }}
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  draft:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: |
+          pre=""; case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" --draft --verify-tag --title "MetricCraft ${TAG#v}" --generate-notes $pre
+
+  build:
+    name: dist (${{ matrix.os }})
+    needs: draft
+    # Runs on a hand dispatch too, where `draft` is skipped.
+    if: ${{ !cancelled() && !failure() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+          - os: windows
+            runner: windows-latest
+          - os: macos
+            runner: macos-latest
+            targets: --target aarch64-apple-darwin --target x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install
+      - if: matrix.os == 'macos'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: cargo install cargo-about --locked --version 0.9.2 --features cli
+      - run: cargo xtask dist ${{ matrix.targets }}
+      - if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          gh release upload "$TAG" target/dist/*.tar.gz target/dist/*.zip --clobber
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh release edit "$TAG" --draft=false

@@ -1,7 +1,7 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
 //! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
-//! `bench [--save] [--reference]`, `snapshot [--update]`, `ui-bench`,
+//! `bench [--save] [--reference]`, `snapshot [--update]`, `ui-bench`, `dist [--target T]…`,
 //! `parity [--update | --export]`; and
 //! `dataset [--rows N] [--out DIR] [--csv]` (the reference dataset, `docs/bench.md`).
 
@@ -10,6 +10,7 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 
 mod dataset;
+mod dist;
 mod memcap;
 
 type Result<T = ()> = std::result::Result<T, String>;
@@ -68,13 +69,14 @@ fn main() -> ExitCode {
         "bench" => bench(std::env::args().any(|a| a == "--save")),
         "snapshot" => snapshot(std::env::args().any(|a| a == "--update")),
         "ui-bench" => ui_bench(),
+        "dist" => dist::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "parity" if std::env::args().any(|a| a == "--export") => parity_export(),
         "parity" => parity(
             std::env::args().any(|a| a == "--update"),
             std::env::args().any(|a| a == "--pending"),
         ),
         _ => {
-            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|ui-bench|parity>".into())
+            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|ui-bench|dist|parity>".into())
         }
     };
     match result {
