@@ -227,10 +227,18 @@ fn ui_bench() -> Result {
     let status = child.wait();
     let _ = std::fs::remove_dir_all(&profile);
     let cold = cold.ok_or_else(|| format!("the app never showed a frame (exit: {status:?})"))?;
-    println!("  ui/cold_start: {cold} ms (budget {COLD_START_MS} ms)");
+    // Timing is gated only on a machine with a bench baseline (the reference machine), as in
+    // `bench`: hosted CI draws with software OpenGL. Memory is gated everywhere.
+    let machine = machine_id();
+    let timed = Path::new(&format!("bench/{machine}.json")).exists();
     let mut problems = Vec::new();
-    if cold >= COLD_START_MS {
-        problems.push(format!("cold start {cold} ms"));
+    if timed {
+        println!("  ui/cold_start: {cold} ms (budget {COLD_START_MS} ms)");
+        if cold >= COLD_START_MS {
+            problems.push(format!("cold start {cold} ms"));
+        }
+    } else {
+        println!("  ui/cold_start: {cold} ms (no {machine} baseline: not gated)");
     }
     match private {
         Some(bytes) => {

@@ -120,15 +120,17 @@ folds the whole dictionary per query. Baselines not re-recorded (host load > 2).
 `cargo xtask ui-bench` builds the release app, starts it on a fresh profile with
 `MCRAFT_UI_BENCH=1` and checks the N-8 budgets for a blank window:
 
-- **cold start**: spawn to the first frame on screen, under 1 s;
+- **cold start**: spawn to the first frame on screen, under 1 s. Gated only on a machine with a
+  `bench/<machine>.json` baseline (the reference machine), like the other timings; elsewhere
+  it is reported. Hosted CI draws with software OpenGL (Mesa llvmpipe), about 3 s;
 - **idle private memory**: the app's own resident pages (`RssAnon`) two seconds after the
   first frame, at most 100 MB. This is what Task Manager's *private working set* shows, the
   figure Power BI Desktop's ~451 MB idle was read as. Total RSS is printed too but not
   budgeted: about half of it is the graphics driver's shared libraries (on tardis2, NVIDIA's
   `libnvidia-gpucomp` and `libnvidia-eglcore` and LLVM, ~80 MB), which differ by machine.
 
-It needs a display: `xvfb-run` is used where there is none (`sudo pacman -S
-xorg-server-xvfb` on the workstation runner), and it is skipped where neither exists. It
+It needs a display: `xvfb-run` is used where there is none (CI installs `xvfb` and Mesa; on
+Arch, `sudo pacman -S xorg-server-xvfb`), and it is skipped where neither exists. It
 opens a window for about two seconds, so it isn't part of `cargo xtask ci`; CI runs it as its
 own step.
 
