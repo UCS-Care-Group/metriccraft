@@ -772,8 +772,8 @@ mod tests {
                         chain(|inner| format!("{}{inner}{}", open.repeat(60), close.repeat(60)));
                     let e = run(&db, &format!("{q}EVALUATE ROW(\"x\", [m9])")).expect_err(open);
                     assert_eq!(e.kind, ErrorKind::Limit, "{open}: {e}");
-                    // The depth cap, or the stack budget first where frames are larger (macOS
-                    // aarch64 debug builds): either way a Limit error, never a stack overflow.
+                    // The depth cap, or the stack budget first where frames are larger (macOS and
+                    // Windows debug builds): either way a Limit error, never a stack overflow.
                     assert!(
                         e.message.contains(&MAX_EVAL_DEPTH.to_string())
                             || e.message.contains("of stack"),
