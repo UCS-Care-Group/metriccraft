@@ -2,7 +2,7 @@
 //! (`"Home > Data"` is the Data group of the Home tab). Every button runs a command.
 
 use egui::{RichText, Ui};
-use opendash_engine::Command;
+use metriccraft_engine::Command;
 
 use crate::palette::{Action, invoke};
 use crate::strings::Str;
@@ -194,7 +194,7 @@ pub fn show_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opendash_engine::COMMANDS;
+    use metriccraft_engine::COMMANDS;
 
     #[test]
     fn groups_follow_ribbon_paths() {

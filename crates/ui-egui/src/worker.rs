@@ -6,16 +6,16 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use opendash_engine::{App, Command, Document, Location, RecoveryInfo};
-use opendash_visuals::Scene;
-use opendash_visuals::layout::Context;
+use metriccraft_engine::{App, Command, Document, Location, RecoveryInfo};
+use metriccraft_visuals::Scene;
+use metriccraft_visuals::layout::Context;
 use serde_json::Value;
 
 /// What the window shows of the engine: a copy taken after the last command.
 #[derive(Clone, Default)]
 pub struct Snapshot {
     pub doc: Document,
-    /// Whether each command (in [`opendash_engine::COMMANDS`] order) can run now.
+    /// Whether each command (in [`metriccraft_engine::COMMANDS`] order) can run now.
     pub enabled: Vec<bool>,
     pub dirty: bool,
     pub location: Option<Location>,
@@ -56,10 +56,10 @@ fn draw(app: &mut App) -> (String, Vec<(String, Scene)>) {
     let Some(page) = crate::views::current_page(app.document()).map(|p| p.id.clone()) else {
         return Default::default();
     };
-    let theme = opendash_visuals::Theme::light();
+    let theme = metriccraft_visuals::Theme::light();
     let cx = Context {
         theme: &theme,
-        locale: &opendash_core::EN_US,
+        locale: &metriccraft_core::EN_US,
     };
     let scenes = app.page_scene(&page, &cx).unwrap_or_default();
     (page, scenes)
@@ -86,7 +86,7 @@ pub struct PreviewOut {
     pub step: Option<usize>,
     /// The snapshot `seq` it was made after.
     pub seq: u64,
-    pub result: Result<opendash_engine::Preview, String>,
+    pub result: Result<metriccraft_engine::Preview, String>,
 }
 
 enum Job {
@@ -157,7 +157,7 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
         },
         Job::Autosave(now) => {
             if app.autosave_due(now)
-                && let Some(dir) = opendash_engine::recovery_dir()
+                && let Some(dir) = metriccraft_engine::recovery_dir()
                 && let Err(e) = app.write_recovery(&dir, now)
             {
                 Event::Failed {
@@ -178,7 +178,7 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
 /// The UI's handle on the engine.
 pub struct Engine {
     shared: Arc<Mutex<Shared>>,
-    progress: Arc<opendash_engine::Progress>,
+    progress: Arc<metriccraft_engine::Progress>,
     commands: &'static [Command],
     #[cfg(not(target_arch = "wasm32"))]
     jobs: std::sync::mpsc::Sender<Job>,
@@ -323,7 +323,7 @@ impl Engine {
 
     /// Recovery copies left by sessions that didn't close (none on the web).
     pub fn recoverable() -> (Option<PathBuf>, Vec<RecoveryInfo>) {
-        let dir = opendash_engine::recovery_dir();
+        let dir = metriccraft_engine::recovery_dir();
         let list = dir.as_deref().map(App::recoverable).unwrap_or_default();
         (dir, list)
     }

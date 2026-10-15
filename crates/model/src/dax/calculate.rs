@@ -31,8 +31,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use opendash_core::Value;
-use opendash_dax::{BinOp, Expr, ExprKind, Span, UnaryOp};
+use metriccraft_core::Value;
+use metriccraft_dax::{BinOp, Expr, ExprKind, Span, UnaryOp};
 
 use super::eval::{Evaluator, RowFrame, Rows, RowsColumn, TableVal, Val, value_error};
 use super::functions::{Call, logic};

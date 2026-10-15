@@ -14,9 +14,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use opendash_core::Value;
-use opendash_model::dax::{Database, Filter, FilterContext, Options};
-use opendash_model::parity::{Case, Check, Report, cases_in, loaded};
+use metriccraft_core::Value;
+use metriccraft_model::dax::{Database, Filter, FilterContext, Options};
+use metriccraft_model::parity::{Case, Check, Report, cases_in, loaded};
 
 use crate::query::{QueryInput, QueryResult, run_query};
 use crate::visual::{FieldRef, Visual, VisualType, Well};

@@ -1,5 +1,5 @@
 [package]
-name = "opendash-ui-egui"
+name = "metriccraft-ui-egui"
 description = "Desktop and web UI."
 version.workspace = true
 edition.workspace = true
@@ -12,12 +12,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-opendash-engine = { path = "../engine", default-features = false }
-opendash-core = { path = "../core" }
-opendash-model = { path = "../model" }
-opendash-dax = { path = "../dax" }
+metriccraft-engine = { path = "../engine", default-features = false }
+metriccraft-core = { path = "../core" }
+metriccraft-model = { path = "../model" }
+metriccraft-dax = { path = "../dax" }
 arrow-array = { workspace = true }
-opendash-visuals = { path = "../visuals", default-features = false }
+metriccraft-visuals = { path = "../visuals", default-features = false }
 egui = { workspace = true }
 egui_dock = { workspace = true }
 serde_json = { workspace = true }

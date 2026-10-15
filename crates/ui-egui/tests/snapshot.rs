@@ -1,12 +1,12 @@
 //! UI snapshots for `cargo xtask snapshot`: each View (and the Power Query editor), light and
-//! dark, rendered offscreen to PNGs in `$ODASH_SNAPSHOT_PNG` (gitignored `observations/`), to
+//! dark, rendered offscreen to PNGs in `$MCRAFT_SNAPSHOT_PNG` (gitignored `observations/`), to
 //! look at after UI work. Without that variable the test does nothing (no GPU needed in CI).
 
 use std::time::{Duration, Instant};
 
-use opendash_engine::App;
-use opendash_ui_egui::worker::Engine;
-use opendash_ui_egui::{Prefs, Shell};
+use metriccraft_engine::App;
+use metriccraft_ui_egui::worker::Engine;
+use metriccraft_ui_egui::{Prefs, Shell};
 use serde_json::json;
 
 type Harness = egui_kittest::Harness<'static, Shell>;
@@ -36,7 +36,7 @@ fn run(h: &mut Harness, id: &str, params: serde_json::Value) {
 
 #[test]
 fn ui_snapshot_views() {
-    let Some(out) = std::env::var_os("ODASH_SNAPSHOT_PNG").map(std::path::PathBuf::from) else {
+    let Some(out) = std::env::var_os("MCRAFT_SNAPSHOT_PNG").map(std::path::PathBuf::from) else {
         return;
     };
     std::fs::create_dir_all(&out).unwrap();

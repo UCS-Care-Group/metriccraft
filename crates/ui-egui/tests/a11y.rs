@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
-use opendash_engine::App;
-use opendash_ui_egui::worker::Engine;
-use opendash_ui_egui::{Prefs, Shell};
+use metriccraft_engine::App;
+use metriccraft_ui_egui::worker::Engine;
+use metriccraft_ui_egui::{Prefs, Shell};
 use serde_json::json;
 
 const INTERACTIVE: [Role; 12] = [
@@ -75,7 +75,7 @@ fn unlabelled(h: &Harness<'_, Shell>, state: &str) -> Vec<String> {
 
 #[test]
 fn every_control_is_labelled_in_every_view_and_dialog() {
-    let dir = std::env::temp_dir().join(format!("odash-a11y-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-a11y-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap_or_default();
     let csv = dir.join("Sales.csv");
     let mut text = String::from("Region,Amount\n");

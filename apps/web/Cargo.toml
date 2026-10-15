@@ -1,6 +1,6 @@
 [package]
-name = "opendash-web"
-description = "OpenDash BI web app (WASM)."
+name = "metriccraft-web"
+description = "MetricCraft web app (WASM)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

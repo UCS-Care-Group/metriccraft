@@ -2,7 +2,7 @@
 //! what every Visual shares: the frame and title, value text, auto display units and the error
 //! state; each Visual type has its own submodule.
 
-use opendash_core::{Locale, Value};
+use metriccraft_core::{Locale, Value};
 
 use crate::draw::{Align, Cmd, Scene, Weight};
 use crate::query::{Header, QueryResult};
@@ -34,7 +34,7 @@ pub fn value_text(v: &Value, header: &Header, locale: &Locale) -> String {
     if v.is_blank() {
         return String::new();
     }
-    opendash_core::format(v, &header.format_string, locale).unwrap_or_else(|_| v.to_text())
+    metriccraft_core::format(v, &header.format_string, locale).unwrap_or_else(|_| v.to_text())
 }
 
 /// A group key as a row or axis label: BLANK is "(Blank)", as in Power BI.
@@ -51,7 +51,7 @@ pub fn auto_units(v: &Value, header: &Header, locale: &Locale) -> String {
     let d = match v {
         Value::Integer(i) => *i as f64,
         Value::Decimal(d) => *d,
-        Value::Currency(c) => *c as f64 / opendash_core::CURRENCY_SCALE as f64,
+        Value::Currency(c) => *c as f64 / metriccraft_core::CURRENCY_SCALE as f64,
         _ => return value_text(v, header, locale),
     };
     let a = d.abs();
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn auto_units_like_power_bi() {
         let h = header("");
-        let en = &opendash_core::EN_GB;
+        let en = &metriccraft_core::EN_GB;
         let u = |v: Value| auto_units(&v, &h, en);
         assert_eq!(u(Value::Integer(999)), "999");
         assert_eq!(u(Value::Integer(1234)), "1.23K");
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(u(Value::Decimal(123.4e12)), "123T");
         assert_eq!(u(Value::Blank), "");
         assert_eq!(
-            auto_units(&Value::Integer(1234), &h, &opendash_core::DE_DE),
+            auto_units(&Value::Integer(1234), &h, &metriccraft_core::DE_DE),
             "1,23K"
         );
         assert_eq!(key_text(&Value::Blank, &h, en), "(Blank)");
@@ -243,7 +243,7 @@ mod tests {
         let th = Theme::light();
         let cx = Context {
             theme: &th,
-            locale: &opendash_core::EN_GB,
+            locale: &metriccraft_core::EN_GB,
         };
         let s = error_scene(&v, &"word ".repeat(200), &cx);
         assert!(s.cmds.len() > 3);

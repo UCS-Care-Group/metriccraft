@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-use opendash_data::{Preview, Query, Table, default_memory_cap};
-use opendash_model::Model;
+use metriccraft_data::{Preview, Query, Table, default_memory_cap};
+use metriccraft_model::Model;
 use serde_json::Value;
 
 use crate::{COMMANDS, Command, Error, LoadReport, Result, Run};
@@ -21,11 +21,11 @@ pub struct Document {
     /// The model properties of the loaded Tables (one per Table, same name).
     pub model: Model,
     /// How each Table's data was loaded (its Query's M hash, Source fingerprints and time), by
-    /// Table name: the Data cache's metadata (`opendash_file::cache`), undone with the data.
-    pub provenance: BTreeMap<String, opendash_file::cache::Provenance>,
+    /// Table name: the Data cache's metadata (`metriccraft_file::cache`), undone with the data.
+    pub provenance: BTreeMap<String, metriccraft_file::cache::Provenance>,
     /// The Calculated columns whose DAX failed when last computed (they hold BLANKs), in Model
     /// order: derived from the Model and the data (`expression.rs`), never saved.
-    pub formula_errors: Vec<opendash_model::Error>,
+    pub formula_errors: Vec<metriccraft_model::Error>,
     /// The report: Pages of Visuals (`report.rs`).
     pub report: crate::report::Report,
     /// Model view layout: where each Table's box sits (`diagram.rs`).
@@ -70,7 +70,7 @@ pub struct App {
     /// Stops a running Page drawing (`App::cancel_flag`).
     pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Rows read and the cancel switch of the load running (Get Data, Refresh, Close & Apply).
-    pub(crate) progress: std::sync::Arc<opendash_data::Progress>,
+    pub(crate) progress: std::sync::Arc<metriccraft_data::Progress>,
     /// What the last command moved, for `merge` (see [`merge_key`]).
     last_move: Option<String>,
 }
@@ -360,7 +360,7 @@ impl App {
 fn merge_key(id: &str, params: &Value) -> Option<String> {
     let s = |k: &str| params.get(k).and_then(Value::as_str).unwrap_or_default();
     match id {
-        "model.moveTable" => Some(format!("{id}\n{}", opendash_model::name_key(s("table")))),
+        "model.moveTable" => Some(format!("{id}\n{}", metriccraft_model::name_key(s("table")))),
         "visual.move" | "visual.resize" => Some(format!("{id}\n{}\n{}", s("page"), s("visual"))),
         _ => None,
     }
@@ -370,9 +370,9 @@ fn merge_key(id: &str, params: &Value) -> Option<String> {
 fn is_memory_cap(e: &Error) -> bool {
     matches!(
         e,
-        Error::Data(opendash_data::Error::MemoryCap { .. })
+        Error::Data(metriccraft_data::Error::MemoryCap { .. })
             | Error::Refresh {
-                error: opendash_data::Error::MemoryCap { .. },
+                error: metriccraft_data::Error::MemoryCap { .. },
                 ..
             }
     )
@@ -553,7 +553,7 @@ mod tests {
         use std::sync::Arc;
 
         use arrow_array::{Array, Int64Array, RecordBatch};
-        use opendash_data::TableBuilder;
+        use metriccraft_data::TableBuilder;
 
         let rows: i64 = 10_000_000;
         let col = Int64Array::from_iter_values((0..rows).map(|i| i % 100));

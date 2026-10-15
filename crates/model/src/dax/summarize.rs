@@ -32,8 +32,8 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use opendash_core::Value;
-use opendash_dax::{Expr, ExprKind, Span};
+use metriccraft_core::Value;
+use metriccraft_dax::{Expr, ExprKind, Span};
 
 use crate::dax::calculate;
 use crate::dax::eval::{Evaluator, Rows, RowsColumn, TableVal, Val};
@@ -121,7 +121,7 @@ pub fn summarizecolumns(ev: &mut Evaluator<'_, '_>, call: &Call<'_>) -> Result<V
             _ => {
                 return Err(DaxError::new(
                     arg.span,
-                    "OpenDash BI doesn't support SUMMARIZECOLUMNS filter-table arguments (yet): \
+                    "MetricCraft doesn't support SUMMARIZECOLUMNS filter-table arguments (yet): \
                      give group-by columns, then \"Name\", expression pairs",
                 ));
             }

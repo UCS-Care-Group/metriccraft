@@ -1,6 +1,6 @@
 # Upstream agent files (verbatim, historical reference)
 
-OpenDash BI is independent of storytold (ADR 0002). These files are kept only to show where
+MetricCraft is independent of storytold (ADR 0002). These files are kept only to show where
 `AGENTS.md`'s rules came from; they are not followed and not tracked for changes.
 
 Copied unmodified from storytold on 2026-10-12. Each repo's `CLAUDE.md` is the same file

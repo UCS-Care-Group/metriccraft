@@ -10,7 +10,7 @@
 //! `Tag { series: j * values.len() + k (column tuple j, value k), point: row index in
 //! result.rows }`; the grand total row is `point: rows.len()`. Derived parent rows have none.
 
-use opendash_core::Value;
+use metriccraft_core::Value;
 
 use super::table::{CELL_PAD, Grid, cell, draw_notice, fit, is_number, notice, rule};
 use super::{Context, PAD, frame, key_text, value_text};
@@ -385,7 +385,7 @@ mod tests {
         let th = theme();
         let cx = Context {
             theme: &th,
-            locale: &opendash_core::EN_GB,
+            locale: &metriccraft_core::EN_GB,
         };
         let s = layout(v, r, &cx);
         assert_sane(&s);

@@ -6,9 +6,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder};
-use opendash_dax::Span;
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder};
+use metriccraft_dax::Span;
 
 use super::model_eval::evaluate_rows;
 use super::*;
@@ -75,7 +75,7 @@ fn text_doubled_through_vars_fails_fast() {
     let e = scalar(&db, &doubling(), capped(&db, 4 << 20)).unwrap_err();
     assert_eq!(e.kind, ErrorKind::Memory, "{e}");
     // As a Calculated column (each row): the column's error, not an abort.
-    let expr = opendash_dax::parse_expr(&doubling()).unwrap();
+    let expr = metriccraft_dax::parse_expr(&doubling()).unwrap();
     let e = evaluate_rows(&db, &model, 0, &expr, unbounded()).unwrap_err();
     assert_eq!(e.kind, ErrorKind::Limit, "{e}");
     assert!(start.elapsed() < Duration::from_secs(20));
@@ -103,7 +103,7 @@ fn temporaries_are_refunded_per_row() {
             n,
         ),
     ] {
-        let expr = opendash_dax::parse_expr(text).unwrap();
+        let expr = metriccraft_dax::parse_expr(text).unwrap();
         let v = evaluate_rows(&db, &model, 0, &expr, cap).unwrap_or_else(|e| panic!("{text}: {e}"));
         assert_eq!(v.len(), n as usize);
         assert!(

@@ -28,7 +28,7 @@
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
-use opendash_dax::{Expr, ExprKind, Span, is_keyword, parse_expr};
+use metriccraft_dax::{Expr, ExprKind, Span, is_keyword, parse_expr};
 
 use crate::dax::MAX_MEASURE_CHAIN;
 use crate::table::{Error, Result};
@@ -56,13 +56,13 @@ impl Measure {
     }
 
     /// The parsed expression, or why it doesn't parse.
-    pub fn parse(&self) -> std::result::Result<Expr, opendash_dax::Error> {
+    pub fn parse(&self) -> std::result::Result<Expr, metriccraft_dax::Error> {
         parse_expr(&self.expression)
     }
 }
 
 /// DAX text as the Model keeps it: line breaks as `\n`, no trailing blank lines or spaces (what
-/// the `.odm` block holds, so a save and open give the same text).
+/// the `.mcm` block holds, so a save and open give the same text).
 pub fn normalise_expression(text: &str) -> String {
     text.replace("\r\n", "\n")
         .replace('\r', "\n")
@@ -772,7 +772,7 @@ impl Model {
         let ti = self.table_index(table)?;
         self.check_free(ti, name, None)?;
         let t = self.tables.get_mut(ti).ok_or_else(|| no_table(table))?;
-        let mut c = crate::Column::new(name, opendash_data::step::ColumnType::Text);
+        let mut c = crate::Column::new(name, metriccraft_data::step::ColumnType::Text);
         c.expression = Some(expression.into());
         t.columns.push(c);
         let index = t.columns.len().saturating_sub(1);
@@ -926,7 +926,7 @@ fn no_table(table: &str) -> Error {
     }
 }
 
-/// How Measures sort in a Table (and in its `.odm` block): by name ignoring case, then exactly.
+/// How Measures sort in a Table (and in its `.mcm` block): by name ignoring case, then exactly.
 pub fn measure_order(a: &Measure, b: &Measure) -> std::cmp::Ordering {
     a.name
         .to_lowercase()

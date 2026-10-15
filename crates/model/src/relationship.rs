@@ -37,8 +37,8 @@ use std::collections::HashSet;
 use std::fmt;
 
 use arrow_array::Array;
-use opendash_data::Table;
-use opendash_data::step::ColumnType;
+use metriccraft_data::Table;
+use metriccraft_data::step::ColumnType;
 
 use crate::table::Result;
 use crate::table::as_text;
@@ -357,7 +357,7 @@ fn check_key(table: &Table, column: &str) -> Result {
             )));
         };
         let key = if is_text {
-            opendash_core::fold(v.trim_end_matches(' '))
+            metriccraft_core::fold(v.trim_end_matches(' '))
         } else {
             v.to_string()
         };
@@ -375,8 +375,8 @@ mod tests {
     use std::sync::Arc;
 
     use arrow_array::{ArrayRef, Int64Array, RecordBatch, StringArray};
-    use opendash_data::TableBuilder;
-    use opendash_data::culture::Culture;
+    use metriccraft_data::TableBuilder;
+    use metriccraft_data::culture::Culture;
 
     use super::*;
     use crate::ModelTable;

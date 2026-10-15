@@ -821,7 +821,7 @@ mod tests {
         assert!(parse(&deep).unwrap_err().message.contains("nested"));
     }
 
-    /// 20,000 cases a run; soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).
+    /// 20,000 cases a run; soak with `MCRAFT_FUZZ_SCALE` / `MCRAFT_FUZZ_SEED` (see `crate::fuzz`).
     #[test]
     fn fuzzed_input_never_panics() {
         let seeds = [

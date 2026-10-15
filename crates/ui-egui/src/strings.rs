@@ -39,7 +39,7 @@ pub enum Str {
     Cancel,
     Optional,
     Browse,
-    OpenDashFiles,
+    MetricCraftFiles,
     DataFiles,
     // Recovery and closing (spec U-7).
     RecoveryFound,
@@ -113,7 +113,7 @@ pub enum Str {
 impl Str {
     pub fn text(self) -> &'static str {
         match self {
-            Str::AppName => "OpenDash BI",
+            Str::AppName => "MetricCraft",
             Str::Untitled => "Untitled",
             Str::TabFile => "File",
             Str::TabHome => "Home",
@@ -142,7 +142,7 @@ impl Str {
             Str::Cancel => "Cancel",
             Str::Optional => "optional",
             Str::Browse => "Browse…",
-            Str::OpenDashFiles => "OpenDash projects and packages",
+            Str::MetricCraftFiles => "MetricCraft projects and packages",
             Str::DataFiles => "CSV, Excel and Parquet files",
             Str::RecoveryFound => "Unsaved work from an earlier session can be recovered: {}",
             Str::RecoveryUnsaved => "a document never saved",

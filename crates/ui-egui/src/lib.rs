@@ -1,4 +1,4 @@
-//! The OpenDash BI window (layer 6, ADR 0008): egui panels over the engine. Thin: everything
+//! The MetricCraft window (layer 6, ADR 0008): egui panels over the engine. Thin: everything
 //! the user does goes to the engine as a command ([`worker::Engine::run`]); panels only read the
 //! published [`worker::Snapshot`]. Swappable: nothing below depends on it.
 
@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use egui::{Key, KeyboardShortcut, Modifiers, RichText, Ui};
-use opendash_engine::{Command, RecoveryInfo};
+use metriccraft_engine::{Command, RecoveryInfo};
 use serde_json::{Value, json};
 
 use crate::palette::{Action, Form, Palette};
@@ -73,9 +73,9 @@ impl Prefs {
 /// A native file dialog the shell asks the app for (the app owns the window it parents to).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileAsk {
-    /// Pick a `.odash` Package or a Project's `project.odash.json`.
+    /// Pick a `.mcraft` Package or a Project's `project.mcraft.json`.
     Open,
-    /// Pick where to save; a name ending `.odash` saves a Package, any other a Project folder.
+    /// Pick where to save; a name ending `.mcraft` saves a Package, any other a Project folder.
     SaveAs { name: String },
     /// Pick a CSV, Excel or Parquet file to get data from.
     Data,
@@ -224,7 +224,7 @@ impl Shell {
         let list = {
             let path = path.clone();
             move || {
-                let items = opendash_engine::excel_items(&path).map_err(|e| e.to_string());
+                let items = metriccraft_engine::excel_items(&path).map_err(|e| e.to_string());
                 let _ = tx.send(items);
             }
         };
@@ -249,8 +249,8 @@ impl Shell {
             "file.saveAs" => {
                 let name = match &self.snap.location {
                     Some(
-                        opendash_engine::Location::Folder(p)
-                        | opendash_engine::Location::Package(p),
+                        metriccraft_engine::Location::Folder(p)
+                        | metriccraft_engine::Location::Package(p),
                     ) => p.file_name().map(|n| n.to_string_lossy().into_owned()),
                     None => None,
                 };
@@ -285,8 +285,8 @@ impl Shell {
         self.ready = true;
         let mut fonts = egui::FontDefinitions::default();
         for (name, bytes) in [
-            ("Inter", opendash_visuals::text::REGULAR),
-            ("Inter Bold", opendash_visuals::text::BOLD),
+            ("Inter", metriccraft_visuals::text::REGULAR),
+            ("Inter Bold", metriccraft_visuals::text::BOLD),
         ] {
             fonts
                 .font_data
@@ -697,12 +697,12 @@ impl Shell {
                     if snap.busy.is_some_and(|id| LOADS.contains(&id)) {
                         // Rows read so far, per Query; polled while the load runs.
                         for (query, rows) in self.engine.load_rows() {
-                            let n = opendash_core::format(
-                                &opendash_core::Value::Integer(
+                            let n = metriccraft_core::format(
+                                &metriccraft_core::Value::Integer(
                                     i64::try_from(rows).unwrap_or(i64::MAX),
                                 ),
                                 "#,0",
-                                &opendash_core::EN_US,
+                                &metriccraft_core::EN_US,
                             )
                             .unwrap_or_default();
                             ui.label(
@@ -979,9 +979,9 @@ impl Shell {
         let (dir, list) = self.recovery.as_ref()?;
         let info = list.first()?;
         let what = match &info.location {
-            Some(opendash_engine::Location::Folder(p) | opendash_engine::Location::Package(p)) => {
-                p.display().to_string()
-            }
+            Some(
+                metriccraft_engine::Location::Folder(p) | metriccraft_engine::Location::Package(p),
+            ) => p.display().to_string(),
             None => Str::RecoveryUnsaved.text().to_string(),
         };
         let params = json!({"id": info.id, "dir": dir.display().to_string()});
@@ -1043,7 +1043,9 @@ impl Shell {
 
     fn close_prompt(&mut self, ui: &mut Ui, snap: &Snapshot) {
         let name = match &snap.location {
-            Some(opendash_engine::Location::Folder(p) | opendash_engine::Location::Package(p)) => p
+            Some(
+                metriccraft_engine::Location::Folder(p) | metriccraft_engine::Location::Package(p),
+            ) => p
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default(),
@@ -1132,10 +1134,10 @@ impl egui_dock::TabViewer for PaneViewer<'_> {
 
 /// The formula bar for Field `f` if it is a Measure or a Calculated column.
 fn formula_for(
-    doc: &opendash_engine::Document,
-    f: &opendash_visuals::FieldRef,
+    doc: &metriccraft_engine::Document,
+    f: &metriccraft_visuals::FieldRef,
 ) -> Option<formula::Formula> {
-    use opendash_visuals::FieldRef;
+    use metriccraft_visuals::FieldRef;
     match f {
         FieldRef::Measure { name } => {
             let (t, m) = doc.model.measure(name)?;

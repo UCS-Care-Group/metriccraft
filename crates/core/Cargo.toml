@@ -1,5 +1,5 @@
 [package]
-name = "opendash-core"
+name = "metriccraft-core"
 description = "Error type, values and data types, BLANK, locale and format-string rendering."
 version.workspace = true
 edition.workspace = true

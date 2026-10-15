@@ -12,7 +12,7 @@
 //! **Rename a model Column** (`modeling.renameColumn`): Power BI renames a column of an import
 //! Table in Data / Report / Model view by adding a *Renamed Columns* step to its Query (Microsoft
 //! Learn, "Work with TMDL view": the UI adds a rename step while the model column's name and
-//! its `sourceColumn` are identical, which in OpenDash BI they always are). So one undoable
+//! its `sourceColumn` are identical, which in MetricCraft they always are). So one undoable
 //! edit: appends `Table.RenameColumns` (old → new) to the Query, renames the loaded column and
 //! the model Column (keeping its properties), every sort by and Relationship end on it, and the
 //! key and expanded columns that Merged Queries steps in other Queries take from it (the
@@ -32,7 +32,7 @@
 //!
 //! **DAX** (M3.6): both renames, and renaming a Measure (`modeling.renameMeasure`,
 //! `expression.rs`), rewrite every reference in the Model's Measures and Calculated columns
-//! through the AST, replacing only the referencing bytes (`opendash_model`, `expression.rs`).
+//! through the AST, replacing only the referencing bytes (`metriccraft_model`, `expression.rs`).
 //! Renaming a Calculated column adds no Query step: it isn't the Query's.
 //!
 //! Parity uncertainties, to observe in the VM:
@@ -45,9 +45,9 @@
 //! - a duplicated Query's name (`Sales (2)`, the next free number) and whether it copies
 //!   *Enable load* (we copy it).
 
-use opendash_data::step::Step;
-use opendash_file::cache::m_hash;
-use opendash_model::same_name;
+use metriccraft_data::step::Step;
+use metriccraft_file::cache::m_hash;
+use metriccraft_model::same_name;
 use serde_json::Value;
 
 use crate::model::{invalid, text};
@@ -144,7 +144,7 @@ pub(crate) fn rename_column(app: &mut App, params: &Value) -> Result {
     let doc = app.document();
     let column = doc.model.table(&table).and_then(|t| t.column(&old));
     if column.is_none() {
-        return Err(Error::Model(opendash_model::Error {
+        return Err(Error::Model(metriccraft_model::Error {
             table,
             column: old,
             message: "there is no such column".into(),
@@ -158,7 +158,7 @@ pub(crate) fn rename_column(app: &mut App, params: &Value) -> Result {
             .model
             .table(&table)
             .and_then(|t| t.column(&old))
-            .is_some_and(opendash_model::Column::is_calculated);
+            .is_some_and(metriccraft_model::Column::is_calculated);
         doc.model
             .rename_column(&table, &old, &new)
             .map_err(Error::Model)?;

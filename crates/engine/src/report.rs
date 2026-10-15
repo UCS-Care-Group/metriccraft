@@ -35,9 +35,9 @@ mod json;
 
 use std::collections::BTreeMap;
 
-use opendash_model::{Model, same_name};
-use opendash_visuals::visual::{LegendPosition, SlicerStyle};
-use opendash_visuals::{FieldRef, Sort, SortDirection, Visual, VisualType, Well};
+use metriccraft_model::{Model, same_name};
+use metriccraft_visuals::visual::{LegendPosition, SlicerStyle};
+use metriccraft_visuals::{FieldRef, Sort, SortDirection, Visual, VisualType, Well};
 use serde_json::{Map, Value};
 
 use crate::model::{invalid, text};

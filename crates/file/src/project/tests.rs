@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use opendash_data::source::ExcelKind;
-use opendash_data::step::Step;
+use metriccraft_data::source::ExcelKind;
+use metriccraft_data::step::Step;
 
 use super::*;
 use crate::manifest::Migration;
@@ -156,23 +156,23 @@ fn layout_follows_the_adr() {
     let sales_stem = crate::escape::file_stems(&["Sales", "sales"])[1].clone();
     let mut want = vec![
         ".gitignore".to_string(),
-        "model/model.odm".into(),
-        "model/relationships.odm".into(),
-        "model/tables/Sales.odm".into(),
-        "model/tables/Unit Regions.odm".into(),
-        format!("model/tables/{sales_stem}.odm"),
-        "project.odash.json".into(),
-        "queries/%43ON.odq".into(),
-        "queries/Sales.odq".into(),
-        "queries/Unit Regions.odq".into(),
-        format!("queries/{sales_stem}.odq"),
+        "model/model.mcm".into(),
+        "model/relationships.mcm".into(),
+        "model/tables/Sales.mcm".into(),
+        "model/tables/Unit Regions.mcm".into(),
+        format!("model/tables/{sales_stem}.mcm"),
+        "project.mcraft.json".into(),
+        "queries/%43ON.mcq".into(),
+        "queries/Sales.mcq".into(),
+        "queries/Unit Regions.mcq".into(),
+        format!("queries/{sales_stem}.mcq"),
     ];
     want.sort();
     assert_eq!(paths, want);
     assert_eq!(text(&files, ".gitignore"), ".cache/\n.local/\n.staging/\n");
 
     assert_eq!(
-        text(&files, "model/tables/Sales.odm"),
+        text(&files, "model/tables/Sales.mcm"),
         "table Sales\n  \
            description: \"Every sale\"\n  \
            column Region\n    \
@@ -194,12 +194,12 @@ fn layout_follows_the_adr() {
              summarizeBy: sum\n"
     );
     assert_eq!(
-        text(&files, "model/relationships.odm"),
+        text(&files, "model/relationships.mcm"),
         "relationship Sales[Region] -> 'Unit Regions'[Region]\n\
          relationship sales[x]]y] -> 'Unit Regions'[Region]\n  inactive\n"
     );
     assert_eq!(
-        text(&files, "model/model.odm"),
+        text(&files, "model/model.mcm"),
         "model Model\n  \
            culture: en-US\n  \
            autodetectRelationships: false\n  \
@@ -211,15 +211,15 @@ fn layout_follows_the_adr() {
            ref table 'Unit Regions'\n  \
            ref table sales\n"
     );
-    let sales = text(&files, "queries/Sales.odq");
+    let sales = text(&files, "queries/Sales.mcq");
     assert!(sales.starts_with("query Sales\n  load: true\n  culture: en-GB\n  m:\n    let\n"));
     assert!(
         sales.contains(r#"Parquet.Document(File.Contents("data/sales.parquet"))"#),
         "inside the Project: relative, with /\n{sales}"
     );
-    let con = text(&files, "queries/%43ON.odq");
+    let con = text(&files, "queries/%43ON.mcq");
     assert!(con.starts_with("query CON\n  load: false\n  m:\n"), "{con}");
-    let regions = text(&files, "queries/Unit Regions.odq");
+    let regions = text(&files, "queries/Unit Regions.mcq");
     assert!(
         regions.contains(&elsewhere().display().to_string().replace('\\', "\\\\")),
         "outside the Project: absolute\n{regions}"
@@ -232,19 +232,19 @@ fn layout_follows_the_adr() {
 #[test]
 fn unknown_content_survives_open_and_save() {
     let mut files = encode(&sample(), Some(&root()), &Preserved::default()).unwrap();
-    let sales = text(&files, "model/tables/Sales.odm").replace(
+    let sales = text(&files, "model/tables/Sales.mcm").replace(
         "  column Qty\n",
         "  lineageTag: abc\n  column Qty\n    annotation Foo\n      value: 1\n    isKey\n",
     ) + "perspective Main\n  showAll\n";
-    files.insert("model/tables/Sales.odm".into(), sales.into_bytes());
-    let q = text(&files, "queries/Sales.odq").replace(
+    files.insert("model/tables/Sales.mcm".into(), sales.into_bytes());
+    let q = text(&files, "queries/Sales.mcq").replace(
         "  load: true\n",
         "  load: true\n  note:\n    free text\n      kept as is\n",
     );
-    files.insert("queries/Sales.odq".into(), q.into_bytes());
+    files.insert("queries/Sales.mcq".into(), q.into_bytes());
     files.insert("report/report.json".into(), b"{\"pages\": []}\n".to_vec());
-    files.insert("model/extra.odm".into(), b"thing X\n  y: 1\n".to_vec());
-    rehash(&mut files, &["report/report.json", "model/extra.odm"]);
+    files.insert("model/extra.mcm".into(), b"thing X\n  y: 1\n".to_vec());
+    rehash(&mut files, &["report/report.json", "model/extra.mcm"]);
     let m = text(&files, MANIFEST).replacen('{', "{\n  \"generator\": {\"b\": 1, \"a\": [2]},", 1);
     files.insert(MANIFEST.into(), m.into_bytes());
 
@@ -262,7 +262,7 @@ fn unknown_content_survives_open_and_save() {
     };
     assert_eq!(model, sample(), "unknown content doesn't change the model");
     let saved = encode(&p, Some(&root()), &pre).unwrap();
-    let sales = text(&saved, "model/tables/Sales.odm");
+    let sales = text(&saved, "model/tables/Sales.mcm");
     for kept in [
         "  lineageTag: abc\n",
         "    annotation Foo\n      value: 1\n    isKey\n",
@@ -271,10 +271,10 @@ fn unknown_content_survives_open_and_save() {
         assert!(sales.contains(kept), "{kept:?} in\n{sales}");
     }
     assert!(
-        text(&saved, "queries/Sales.odq").contains("  note:\n    free text\n      kept as is\n")
+        text(&saved, "queries/Sales.mcq").contains("  note:\n    free text\n      kept as is\n")
     );
     assert_eq!(text(&saved, "report/report.json"), "{\"pages\": []}\n");
-    assert_eq!(text(&saved, "model/extra.odm"), "thing X\n  y: 1\n");
+    assert_eq!(text(&saved, "model/extra.mcm"), "thing X\n  y: 1\n");
     let manifest = text(&saved, MANIFEST);
     assert!(
         manifest.contains("\"generator\": {\n    \"a\": [\n      2\n    ],\n    \"b\": 1\n  }")
@@ -328,7 +328,7 @@ fn known_items_the_model_dropped_are_not_resurrected() {
     t.description.clear();
     t.columns.retain(|c| c.name != "Qty");
     let saved = encode(&p, Some(&root()), &pre).unwrap();
-    let sales = text(&saved, "model/tables/Sales.odm");
+    let sales = text(&saved, "model/tables/Sales.mcm");
     assert!(
         !sales.contains("Every sale") && !sales.contains("Qty"),
         "{sales}"
@@ -338,12 +338,12 @@ fn known_items_the_model_dropped_are_not_resurrected() {
 #[test]
 fn interrupted_or_damaged_parts_are_detected() {
     let mut files = encode(&sample(), Some(&root()), &Preserved::default()).unwrap();
-    files.insert("queries/Sales.odq".into(), b"query Sales\n".to_vec());
-    files.remove("model/model.odm");
+    files.insert("queries/Sales.mcq".into(), b"query Sales\n".to_vec());
+    files.remove("model/model.mcm");
     assert_eq!(
         decode(&files, None),
         Err(Error::Damaged {
-            parts: vec!["model/model.odm".into(), "queries/Sales.odq".into()]
+            parts: vec!["model/model.mcm".into(), "queries/Sales.mcq".into()]
         })
     );
 }
@@ -361,7 +361,7 @@ fn newer_format_is_refused() {
             supported: 1
         }
     );
-    assert!(e.to_string().contains("newer OpenDash BI"));
+    assert!(e.to_string().contains("newer MetricCraft"));
 }
 
 /// Format version 0 (test-only) called `dataType` `type`.
@@ -423,67 +423,67 @@ fn inconsistent_parts_are_errors() {
     let base = encode(&sample(), Some(&root()), &Preserved::default()).unwrap();
     let cases: &[(&str, &str, &str)] = &[
         (
-            "model/relationships.odm",
+            "model/relationships.mcm",
             "relationship Sales[Nope] -> sales[x]]y]\n",
             "Nope",
         ),
         (
-            "model/relationships.odm",
+            "model/relationships.mcm",
             "relationship Sales[Region]\n",
             "expected Table[Column]",
         ),
         (
-            "model/relationships.odm",
+            "model/relationships.mcm",
             "relationship Sales[Region] -> 'Unit Regions'[Region]\n\
              relationship 'Unit Regions'[Region] -> Sales[Region]\n",
             "two active",
         ),
         (
-            "model/tables/Sales.odm",
+            "model/tables/Sales.mcm",
             "table Sales\n  column A\n",
             "no `dataType`",
         ),
         (
-            "model/tables/Sales.odm",
+            "model/tables/Sales.mcm",
             "table Sales\n  column A\n    dataType: x\n",
             "dataType: x",
         ),
         (
-            "model/tables/Sales.odm",
+            "model/tables/Sales.mcm",
             "table Sales\n  column A\n    dataType: text\n    sortByColumn: B\n",
             "sorts by `B`",
         ),
         (
-            "model/tables/Sales.odm",
+            "model/tables/Sales.mcm",
             "table Sales\n  column A\n    dataType: text\n  column A\n    dataType: text\n",
             "twice",
         ),
-        ("model/tables/Sales.odm", "table Orphan\n", "no query"),
-        ("model/tables/Sales.odm", "table 'Unit Regions'\n", "twice"),
-        ("model/tables/Sales.odm", "column A\n", "expected a `table`"),
+        ("model/tables/Sales.mcm", "table Orphan\n", "no query"),
+        ("model/tables/Sales.mcm", "table 'Unit Regions'\n", "twice"),
+        ("model/tables/Sales.mcm", "column A\n", "expected a `table`"),
         (
-            "queries/Sales.odq",
+            "queries/Sales.mcq",
             "query Sales\n  load: maybe\n  m:\n    1\n",
             "true or false",
         ),
         (
-            "queries/Sales.odq",
+            "queries/Sales.mcq",
             "query Sales\n  load: true\n",
             "no `m:`",
         ),
         (
-            "queries/Sales.odq",
+            "queries/Sales.mcq",
             "query Sales\n  m:\n    1 +\n",
             "m: line",
         ),
         (
-            "queries/Sales.odq",
+            "queries/Sales.mcq",
             "query Sales\n  culture: xx-XX\n  m:\n    1\n",
             "xx-XX",
         ),
-        ("queries/Sales.odq", "query a b\n", "expected one name"),
-        ("queries/Sales.odq", "// hi\n", "comments"),
-        ("model/model.odm", "model Model\n  culture: zz\n", "zz"),
+        ("queries/Sales.mcq", "query a b\n", "expected one name"),
+        ("queries/Sales.mcq", "// hi\n", "comments"),
+        ("model/model.mcm", "model Model\n  culture: zz\n", "zz"),
     ];
     for (path, content, want) in cases {
         let mut files = base.clone();
@@ -648,7 +648,7 @@ fn sample_with_expressions() -> Project {
 fn measures_and_calculated_columns_round_trip() {
     let project = sample_with_expressions();
     let files = encode(&project, Some(&root()), &Preserved::default()).unwrap();
-    let sales = text(&files, "model/tables/Sales.odm");
+    let sales = text(&files, "model/tables/Sales.mcm");
     assert!(
         sales.contains(
             "  column Margin =\n      [Qty] *\n          2 -- twice\n\n        + 1\n    \
@@ -672,7 +672,7 @@ fn measures_and_calculated_columns_round_trip() {
         "  measure broken =\n      SUM((\n",
         "  measure broken = 1 + 2\n",
     );
-    files.insert("model/tables/Sales.odm".into(), one_line.into_bytes());
+    files.insert("model/tables/Sales.mcm".into(), one_line.into_bytes());
     rehash(&mut files, &[]);
     let (back, _) = round_trip(&files);
     let m = back
@@ -688,8 +688,8 @@ fn measures_and_calculated_columns_round_trip() {
         "  measure 'total qty' =\n      1\n",
     ] {
         let mut files = encode(&project, Some(&root()), &Preserved::default()).unwrap();
-        let t = text(&files, "model/tables/Sales.odm") + bad;
-        files.insert("model/tables/Sales.odm".into(), t.into_bytes());
+        let t = text(&files, "model/tables/Sales.mcm") + bad;
+        files.insert("model/tables/Sales.mcm".into(), t.into_bytes());
         rehash(&mut files, &[]);
         assert!(decode(&files, Some(&root())).is_err(), "{bad}");
     }
@@ -712,8 +712,8 @@ fn a_project_with_50k_measures_opens_quickly() {
     assert_eq!(back, project);
     // A duplicate across Tables is still found.
     let mut files = files;
-    let t = text(&files, "model/tables/Sales.odm") + "  measure m1_00007 =\n      1\n";
-    files.insert("model/tables/Sales.odm".into(), t.into_bytes());
+    let t = text(&files, "model/tables/Sales.mcm") + "  measure m1_00007 =\n      1\n";
+    files.insert("model/tables/Sales.mcm".into(), t.into_bytes());
     rehash(&mut files, &[]);
     let e = decode(&files, Some(&root())).unwrap_err().to_string();
     assert!(e.contains("measure names are unique"), "{e}");
@@ -760,7 +760,7 @@ fn random_bytes_never_panic() {
         for _ in 0..rng.below(4) {
             let len = rng.below(200);
             let bytes: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
-            let name = ["project.odash.json", "model/model.odm", "queries/a.odq"][rng.below(3)];
+            let name = ["project.mcraft.json", "model/model.mcm", "queries/a.mcq"][rng.below(3)];
             files.insert(name.into(), bytes);
         }
         let _ = decode(&files, None);

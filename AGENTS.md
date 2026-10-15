@@ -1,6 +1,6 @@
-# OpenDash BI — instructions for agents
+# MetricCraft — instructions for agents
 
-OpenDash BI is a clean-room, open-source, Rust-native business-intelligence authoring app: a Power BI Desktop alternative that connects to data, shapes it, models it, and builds interactive report pages. DAX results match Power BI exactly; the UI follows Power BI's workflow but may improve on it. Desktop (Linux, Windows, macOS) is the product; the web build (WASM) is a reduced, file-only variant. Publishing, sharing and scheduled refresh (the Power BI Service half) is a separate, later product.
+MetricCraft is a clean-room, open-source, Rust-native business-intelligence authoring app: a Power BI Desktop alternative that connects to data, shapes it, models it, and builds interactive report pages. DAX results match Power BI exactly; the UI follows Power BI's workflow but may improve on it. Desktop (Linux, Windows, macOS) is the product; the web build (WASM) is a reduced, file-only variant. Publishing, sharing and scheduled refresh (the Power BI Service half) is a separate, later product.
 
 Independent project (ADR 0002). Its engineering rules were adapted from the storytold crafting apps (`storytold/gridcraft`; verbatim copies in `docs/agents/upstream/` for reference only) and are now our own.
 
@@ -13,14 +13,14 @@ Work is planned **Glossary → Specification → Implementation Plan** before co
 
 ## Assets and iconography — absolute rule
 **No Microsoft, Adobe, Tableau/Salesforce, Qlik (or any other vendor's) iconography, images, artwork, fonts, templates, themes, visuals or sample files — ever.** This is the most important rule in this repository; breaking it is a serious failure.
-- Every asset in the repo is original work by OpenDash BI contributors, or public domain / CC0, or open source / Creative Commons that allows redistribution.
+- Every asset in the repo is original work by MetricCraft contributors, or public domain / CC0, or open source / Creative Commons that allows redistribution.
 - Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md) (author, source, licence). Adding an asset without a row is a bug.
 - Prefer art generated in code: the UI icon set, report themes, visual palettes and sample datasets are drawn/defined in code and original.
 - Never copy Power BI's icons, ribbon artwork, theme JSON, visual definitions, templates, sample `.pbix` files (Contoso, AdventureWorks reports…) or wording beyond feature names. Power BI feature *names* (menu labels, DAX/M function names) are fine.
 - Fonts: system fonts, plus at most one bundled OFL-licensed font with an `ATTRIBUTION.md` row.
 
 ## Never crash
-People trust OpenDash BI with their numbers; a crash loses their work. **This outranks feature work.**
+People trust MetricCraft with their numbers; a crash loses their work. **This outranks feature work.**
 - **No panics in non-test code:** no `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`; no `unsafe` (`unsafe_code = "forbid"`).
 - **Errors are `Result<T, E>`** through the crate's error type and `?`.
 - **Input-derived numbers are hostile** (files, data sources, DAX/M expressions, commands, MCP/control params): `get()` instead of indexing, checked/saturating arithmetic, cap input-sized allocations (huge tables, cross joins, `GENERATESERIES`, unbounded `List.Generate`).
@@ -37,12 +37,12 @@ People trust OpenDash BI with their numbers; a crash loses their work. **This ou
 - **Layering** is enforced: core → expression languages (DAX, M) → model/query/file formats → visuals → engine → UI/MCP → apps. Nothing below the UI layer depends on egui/eframe/winit/rfd. **The UI crate is swappable.** Exact crate list is fixed in `docs/plan/`.
 - **The UI is thin**: panels read engine state and act through `app.run(id, params)`. Colours come from theme tokens. UI strings go through the string catalogue; every widget is keyboard-reachable and carries an AccessKit label.
 - **Rust only** (no handwritten JS/TS). **Never break wasm.**
-- **Quality gates** before every commit: `cargo xtask ci` (fmt, layers, assets, clippy `-D warnings`, tests, wasm, bench). On Linux `cargo xtask test` runs each test binary under `prlimit --as` (4 GiB address space, override with `ODASH_TEST_MEM_MB`), so a runaway test aborts instead of OOM-killing the host. Benches are `harness = false` targets printing `BENCH <name> <ns>`; after an intended performance change, re-record the baseline on the reference machine with `cargo xtask bench --save` and commit `bench/<machine>.json` in the same commit. A new crate needs a row in the xtask `LAYERS` table. One task id per commit (`M1.2: CSV connector`).
+- **Quality gates** before every commit: `cargo xtask ci` (fmt, layers, assets, clippy `-D warnings`, tests, wasm, bench). On Linux `cargo xtask test` runs each test binary under `prlimit --as` (4 GiB address space, override with `MCRAFT_TEST_MEM_MB`), so a runaway test aborts instead of OOM-killing the host. Benches are `harness = false` targets printing `BENCH <name> <ns>`; after an intended performance change, re-record the baseline on the reference machine with `cargo xtask bench --save` and commit `bench/<machine>.json` in the same commit. A new crate needs a row in the xtask `LAYERS` table. One task id per commit (`M1.2: CSV connector`).
 - Parallel agents: separate `CARGO_TARGET_DIR` per agent; edit only the crates you own; delete your target dir when done.
 
 ## Running and looking at the app
-- **Desktop app:** `cargo run -p opendash -- [PROJECT]` (a Project folder or `.odash` Package). `--no-default-features --features wgpu` swaps the OpenGL renderer for wgpu.
-- **Look without opening a window:** `cargo run -p opendash-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]` renders the window offscreen (wgpu) to PNG; the script runs commands (`{"run": id, "params": {…}}`), switches theme or View, selects Visuals, invokes Ribbon buttons, types, opens the Power Query editor and takes more shots (see the example's docs). **For UI work, look at the result.**
+- **Desktop app:** `cargo run -p metriccraft -- [PROJECT]` (a Project folder or `.mcraft` Package). `--no-default-features --features wgpu` swaps the OpenGL renderer for wgpu.
+- **Look without opening a window:** `cargo run -p metriccraft-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]` renders the window offscreen (wgpu) to PNG; the script runs commands (`{"run": id, "params": {…}}`), switches theme or View, selects Visuals, invokes Ribbon buttons, types, opens the Power Query editor and takes more shots (see the example's docs). **For UI work, look at the result.**
 - **UI tests** drive the window through AccessKit labels (`crates/ui-egui/tests/`, `egui_kittest`). `tests/a11y.rs` fails on any control without a worded label (spec A-1): give symbol-only controls one with `icons::name`.
 - **UI snapshots:** `cargo xtask snapshot` writes PNGs of every View (light, dark) and the Power Query editor to `observations/snapshots/`.
 - **UI budgets:** `cargo xtask ui-bench` (cold start < 1 s, idle private memory ≤ 100 MB; opens a window for ~2 s, or runs under `xvfb-run`).

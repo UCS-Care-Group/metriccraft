@@ -5,8 +5,8 @@
 //! Parity uncertainties, to observe in the VM: row height and checkbox size; the dropdown's
 //! wording for several items ("Multiple selections").
 
-use opendash_core::Value;
-use opendash_model::dax::Key;
+use metriccraft_core::Value;
+use metriccraft_model::dax::Key;
 
 use super::{Context, PAD, frame, key_text};
 use crate::draw::{Align, Cmd, Scene, Tag, Weight};
@@ -184,7 +184,7 @@ fn dropdown_item(
 mod tests {
     use std::path::Path;
 
-    use opendash_data::step::ColumnType;
+    use metriccraft_data::step::ColumnType;
 
     use super::*;
     use crate::query::ResultRow;
@@ -250,7 +250,7 @@ mod tests {
         let th = Theme::light();
         let cx = Context {
             theme: &th,
-            locale: &opendash_core::EN_GB,
+            locale: &metriccraft_core::EN_GB,
         };
         layout(v, r, selected, &cx)
     }

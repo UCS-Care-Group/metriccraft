@@ -1,11 +1,11 @@
 //! Relationship commands (spec D-2): Power BI's Modeling > Manage relationships. The rules
-//! (keys, one active per pair, auto-detect) are `opendash_model`'s (`relationship.rs`).
+//! (keys, one active per pair, auto-detect) are `metriccraft_model`'s (`relationship.rs`).
 //!
 //! An existing Relationship is named by `relationship`: its position in Manage relationships
 //! order (`Model::relationships`, 0 = first), or `{fromTable, fromColumn, toTable, toColumn}`
 //! (unique: two Relationships never link the same two columns).
 
-use opendash_model::Relationship;
+use metriccraft_model::Relationship;
 use serde_json::Value;
 
 use crate::model::{invalid, text};

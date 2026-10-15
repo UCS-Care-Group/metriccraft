@@ -333,7 +333,7 @@ pub(crate) fn days_from_civil(y: u32, m: u32, d: u32) -> Option<i32> {
     if y == 0 || d == 0 || d > days_in_month {
         return None;
     }
-    let days = opendash_core::date::days_from_civil(i64::from(y), i64::from(m), i64::from(d));
+    let days = metriccraft_core::date::days_from_civil(i64::from(y), i64::from(m), i64::from(d));
     i32::try_from(days).ok()
 }
 

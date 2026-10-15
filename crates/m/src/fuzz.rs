@@ -1,16 +1,16 @@
-//! Test-only fuzz harness for the fuzz tests of this crate and of `opendash-data` (which
+//! Test-only fuzz harness for the fuzz tests of this crate and of `metriccraft-data` (which
 //! includes this file by path): a deterministic xorshift generator, and a per-case net that
 //! records panics and hangs with their input instead of stopping at the first.
 //!
 //! Soak knobs (environment), all optional; the default run stays quick:
-//! - `ODASH_FUZZ_SCALE=N` multiplies each test's random case count (default 1);
-//! - `ODASH_FUZZ_SEED=S` (decimal or `0x` hex) reseeds the generator;
-//! - `ODASH_FUZZ_OUT=dir` is where failing inputs are written (default: the temp dir);
-//! - `ODASH_FUZZ_SLOW_MS=ms` is the per-case time limit counted as a hang (default 5000);
-//! - `ODASH_FUZZ_TRACE=1` writes every input to `<out>/<test>.current` before running it, so
+//! - `MCRAFT_FUZZ_SCALE=N` multiplies each test's random case count (default 1);
+//! - `MCRAFT_FUZZ_SEED=S` (decimal or `0x` hex) reseeds the generator;
+//! - `MCRAFT_FUZZ_OUT=dir` is where failing inputs are written (default: the temp dir);
+//! - `MCRAFT_FUZZ_SLOW_MS=ms` is the per-case time limit counted as a hang (default 5000);
+//! - `MCRAFT_FUZZ_TRACE=1` writes every input to `<out>/<test>.current` before running it, so
 //!   an abort (allocation failure under `ulimit -v`) or a true hang leaves its input behind.
 //!
-//! `ODASH_FUZZ_SCALE=100 ODASH_FUZZ_SEED=7 cargo test --release -p opendash-data never_panic`
+//! `MCRAFT_FUZZ_SCALE=100 MCRAFT_FUZZ_SEED=7 cargo test --release -p metriccraft-data never_panic`
 
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
@@ -34,7 +34,7 @@ fn env(key: &str) -> Option<String> {
 
 impl Fuzz {
     pub fn new(name: &'static str, default_seed: u64) -> Self {
-        let seed = env("ODASH_FUZZ_SEED")
+        let seed = env("MCRAFT_FUZZ_SEED")
             .map(|s| match s.strip_prefix("0x") {
                 Some(hex) => u64::from_str_radix(hex, 16).unwrap(),
                 None => s.parse().unwrap(),
@@ -42,17 +42,17 @@ impl Fuzz {
             .unwrap_or(default_seed);
         Self {
             name,
-            scale: env("ODASH_FUZZ_SCALE").map_or(1, |s| s.parse().unwrap()),
+            scale: env("MCRAFT_FUZZ_SCALE").map_or(1, |s| s.parse().unwrap()),
             seed,
             // xorshift has a fixed point at 0.
             state: seed.max(1),
             cases: 0,
             failures: 0,
             slow: Duration::from_millis(
-                env("ODASH_FUZZ_SLOW_MS").map_or(5000, |s| s.parse().unwrap()),
+                env("MCRAFT_FUZZ_SLOW_MS").map_or(5000, |s| s.parse().unwrap()),
             ),
-            out: env("ODASH_FUZZ_OUT").map_or_else(std::env::temp_dir, PathBuf::from),
-            trace: env("ODASH_FUZZ_TRACE").is_some(),
+            out: env("MCRAFT_FUZZ_OUT").map_or_else(std::env::temp_dir, PathBuf::from),
+            trace: env("MCRAFT_FUZZ_TRACE").is_some(),
         }
     }
 

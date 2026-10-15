@@ -583,7 +583,7 @@ mod tests {
     #[test]
     fn a_missing_file_is_an_error_naming_the_query() {
         let s = Source::Parquet {
-            file: File::Path("/nonexistent/opendash/x.parquet".into()),
+            file: File::Path("/nonexistent/metriccraft/x.parquet".into()),
         };
         let e = s
             .read_batch("Sales", 10, culture(), usize::MAX)

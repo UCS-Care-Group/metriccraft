@@ -14,7 +14,7 @@ impl Dir {
         static N: AtomicUsize = AtomicUsize::new(0);
         let n = N.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("opendash-recovery-{}-{n}", std::process::id()));
+            std::env::temp_dir().join(format!("metriccraft-recovery-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Dir(dir)
@@ -107,11 +107,11 @@ fn a_killed_session_recovers_its_definitions_data_and_stale_flags() {
     assert!(app.is_dirty());
     assert!(app.write_recovery(&rec, 1_000).unwrap());
     let original: Document = app.document().clone();
-    let tracked = fs::read(dir.path("Proj/queries/Sales.odq")).unwrap();
+    let tracked = fs::read(dir.path("Proj/queries/Sales.mcq")).unwrap();
     drop(app); // killed: no close
 
     assert_eq!(
-        fs::read(dir.path("Proj/queries/Sales.odq")).unwrap(),
+        fs::read(dir.path("Proj/queries/Sales.mcq")).unwrap(),
         tracked,
         "the Project is untouched"
     );
@@ -229,7 +229,7 @@ fn unchanged_tables_are_not_rewritten() {
     assert!(app.write_recovery(&rec, MIN).unwrap());
     assert_eq!((mtime(&sales), mtime(&regions)), before);
     assert!(
-        fs::read_to_string(copy.join("model/tables/Sales.odm"))
+        fs::read_to_string(copy.join("model/tables/Sales.mcm"))
             .unwrap()
             .contains("hidden")
     );
@@ -348,7 +348,7 @@ fn a_corrupt_copy_is_listed_with_a_problem_never_a_crash() {
 
     // Damaged definitions: an error. Damaged data: opens empty and Stale, with a notice.
     let id = write(&dir);
-    fs::write(rec.join(&id).join("queries/Sales.odq"), "garbage").unwrap();
+    fs::write(rec.join(&id).join("queries/Sales.mcq"), "garbage").unwrap();
     let mut app = App::new();
     assert!(app.recover(&rec, &id).is_err());
     app.discard_recovery(&rec, &id).unwrap();
@@ -387,6 +387,6 @@ fn the_recovery_dir_is_the_user_cache() {
     // Only shape: the environment is the test runner's.
     if let Some(d) = recovery_dir() {
         assert!(d.is_absolute());
-        assert!(d.ends_with("opendash/recovery"));
+        assert!(d.ends_with("metriccraft/recovery"));
     }
 }

@@ -77,7 +77,7 @@ pub static COMMANDS: &[Command] = &[
             req(
                 "path",
                 Kind::Path,
-                "a Project folder, its project.odash.json, or a .odash Package",
+                "a Project folder, its project.mcraft.json, or a .mcraft Package",
             ),
             opt(
                 "recover",
@@ -110,12 +110,12 @@ pub static COMMANDS: &[Command] = &[
             req(
                 "path",
                 Kind::Path,
-                "the Project folder or .odash Package to write",
+                "the Project folder or .mcraft Package to write",
             ),
             opt(
                 "package",
                 Kind::Bool,
-                "write a .odash Package (default: whether path ends in .odash)",
+                "write a .mcraft Package (default: whether path ends in .mcraft)",
             ),
             opt(
                 "data",
@@ -159,7 +159,7 @@ pub static COMMANDS: &[Command] = &[
             opt(
                 "dir",
                 Kind::Path,
-                "the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)",
+                "the recovery folder (default: the user's, e.g. ~/.cache/metriccraft/recovery)",
             ),
         ],
         enabled: |_| true,
@@ -175,7 +175,7 @@ pub static COMMANDS: &[Command] = &[
             opt(
                 "dir",
                 Kind::Path,
-                "the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)",
+                "the recovery folder (default: the user's, e.g. ~/.cache/metriccraft/recovery)",
             ),
         ],
         enabled: |_| true,
@@ -1248,8 +1248,8 @@ pub static COMMANDS: &[Command] = &[
 /// `docs/commands.md`, which a test holds to this.
 pub fn reference() -> String {
     let mut out = String::from(
-        "# Commands\n\nGenerated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -p \
-         opendash-engine commands_doc`); do not \
+        "# Commands\n\nGenerated from the engine's command table (`MCRAFT_SNAPSHOT_UPDATE=1 cargo test -p \
+         metriccraft-engine commands_doc`); do not \
          edit. `?` marks an optional param.\n",
     );
     for c in COMMANDS {

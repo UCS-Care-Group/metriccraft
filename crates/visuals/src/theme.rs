@@ -1,4 +1,4 @@
-//! The one built-in theme (spec 3.2): colours and sizes defined in code, original to OpenDash BI.
+//! The one built-in theme (spec 3.2): colours and sizes defined in code, original to MetricCraft.
 
 use crate::draw::Color;
 

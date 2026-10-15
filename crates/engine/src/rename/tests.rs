@@ -1,8 +1,8 @@
-use opendash_data::Query;
-use opendash_data::culture::Culture;
-use opendash_data::source::{Bytes, File, Source, csv};
-use opendash_data::step::Step;
-use opendash_model::{ModelTable, Relationship};
+use metriccraft_data::Query;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::source::{Bytes, File, Source, csv};
+use metriccraft_data::step::Step;
+use metriccraft_model::{ModelTable, Relationship};
 use serde_json::json;
 
 use super::*;
@@ -60,7 +60,7 @@ fn app() -> App {
     app
 }
 
-fn merge(doc: &Document) -> &opendash_data::step::Merge {
+fn merge(doc: &Document) -> &metriccraft_data::step::Merge {
     let sales = doc.queries.iter().find(|q| q.name == "Sales").unwrap();
     let Some(Step::MergedQueries(m)) = sales.steps.last() else {
         panic!("no merge step");
@@ -365,24 +365,24 @@ fn duplicate_copies_the_steps_under_the_next_free_name() {
 }
 
 /// `app`'s Package files, with `edit` applied to some parts and the Manifest rehashed.
-fn files_edited(app: &App, edit: &[(&str, &str, &str)]) -> opendash_file::FileSet {
-    use opendash_file::manifest::{Manifest, hash};
-    let mut files = opendash_file::unpack(&app.package_bytes().unwrap()).unwrap();
+fn files_edited(app: &App, edit: &[(&str, &str, &str)]) -> metriccraft_file::FileSet {
+    use metriccraft_file::manifest::{Manifest, hash};
+    let mut files = metriccraft_file::unpack(&app.package_bytes().unwrap()).unwrap();
     for (path, from, to) in edit {
         let text = String::from_utf8(files[*path].clone()).unwrap();
         assert!(text.contains(from), "{from:?} in {path}:\n{text}");
         files.insert((*path).into(), text.replacen(from, to, 1).into_bytes());
     }
-    let mut m = Manifest::parse(&files[opendash_file::MANIFEST]).unwrap();
+    let mut m = Manifest::parse(&files[metriccraft_file::MANIFEST]).unwrap();
     for (p, h) in m.parts.iter_mut() {
         *h = hash(&files[p]);
     }
-    files.insert(opendash_file::MANIFEST.into(), m.print());
+    files.insert(metriccraft_file::MANIFEST.into(), m.print());
     files
 }
 
 fn saved(app: &App, path: &str) -> String {
-    let files = opendash_file::unpack(&app.package_bytes().unwrap()).unwrap();
+    let files = metriccraft_file::unpack(&app.package_bytes().unwrap()).unwrap();
     String::from_utf8(files.get(path).cloned().unwrap_or_default()).unwrap()
 }
 
@@ -401,29 +401,29 @@ fn renames_keep_unknown_file_content_under_the_new_name() {
         &app(),
         &[
             (
-                "model/tables/Regions.odm",
+                "model/tables/Regions.mcm",
                 "table Regions\n",
                 "table Regions\n  lineageTag: t1\n",
             ),
             (
-                "model/tables/Regions.odm",
+                "model/tables/Regions.mcm",
                 "  column Manager\n",
                 "  column Manager\n    isKey\n",
             ),
             (
-                "queries/Regions.odq",
+                "queries/Regions.mcq",
                 "  load: true\n",
                 "  load: true\n  note: kept\n",
             ),
             (
-                "model/relationships.odm",
+                "model/relationships.mcm",
                 "relationship Sales[Region] -> Regions[Region]\n",
                 "relationship Sales[Region] -> Regions[Region]\n  crossFilter: both\n",
             ),
         ],
     );
     let mut app = App::new();
-    app.open_package_bytes(&opendash_file::pack(&files).unwrap())
+    app.open_package_bytes(&metriccraft_file::pack(&files).unwrap())
         .unwrap();
     app.run(
         "modeling.renameTable",
@@ -441,28 +441,28 @@ fn renames_keep_unknown_file_content_under_the_new_name() {
     )
     .unwrap();
 
-    let table = saved(&app, "model/tables/Areas.odm");
+    let table = saved(&app, "model/tables/Areas.mcm");
     assert!(
         table.starts_with("table Areas\n") && table.contains("  lineageTag: t1\n"),
         "{table}"
     );
     assert!(column(&table, "Boss").contains("    isKey\n"), "{table}");
-    assert!(saved(&app, "queries/Areas.odq").contains("  note: kept\n"));
+    assert!(saved(&app, "queries/Areas.mcq").contains("  note: kept\n"));
     assert_eq!(
-        saved(&app, "model/relationships.odm"),
+        saved(&app, "model/relationships.mcm"),
         "relationship Sales[Region] -> Areas[Area]\n  crossFilter: both\n"
     );
-    assert_eq!(saved(&app, "model/tables/Regions.odm"), "");
+    assert_eq!(saved(&app, "model/tables/Regions.mcm"), "");
 
     // Undone, they are under the old names again.
     for _ in 0..3 {
         app.run("edit.undo", &Value::Null).unwrap();
     }
-    let table = saved(&app, "model/tables/Regions.odm");
+    let table = saved(&app, "model/tables/Regions.mcm");
     assert!(
         table.contains("  lineageTag: t1\n") && column(&table, "Manager").contains("    isKey\n"),
         "{table}"
     );
-    assert!(saved(&app, "queries/Regions.odq").contains("  note: kept\n"));
-    assert!(saved(&app, "model/relationships.odm").contains("crossFilter: both"));
+    assert!(saved(&app, "queries/Regions.mcq").contains("  note: kept\n"));
+    assert!(saved(&app, "model/relationships.mcm").contains("crossFilter: both"));
 }

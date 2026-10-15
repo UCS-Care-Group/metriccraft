@@ -1,4 +1,4 @@
-//! Measures and Calculated columns (spec D-3; `opendash_model`'s `expression.rs` and
+//! Measures and Calculated columns (spec D-3; `metriccraft_model`'s `expression.rs` and
 //! `calculated.rs` hold the rules): New measure, New column, editing a formula, deleting one,
 //! renaming a Measure. All undoable; a change that fails changes nothing.
 //!
@@ -15,8 +15,8 @@
 //! Parity uncertainties: Power BI names a new Measure `Measure` (`Measure 2`, …) and a new
 //! column `Column` until the formula bar names it; we need `name`.
 
-use opendash_data::culture::{CULTURES, Culture};
-use opendash_model::{Measure, Object, normalise_expression};
+use metriccraft_data::culture::{CULTURES, Culture};
+use metriccraft_model::{Measure, Object, normalise_expression};
 use serde_json::Value;
 
 use crate::model::{invalid, text};
@@ -179,13 +179,13 @@ impl Document {
     pub fn dax_query(
         &self,
         query: &str,
-    ) -> opendash_model::dax::Result<Vec<opendash_model::dax::ResultTable>> {
-        let db = opendash_model::dax::Database::new(&self.model, &self.tables);
-        opendash_model::dax::model_eval::run_model_query_text(
+    ) -> metriccraft_model::dax::Result<Vec<metriccraft_model::dax::ResultTable>> {
+        let db = metriccraft_model::dax::Database::new(&self.model, &self.tables);
+        metriccraft_model::dax::model_eval::run_model_query_text(
             &db,
             &self.model,
             query,
-            opendash_model::dax::Options::default(),
+            metriccraft_model::dax::Options::default(),
         )
     }
 }

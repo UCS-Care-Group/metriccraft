@@ -2,7 +2,7 @@
 //! by case are one value, spelled as the first row that has it (CONTEXT.md, Column). Power Query
 //! (Preview, merges within a load) stays case-sensitive: only the load folds.
 //!
-//! **The fold** is DAX's ([`opendash_core::fold`]): locale-invariant lower, upper, lower, no
+//! **The fold** is DAX's ([`metriccraft_core::fold`]): locale-invariant lower, upper, lower, no
 //! accent folding. So `"É"`/`"é"` are one value, `"e"`/`"é"` are two; `"ß"`, `"ẞ"`, `"SS"` and
 //! `"ss"` are one (parity case 0038); `"ΟΔΟΣ"` and `"οδος"` are one.
 //!
@@ -181,7 +181,7 @@ fn fold<K: ArrowDictionaryKeyType>(
     Ok(Some(Arc::new(folded)))
 }
 
-/// `s` folded ([`opendash_core::fold`]), borrowing `s` when it has nothing to lower.
+/// `s` folded ([`metriccraft_core::fold`]), borrowing `s` when it has nothing to lower.
 fn lower<'a>(s: &'a str, buf: &'a mut String) -> &'a str {
     if s.is_ascii() {
         if !s.bytes().any(|b| b.is_ascii_uppercase()) {
@@ -192,7 +192,7 @@ fn lower<'a>(s: &'a str, buf: &'a mut String) -> &'a str {
         buf.make_ascii_lowercase();
         return buf;
     }
-    *buf = opendash_core::fold(s);
+    *buf = metriccraft_core::fold(s);
     buf
 }
 

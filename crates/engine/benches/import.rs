@@ -1,8 +1,8 @@
 //! Import benches (spec N-2, N-8; ADR 0005). Run via `cargo xtask bench`, which generates the
-//! files and lists them in `OPENDASH_BENCH_IMPORTS` (lines of `<name>\t<path>`); without it only
+//! files and lists them in `METRICCRAFT_BENCH_IMPORTS` (lines of `<name>\t<path>`); without it only
 //! the idle bench runs.
 //!
-//! Each measurement is a fresh process (this binary again, with `OPENDASH_BENCH_CASE` set), so
+//! Each measurement is a fresh process (this binary again, with `METRICCRAFT_BENCH_CASE` set), so
 //! its peak RSS is the import's own: Get Data (`home.getData`, the real path: connect, run, load)
 //! on a new App. Prints the median of [`RUNS`]:
 //! - `BENCH <name> <ns>`: the Get Data command;
@@ -16,10 +16,10 @@
 use std::process::Command;
 use std::time::Instant;
 
-use opendash_engine::App;
+use metriccraft_engine::App;
 use serde_json::json;
 
-const CASE: &str = "OPENDASH_BENCH_CASE";
+const CASE: &str = "METRICCRAFT_BENCH_CASE";
 const RUNS: usize = 3;
 
 fn main() {
@@ -30,7 +30,7 @@ fn main() {
         }
         return;
     }
-    let imports = std::env::var("OPENDASH_BENCH_IMPORTS").unwrap_or_default();
+    let imports = std::env::var("METRICCRAFT_BENCH_IMPORTS").unwrap_or_default();
     let cases = std::iter::once(("engine/idle", ""))
         .chain(imports.lines().filter_map(|l| l.split_once('\t')));
     for (name, path) in cases {

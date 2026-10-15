@@ -1,5 +1,5 @@
 [package]
-name = "opendash-engine"
+name = "metriccraft-engine"
 description = "Document, commands, undo/redo and cross-filter state."
 version.workspace = true
 edition.workspace = true
@@ -12,17 +12,17 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-opendash-core = { path = "../core" }
-opendash-data = { path = "../data" }
-opendash-model = { path = "../model" }
-opendash-file = { path = "../file" }
-opendash-visuals = { path = "../visuals", default-features = false }
+metriccraft-core = { path = "../core" }
+metriccraft-data = { path = "../data" }
+metriccraft-model = { path = "../model" }
+metriccraft-file = { path = "../file" }
+metriccraft-visuals = { path = "../visuals", default-features = false }
 arrow-schema.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 # Snapshot PNGs for eyeballing (`cargo xtask snapshot`).
-opendash-visuals = { path = "../visuals" }
+metriccraft-visuals = { path = "../visuals" }
 arrow-array.workspace = true
 arrow-cast.workspace = true
 

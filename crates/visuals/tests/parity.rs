@@ -6,7 +6,7 @@ use std::path::Path;
 #[test]
 fn visual_parity() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parity/visuals");
-    let report = opendash_visuals::parity::run(&dir).unwrap();
+    let report = metriccraft_visuals::parity::run(&dir).unwrap();
     let problems = report.problems();
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
@@ -14,11 +14,11 @@ fn visual_parity() {
 #[test]
 fn every_visual_case_runs_on_our_side() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parity/visuals");
-    let cases = opendash_model::parity::cases_in(&dir).unwrap();
+    let cases = metriccraft_model::parity::cases_in(&dir).unwrap();
     assert!(cases.len() >= 4);
     for case in &cases {
-        let (columns, rows) =
-            opendash_visuals::parity::evaluate(case).unwrap_or_else(|e| panic!("{}: {e}", case.id));
+        let (columns, rows) = metriccraft_visuals::parity::evaluate(case)
+            .unwrap_or_else(|e| panic!("{}: {e}", case.id));
         assert!(!columns.is_empty() && !rows.is_empty(), "{}", case.id);
         eprintln!("{}: {columns:?}\n{rows:?}", case.id);
     }

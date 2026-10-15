@@ -1,4 +1,4 @@
-//! The formula engine (ADR 0006): interprets the `opendash_dax` AST under a filter context and
+//! The formula engine (ADR 0006): interprets the `metriccraft_dax` AST under a filter context and
 //! a row context stack. Aggregations go to storage scans ([`super::storage`]); functions are in
 //! [`super::functions`].
 //!
@@ -15,8 +15,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use opendash_core::Value;
-use opendash_dax::{BinOp, Define, Expr, ExprKind, Query, Span, UnaryOp};
+use metriccraft_core::Value;
+use metriccraft_dax::{BinOp, Define, Expr, ExprKind, Query, Span, UnaryOp};
 
 use super::functions::{self, Call};
 use super::storage::{self, Bitset, Cancel, DbTable, Filter, Key, and};
@@ -215,7 +215,7 @@ impl<'a, 'q> Evaluator<'a, 'q> {
     }
 
     /// Sorts a result by `ORDER BY` keys, each evaluated in the row context of a result row.
-    fn order_by(&mut self, rows: Rows, keys: &[opendash_dax::OrderKey]) -> Result<Rows> {
+    fn order_by(&mut self, rows: Rows, keys: &[metriccraft_dax::OrderKey]) -> Result<Rows> {
         let n = rows.rows.len();
         let span = keys.first().map(|k| k.expr.span).unwrap_or_default();
         self.charge(
@@ -1283,7 +1283,7 @@ fn constructor_table(rows: Vec<Vec<Value>>) -> Val {
 fn unknown_function(name: &str, span: Span) -> DaxError {
     DaxError::new(
         span,
-        format!("OpenDash BI doesn't know the function {name} (yet)"),
+        format!("MetricCraft doesn't know the function {name} (yet)"),
     )
 }
 
@@ -1324,7 +1324,7 @@ fn too_deep_for_stack(span: Span) -> DaxError {
 
 #[cold]
 #[inline(never)]
-pub(super) fn value_error(span: Span, e: &opendash_core::ValueError) -> DaxError {
+pub(super) fn value_error(span: Span, e: &metriccraft_core::ValueError) -> DaxError {
     DaxError::new(span, e.to_string())
 }
 

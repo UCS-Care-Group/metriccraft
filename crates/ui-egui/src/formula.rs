@@ -4,7 +4,7 @@
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Event, FontId, Key, RichText, Stroke, Ui};
-use opendash_dax::{Span, Tok, tokens};
+use metriccraft_dax::{Span, Tok, tokens};
 use serde_json::{Value, json};
 
 use crate::strings::Str;
@@ -59,7 +59,7 @@ fn error(text: &str) -> Option<(Span, String)> {
     if expr.trim().is_empty() {
         return None;
     }
-    let e = opendash_dax::parse_expr(expr).err()?;
+    let e = metriccraft_dax::parse_expr(expr).err()?;
     let span = Span::new(
         e.span.start.saturating_add(at),
         e.span.end.saturating_add(at),

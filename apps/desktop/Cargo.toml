@@ -1,6 +1,6 @@
 [package]
-name = "opendash"
-description = "OpenDash BI desktop app."
+name = "metriccraft"
+description = "MetricCraft desktop app."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,8 +18,8 @@ glow = ["eframe/glow"]
 wgpu = ["eframe/wgpu"]
 
 [dependencies]
-opendash-engine = { path = "../../crates/engine" }
-opendash-ui-egui = { path = "../../crates/ui-egui" }
+metriccraft-engine = { path = "../../crates/engine" }
+metriccraft-ui-egui = { path = "../../crates/ui-egui" }
 eframe = { workspace = true, features = ["accesskit", "default_fonts", "wayland", "x11"] }
 egui = { workspace = true }
 serde_json = { workspace = true }

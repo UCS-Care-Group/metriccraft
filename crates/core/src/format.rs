@@ -56,7 +56,7 @@ pub const MAX_FORMAT_LEN: usize = 1024;
 const MIN_SERIAL: f64 = -657_434.0;
 const MAX_SERIAL: f64 = 2_958_466.0;
 
-/// The locale facts formatting needs, for the four Cultures (CONTEXT.md). `opendash_data`'s
+/// The locale facts formatting needs, for the four Cultures (CONTEXT.md). `metriccraft_data`'s
 /// `Culture` maps to one by name ([`Locale::get`]).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Locale {

@@ -5,7 +5,7 @@
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{FontId, RichText, Ui};
-use opendash_engine::Command;
+use metriccraft_engine::Command;
 use serde_json::{Value, json};
 
 use crate::grid::Grid;
@@ -45,7 +45,7 @@ pub struct QueryEditor {
 
 /// Applied Steps' names as Power Query shows them: a repeated name gets a number (`Changed
 /// Type1`).
-pub fn step_names(steps: &[opendash_engine::Step]) -> Vec<String> {
+pub fn step_names(steps: &[metriccraft_engine::Step]) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(steps.len());
     for s in steps {
         let name = s.name();
@@ -170,7 +170,7 @@ impl QueryEditor {
                 let m = self
                     .query
                     .as_deref()
-                    .and_then(|n| opendash_engine::query_m(doc, n))
+                    .and_then(|n| metriccraft_engine::query_m(doc, n))
                     .unwrap_or_default();
                 egui::ScrollArea::both().show(ui, |ui| {
                     let job = m_colour(&m, t, &FontId::monospace(13.0));
@@ -297,7 +297,7 @@ pub fn m_colour(src: &str, t: &Tokens, font: &FontId) -> LayoutJob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opendash_engine::Step;
+    use metriccraft_engine::Step;
 
     #[test]
     fn repeated_step_names_are_numbered_as_power_query_does() {

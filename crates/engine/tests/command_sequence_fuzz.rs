@@ -13,8 +13,8 @@
 //! - (e) save → open gives the same definitions (see [`round_trip`]), for the final Document
 //!   and the original.
 //!
-//! Seeded and bounded: `ODASH_FUZZ_SCALE` (default 1) multiplies the number of sequences;
-//! `ODASH_FUZZ_SEED` replays one. Each sequence is at most [`STEPS`] commands (well under
+//! Seeded and bounded: `MCRAFT_FUZZ_SCALE` (default 1) multiplies the number of sequences;
+//! `MCRAFT_FUZZ_SEED` replays one. Each sequence is at most [`STEPS`] commands (well under
 //! `UNDO_LIMIT`, so undo-all always reaches the start) over three tables of a few rows.
 
 // In a `cfg(test)` module so clippy treats it as test code (unwrap and panic allowed).
@@ -23,15 +23,15 @@ mod fuzz {
 
     use std::collections::{BTreeMap, BTreeSet};
 
-    use opendash_data::Query;
-    use opendash_data::culture::Culture;
-    use opendash_data::source::{Bytes, File, Source, csv};
-    use opendash_data::step::Step;
-    use opendash_engine::Page;
-    use opendash_engine::{App, Document, UNDO_LIMIT};
-    use opendash_file::{Preserved, Project};
-    use opendash_model::{ModelTable, same_name};
-    use opendash_visuals::{FieldRef, Visual, VisualType, Well};
+    use metriccraft_data::Query;
+    use metriccraft_data::culture::Culture;
+    use metriccraft_data::source::{Bytes, File, Source, csv};
+    use metriccraft_data::step::Step;
+    use metriccraft_engine::Page;
+    use metriccraft_engine::{App, Document, UNDO_LIMIT};
+    use metriccraft_file::{Preserved, Project};
+    use metriccraft_model::{ModelTable, same_name};
+    use metriccraft_visuals::{FieldRef, Visual, VisualType, Well};
     use serde_json::{Value, json};
 
     /// Commands per sequence.
@@ -105,7 +105,7 @@ mod fuzz {
 
     /// The starting report: two Pages with a few Visuals and Fields, so the report commands
     /// have something to act on from the first step.
-    fn report() -> opendash_engine::Report {
+    fn report() -> metriccraft_engine::Report {
         let column = |t: &str, c: &str| FieldRef::Column {
             table: t.into(),
             column: c.into(),
@@ -142,7 +142,7 @@ mod fuzz {
             .wells
             .insert(Well::Values, vec![column("Products", "Code")]);
         detail.visuals = vec![matrix];
-        let mut report = opendash_engine::Report::default();
+        let mut report = metriccraft_engine::Report::default();
         report.pages = vec![overview, detail];
         report
     }
@@ -881,14 +881,14 @@ mod fuzz {
             report: BTreeMap::new(),
             diagram: None,
         };
-        let files = opendash_file::encode(&project, None, &Preserved::default())
+        let files = metriccraft_file::encode(&project, None, &Preserved::default())
             .map_err(|e| format!("encode: {e}"))?;
         let (back, preserved) =
-            opendash_file::decode(&files, None).map_err(|e| format!("decode: {e}"))?;
+            metriccraft_file::decode(&files, None).map_err(|e| format!("decode: {e}"))?;
         if back != project {
             return Err(format!("decoded {}", first_difference(&back, &project)));
         }
-        let again = opendash_file::encode(&back, None, &preserved)
+        let again = metriccraft_file::encode(&back, None, &preserved)
             .map_err(|e| format!("encode again: {e}"))?;
         if again != files {
             return Err("saving what was opened changes the bytes".into());
@@ -962,7 +962,7 @@ mod fuzz {
             ));
             let fail = |what: String| -> ! {
                 panic!(
-                    "seed {seed}: {what}\nreplay: ODASH_FUZZ_SEED={seed}\n{}",
+                    "seed {seed}: {what}\nreplay: MCRAFT_FUZZ_SEED={seed}\n{}",
                     log.join("\n")
                 )
             };
@@ -988,7 +988,7 @@ mod fuzz {
         let last = app.document().clone();
         if let Err(e) = round_trip(&last) {
             panic!(
-                "seed {seed}: save → open: {e}\nreplay: ODASH_FUZZ_SEED={seed}\n{}",
+                "seed {seed}: save → open: {e}\nreplay: MCRAFT_FUZZ_SEED={seed}\n{}",
                 log.join("\n")
             );
         }
@@ -1018,14 +1018,14 @@ mod fuzz {
 
     #[test]
     fn command_sequences_keep_the_document_consistent_and_undoable() {
-        if let Some(seed) = std::env::var("ODASH_FUZZ_SEED")
+        if let Some(seed) = std::env::var("MCRAFT_FUZZ_SEED")
             .ok()
             .and_then(|s| s.parse().ok())
         {
             run(seed, &mut Stats::new());
             return;
         }
-        let scale: u64 = std::env::var("ODASH_FUZZ_SCALE")
+        let scale: u64 = std::env::var("MCRAFT_FUZZ_SCALE")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(1)

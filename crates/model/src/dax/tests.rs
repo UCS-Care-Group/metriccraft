@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder};
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder};
 
 use super::eval::{RowFrame, TableVal};
 use super::*;
@@ -203,7 +203,7 @@ fn filters_propagate_one_to_many_over_active_relationships() {
     ));
     assert_eq!(ev.mask(product, &one_sale, span).unwrap(), None);
     // COUNTROWS sees the propagated filter.
-    let q = opendash_dax::parse_expr("COUNTROWS(Sales)").unwrap();
+    let q = metriccraft_dax::parse_expr("COUNTROWS(Sales)").unwrap();
     let mut ev = Evaluator::new(&db, options());
     assert!(matches!(ev.scalar(&q, &red), Ok(Value::Integer(3))));
     // An inactive Relationship doesn't propagate.
@@ -253,7 +253,7 @@ fn row_context_reads_the_current_row() {
     let db = db();
     let mut ev = Evaluator::new(&db, options());
     let sales = db.table("Sales").unwrap();
-    let e = opendash_dax::parse_expr("Sales[Amount] * 2 & [Region]").unwrap();
+    let e = metriccraft_dax::parse_expr("Sales[Amount] * 2 & [Region]").unwrap();
     let fc = FilterContext::default();
     let v = ev
         .with_row(
@@ -268,7 +268,7 @@ fn row_context_reads_the_current_row() {
     // A Column outside any row context has no single value.
     let err = ev.scalar(&e, &fc).unwrap_err();
     assert!(err.message.contains("row context"), "{err}");
-    assert_eq!(err.span, opendash_dax::Span::new(0, 13));
+    assert_eq!(err.span, metriccraft_dax::Span::new(0, 13));
 }
 
 #[test]
@@ -534,7 +534,7 @@ fn a_table_scalar_takes_its_one_value() {
     assert_eq!(ev.row_count(&t).unwrap(), 0);
 }
 
-/// 5,000 cases a run (`ODASH_FUZZ_SCALE` multiplies): mutated queries that parse are evaluated
+/// 5,000 cases a run (`MCRAFT_FUZZ_SCALE` multiplies): mutated queries that parse are evaluated
 /// against the tiny model; none may panic or hang.
 #[test]
 fn fuzzed_queries_never_panic() {
@@ -589,7 +589,7 @@ fn fuzzed_queries_never_panic() {
         }
         let src: String = chars.into_iter().collect();
         rng.case(src.as_bytes(), || {
-            if let Ok(q) = opendash_dax::parse_query(&src) {
+            if let Ok(q) = metriccraft_dax::parse_query(&src) {
                 let _ = run_query(&db, &q, options);
             }
         });

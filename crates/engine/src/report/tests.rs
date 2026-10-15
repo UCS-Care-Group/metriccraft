@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use opendash_data::Query;
-use opendash_data::culture::Culture;
-use opendash_data::source::{Bytes, File, Source, csv};
-use opendash_model::ModelTable;
+use metriccraft_data::Query;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::source::{Bytes, File, Source, csv};
+use metriccraft_model::ModelTable;
 use serde_json::json;
 
-use opendash_visuals::query::{MAX_AXIS_FIELDS, MAX_VALUE_FIELDS};
+use metriccraft_visuals::query::{MAX_AXIS_FIELDS, MAX_VALUE_FIELDS};
 
 use super::*;
 use crate::Error;
@@ -904,7 +904,8 @@ impl Dir {
     fn new() -> Dir {
         static N: AtomicUsize = AtomicUsize::new(0);
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("opendash-report-{}-{n}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("metriccraft-report-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Dir(dir)
@@ -1068,8 +1069,9 @@ fn save_twice_is_byte_identical_and_reopens_the_same_report() {
     let mut app = full_app();
     let path = dir.0.join("Proj").display().to_string();
     run(&mut app, "file.saveAs", json!({"path": path}));
-    let read =
-        || opendash_file::read_folder(&dir.0.join("Proj"), opendash_file::Recover::No).unwrap();
+    let read = || {
+        metriccraft_file::read_folder(&dir.0.join("Proj"), metriccraft_file::Recover::No).unwrap()
+    };
     let first = read();
     run(&mut app, "file.save", json!({}));
     assert_eq!(read(), first);
@@ -1086,7 +1088,7 @@ fn project_and_package_round_trip_the_report() {
     let dir = Dir::new();
     let mut app = full_app();
     let report = app.document().report.clone();
-    let pkg = dir.0.join("R.odash").display().to_string();
+    let pkg = dir.0.join("R.mcraft").display().to_string();
     run(&mut app, "file.saveAs", json!({"path": pkg}));
     let mut opened = App::new();
     run(&mut opened, "file.open", json!({"path": pkg}));
@@ -1098,7 +1100,7 @@ fn project_and_package_round_trip_the_report() {
     let mut again = App::new();
     run(&mut again, "file.open", json!({"path": proj}));
     assert_eq!(again.document().report, report);
-    let pkg2 = dir.0.join("R2.odash").display().to_string();
+    let pkg2 = dir.0.join("R2.mcraft").display().to_string();
     run(&mut again, "file.saveAs", json!({"path": pkg2}));
     assert_eq!(std::fs::read(&pkg2).unwrap(), std::fs::read(&pkg).unwrap());
     // And in memory, as the web build does.
@@ -1110,12 +1112,12 @@ fn project_and_package_round_trip_the_report() {
 
 /// `bytes` (a Package) with its report parts changed by `f`.
 fn edit_package(bytes: &[u8], f: impl FnOnce(&mut BTreeMap<String, Vec<u8>>)) -> Vec<u8> {
-    let files = opendash_file::unpack(bytes).unwrap();
-    let (mut project, preserved) = opendash_file::decode(&files, None).unwrap();
+    let files = metriccraft_file::unpack(bytes).unwrap();
+    let (mut project, preserved) = metriccraft_file::decode(&files, None).unwrap();
     f(&mut project.report);
-    let mut out = opendash_file::encode(&project, None, &preserved).unwrap();
+    let mut out = metriccraft_file::encode(&project, None, &preserved).unwrap();
     out.extend(files.into_iter().filter(|(k, _)| k.starts_with(".cache/")));
-    opendash_file::pack(&out).unwrap()
+    metriccraft_file::pack(&out).unwrap()
 }
 
 fn json_part(parts: &mut BTreeMap<String, Vec<u8>>, path: &str, f: impl FnOnce(&mut Value)) {
@@ -1325,7 +1327,7 @@ fn malformed_report_files_are_errors_naming_the_file() {
         let bytes = edit_package(&good, |parts| json_part(parts, path, |v| edit(v)));
         let mut opened = App::new();
         match opened.open_package_bytes(&bytes) {
-            Err(Error::File(opendash_file::Error::Part { path: p, .. })) => assert_eq!(&p, path),
+            Err(Error::File(metriccraft_file::Error::Part { path: p, .. })) => assert_eq!(&p, path),
             other => panic!("{path}: expected a Part error, got {other:?}"),
         }
         assert!(

@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder, fold_case};
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder, fold_case};
 
 use super::{ColumnRef, summarize};
 use crate::dax::*;
@@ -338,8 +338,8 @@ fn cancel_stops_it() {
 #[test]
 fn the_rust_api_matches_the_dax_function() {
     let db = db();
-    let sum = opendash_dax::parse_expr("SUM(Sales[Amount])").unwrap();
-    let count = opendash_dax::parse_expr("COUNTROWS(FILTER(Sales, Sales[Qty] >= 3))").unwrap();
+    let sum = metriccraft_dax::parse_expr("SUM(Sales[Amount])").unwrap();
+    let count = metriccraft_dax::parse_expr("COUNTROWS(FILTER(Sales, Sales[Qty] >= 3))").unwrap();
     let r = summarize(
         &db,
         &[

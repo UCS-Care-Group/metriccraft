@@ -1,5 +1,5 @@
 [package]
-name = "opendash-visuals"
+name = "metriccraft-visuals"
 description = "Visual definitions, visual queries and layout to draw primitives."
 version.workspace = true
 edition.workspace = true
@@ -18,10 +18,10 @@ png = ["dep:tiny-skia"]
 
 [dependencies]
 ab_glyph = "0.2"
-opendash-core = { path = "../core" }
-opendash-data = { path = "../data" }
-opendash-dax = { path = "../dax" }
-opendash-model = { path = "../model" }
+metriccraft-core = { path = "../core" }
+metriccraft-data = { path = "../data" }
+metriccraft-dax = { path = "../dax" }
+metriccraft-model = { path = "../model" }
 serde_json.workspace = true
 tiny-skia = { version = "0.12", optional = true, default-features = false, features = ["std", "png-format"] }
 

@@ -1,18 +1,18 @@
-//! OpenDash BI desktop app: the engine on its worker thread, the egui window on eframe.
+//! MetricCraft desktop app: the engine on its worker thread, the egui window on eframe.
 //!
-//! `opendash [PROJECT]` opens a Project folder or `.odash` Package.
+//! `metriccraft [PROJECT]` opens a Project folder or `.mcraft` Package.
 
 use std::path::PathBuf;
 
-use opendash_engine::App;
-use opendash_ui_egui::strings::Str;
-use opendash_ui_egui::worker::Engine;
-use opendash_ui_egui::{FileAsk, FileHook, Prefs, Shell};
+use metriccraft_engine::App;
+use metriccraft_ui_egui::strings::Str;
+use metriccraft_ui_egui::worker::Engine;
+use metriccraft_ui_egui::{FileAsk, FileHook, Prefs, Shell};
 use serde_json::json;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-/// The per-user preferences file (ADR 0008): `$XDG_CONFIG_HOME/opendash/prefs.json` (or
-/// `~/.config/…`) on Linux, `%APPDATA%\opendash` on Windows, `~/Library/Application Support/…` on
+/// The per-user preferences file (ADR 0008): `$XDG_CONFIG_HOME/metriccraft/prefs.json` (or
+/// `~/.config/…`) on Linux, `%APPDATA%\metriccraft` on Windows, `~/Library/Application Support/…` on
 /// macOS.
 fn prefs_path() -> Option<PathBuf> {
     let var = |k: &str| {
@@ -26,7 +26,7 @@ fn prefs_path() -> Option<PathBuf> {
     let base = var("HOME").map(|h| h.join("Library").join("Application Support"));
     #[cfg(not(any(windows, target_os = "macos")))]
     let base = var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")));
-    Some(base?.join("opendash").join("prefs.json"))
+    Some(base?.join("metriccraft").join("prefs.json"))
 }
 
 fn load_prefs() -> Prefs {
@@ -71,13 +71,13 @@ fn file_dialogs(ctx: &egui::Context) -> (FileHook, Dialogs) {
 impl Dialogs {
     fn show(&self, frame: &eframe::Frame) {
         while let Ok((ask, answer)) = self.queue.try_recv() {
-            let filter = Str::OpenDashFiles.text();
+            let filter = Str::MetricCraftFiles.text();
             let dialog = rfd::AsyncFileDialog::new().set_parent(frame);
             let picking: std::pin::Pin<
                 Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>,
             > = match ask {
                 FileAsk::Open => {
-                    Box::pin(dialog.add_filter(filter, &["odash", "json"]).pick_file())
+                    Box::pin(dialog.add_filter(filter, &["mcraft", "json"]).pick_file())
                 }
                 FileAsk::SaveAs { name } => Box::pin(dialog.set_file_name(name).save_file()),
                 FileAsk::Data => Box::pin(
@@ -102,7 +102,7 @@ impl Dialogs {
 /// The window, the preferences last written, and the file dialogs.
 struct Desktop(Shell, Prefs, Dialogs, Option<Bench>);
 
-/// `ODASH_UI_BENCH=1` (`cargo xtask ui-bench`): prints `BENCH ui/first_frame` once the first
+/// `MCRAFT_UI_BENCH=1` (`cargo xtask ui-bench`): prints `BENCH ui/first_frame` once the first
 /// frame is on screen and, after two idle seconds, `BENCH ui/idle_private <bytes>` (memory of
 /// its own, what Windows' Task Manager shows) and `BENCH ui/idle_rss <bytes>` (with the shared
 /// libraries, the graphics driver's included), then quits.
@@ -172,7 +172,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(Str::AppName.text())
-            .with_app_id("org.opendash.OpenDash")
+            .with_app_id("org.metriccraft.MetricCraft")
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 500.0]),
         ..Default::default()
@@ -190,7 +190,7 @@ fn main() -> eframe::Result {
             let mut shell =
                 Shell::new(engine, prefs, Engine::recoverable()).with_file_dialogs(hook);
             shell.setup(&cc.egui_ctx);
-            let bench = std::env::var_os("ODASH_UI_BENCH").map(|_| Bench {
+            let bench = std::env::var_os("MCRAFT_UI_BENCH").map(|_| Bench {
                 frames: 0,
                 shown: None,
             });

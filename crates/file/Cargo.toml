@@ -1,5 +1,5 @@
 [package]
-name = "opendash-file"
+name = "metriccraft-file"
 description = "Project and Package read/write (ADR 0003)."
 version.workspace = true
 edition.workspace = true
@@ -12,8 +12,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-opendash-data = { path = "../data" }
-opendash-model = { path = "../model" }
+metriccraft-data = { path = "../data" }
+metriccraft-model = { path = "../model" }
 arrow-array.workspace = true
 arrow-cast.workspace = true
 arrow-schema.workspace = true

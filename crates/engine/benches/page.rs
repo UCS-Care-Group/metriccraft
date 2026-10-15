@@ -1,5 +1,5 @@
 //! Page refresh bench (M4.7; spec N-3; `docs/bench.md`). For each `import/parquet_<n>` file in
-//! `OPENDASH_BENCH_IMPORTS` (see `dax.rs`), loads it once and builds the reference page: card,
+//! `METRICCRAFT_BENCH_IMPORTS` (see `dax.rs`), loads it once and builds the reference page: card,
 //! clustered bar (Country), line (OrderDate), table (Product, 500-row window), matrix
 //! (Region → Country × Channel, with subtotals) and a Category slicer. Then, median of [`RUNS`]:
 //!
@@ -10,15 +10,15 @@
 
 use std::time::Instant;
 
-use opendash_engine::App;
-use opendash_visuals::Theme;
-use opendash_visuals::layout::Context;
+use metriccraft_engine::App;
+use metriccraft_visuals::Theme;
+use metriccraft_visuals::layout::Context;
 use serde_json::{Value, json};
 
 const RUNS: usize = 5;
 
 fn main() {
-    let imports = std::env::var("OPENDASH_BENCH_IMPORTS").unwrap_or_default();
+    let imports = std::env::var("METRICCRAFT_BENCH_IMPORTS").unwrap_or_default();
     for (name, path) in imports.lines().filter_map(|l| l.split_once('\t')) {
         let Some(label) = name.strip_prefix("import/parquet_") else {
             continue;
@@ -133,7 +133,7 @@ fn measure(label: &str, path: &str) -> Result<(), String> {
     let th = Theme::light();
     let cx = Context {
         theme: &th,
-        locale: &opendash_core::EN_GB,
+        locale: &metriccraft_core::EN_GB,
     };
     app.page_scene(&page, &cx).map_err(|e| e.to_string())?;
     let categories = ["Bikes", "Helmets", "Clothing", "Shoes", "Tents", "Camping"];

@@ -1,13 +1,13 @@
-//! The File menu (ADR 0003): New, Open, Save and Save As, over `opendash_file`.
+//! The File menu (ADR 0003): New, Open, Save and Save As, over `metriccraft_file`.
 //!
-//! The Document maps to an `opendash_file::Project` (Queries, Enable load, Model, Project
+//! The Document maps to an `metriccraft_file::Project` (Queries, Enable load, Model, Project
 //! culture, and the report as JSON parts, `report/json.rs`); what the files held beyond it (unknown content) and where they live stay in
 //! [`FileState`], beside the Document, so undo never touches them.
 //!
 //! Opening (and New) replaces the Document and clears undo and redo: not undoable, as in Power
 //! BI.
 //!
-//! **Data cache** (`opendash_file::cache`, M2.6). Saving writes each Table's data (as loaded,
+//! **Data cache** (`metriccraft_file::cache`, M2.6). Saving writes each Table's data (as loaded,
 //! after Model type overrides) as Parquet, with its provenance (`Document::provenance`) as
 //! metadata. In a Project folder only what changed since the last save there is written: data
 //! by buffer identity (columns are immutable and shared, ADR 0005, so changed data is different
@@ -23,7 +23,7 @@
 //! no provenance (e.g. renamed since it loaded) is saved with its Query's current hash and
 //! files, or as Stale if its Query has unapplied edits; one that never loaded isn't saved.
 //!
-//! **Local overrides** (`opendash_file::local`, M2.9). A Project folder's `.local/paths.odl`
+//! **Local overrides** (`metriccraft_file::local`, M2.9). A Project folder's `.local/paths.odl`
 //! remaps Source paths for this user: applied on open to the Queries and the cached Source
 //! fingerprints (the Document holds the paths actually read), reversed on every save (Project,
 //! Package, recovery copy), so definitions and cache metadata keep the Project's own paths and a
@@ -38,14 +38,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use opendash_data::Table;
-use opendash_data::source::Bytes;
-use opendash_file::cache::{self, Meta, Provenance};
-use opendash_file::escape::file_stems;
-use opendash_file::local::{self, Remaps};
-use opendash_file::package::Limits;
-use opendash_file::{FileSet, MANIFEST, Preserved, Project, Recover};
-use opendash_model::ModelTable;
+use metriccraft_data::Table;
+use metriccraft_data::source::Bytes;
+use metriccraft_file::cache::{self, Meta, Provenance};
+use metriccraft_file::escape::file_stems;
+use metriccraft_file::local::{self, Remaps};
+use metriccraft_file::package::Limits;
+use metriccraft_file::{FileSet, MANIFEST, Preserved, Project, Recover};
+use metriccraft_model::ModelTable;
 use serde_json::Value;
 
 use crate::model::{invalid, text};
@@ -56,7 +56,7 @@ use crate::{App, Document, Error, Result};
 pub enum Location {
     /// A Project folder.
     Folder(PathBuf),
-    /// A `.odash` Package file.
+    /// A `.mcraft` Package file.
     Package(PathBuf),
 }
 
@@ -164,21 +164,21 @@ impl App {
         self.file.location.as_ref()
     }
 
-    /// Opens a `.odash` Package from its bytes (the web build's File > Open). Like `file.open`:
+    /// Opens a `.mcraft` Package from its bytes (the web build's File > Open). Like `file.open`:
     /// replaces the Document, not undoable. Relative source paths stay relative.
     pub fn open_package_bytes(&mut self, bytes: &[u8]) -> Result {
-        let files = opendash_file::package::unpack_with(bytes, self.package_limits())
+        let files = metriccraft_file::package::unpack_with(bytes, self.package_limits())
             .map_err(Error::File)?;
         self.open_files(files, None, None, &CacheFrom::Files, None)?;
         self.discard_own_recovery();
         Ok(())
     }
 
-    /// The document as `.odash` Package bytes, with its Data cache (the web build's Save: a
+    /// The document as `.mcraft` Package bytes, with its Data cache (the web build's Save: a
     /// download).
     pub fn package_bytes(&self) -> Result<Vec<u8>> {
         let files = self.package_files(None, true)?;
-        opendash_file::pack(&files).map_err(Error::File)
+        metriccraft_file::pack(&files).map_err(Error::File)
     }
 
     /// Package reading limits: the Data cache counts against the memory cap.
@@ -210,7 +210,7 @@ impl App {
     }
 
     pub(crate) fn files(&self, root: Option<&Path>) -> Result<FileSet> {
-        opendash_file::encode(&self.project()?, root, &self.file.preserved).map_err(Error::File)
+        metriccraft_file::encode(&self.project()?, root, &self.file.preserved).map_err(Error::File)
     }
 
     /// The definitions, plus the Data cache if `data`.
@@ -284,7 +284,8 @@ impl App {
         recovered: Option<&BTreeSet<String>>,
     ) -> Result {
         let recorded = |name: &String| recovered.is_some_and(|r| r.contains(name));
-        let (mut project, preserved) = opendash_file::decode(&files, root).map_err(Error::File)?;
+        let (mut project, preserved) =
+            metriccraft_file::decode(&files, root).map_err(Error::File)?;
         let mut problems = Vec::new();
         let remaps = match &location {
             Some(Location::Folder(p)) => local::read_paths(&root_of(p)).unwrap_or_else(|e| {
@@ -341,12 +342,12 @@ impl App {
                 }
                 Ok(None) => {
                     doc.tables
-                        .push(opendash_file::empty_table(model).map_err(Error::Data)?);
+                        .push(metriccraft_file::empty_table(model).map_err(Error::Data)?);
                 }
                 Err(why) => {
                     cache_problems.push(format!("`{}` ({why})", model.name));
                     doc.tables
-                        .push(opendash_file::empty_table(model).map_err(Error::Data)?);
+                        .push(metriccraft_file::empty_table(model).map_err(Error::Data)?);
                 }
             }
         }
@@ -423,7 +424,7 @@ impl App {
             Location::Folder(p) => {
                 let files = self.files(root.as_deref())?;
                 let entries = self.cache_entries(root.as_deref())?;
-                opendash_file::write_folder(p, &files).map_err(Error::File)?;
+                metriccraft_file::write_folder(p, &files).map_err(Error::File)?;
                 let mut saved = std::mem::take(&mut self.file.cache);
                 if self.file.location.as_ref() != Some(&location) {
                     saved.clear();
@@ -438,7 +439,7 @@ impl App {
             }
             Location::Package(p) => {
                 let files = self.package_files(root.as_deref(), data)?;
-                opendash_file::write_package(p, &files).map_err(Error::File)?;
+                metriccraft_file::write_package(p, &files).map_err(Error::File)?;
                 self.file.cache.clear();
             }
         }
@@ -527,7 +528,7 @@ fn read_cached(
         }
     };
     // Cached data was folded when it loaded (M3.10); the flag itself isn't stored.
-    let table = opendash_data::assume_folded(table).map_err(|e| e.to_string())?;
+    let table = metriccraft_data::assume_folded(table).map_err(|e| e.to_string())?;
     Ok(Some((table, meta, meta_bytes)))
 }
 
@@ -617,7 +618,7 @@ pub(crate) fn open(app: &mut App, params: &Value) -> Result {
     let root = location.root();
     match &location {
         Location::Folder(p) => {
-            let files = opendash_file::read_folder(p, recover).map_err(Error::File)?;
+            let files = metriccraft_file::read_folder(p, recover).map_err(Error::File)?;
             let dir = p.clone();
             app.open_files(
                 files,
@@ -628,8 +629,8 @@ pub(crate) fn open(app: &mut App, params: &Value) -> Result {
             )?;
         }
         Location::Package(p) => {
-            let files =
-                opendash_file::read_package_with(p, app.package_limits()).map_err(Error::File)?;
+            let files = metriccraft_file::read_package_with(p, app.package_limits())
+                .map_err(Error::File)?;
             app.open_files(
                 files,
                 Some(location),
@@ -646,7 +647,7 @@ pub(crate) fn open(app: &mut App, params: &Value) -> Result {
 
 fn is_package_path(path: &Path) -> bool {
     path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(opendash_file::package::EXTENSION))
+        .is_some_and(|e| e.eq_ignore_ascii_case(metriccraft_file::package::EXTENSION))
 }
 
 /// `file.save`: saves where the document was opened from or last saved; with `path`, as Save As.

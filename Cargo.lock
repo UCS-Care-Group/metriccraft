@@ -2210,6 +2210,137 @@ dependencies = [
 ]
 
 [[package]]
+name = "metriccraft"
+version = "0.0.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "metriccraft-engine",
+ "metriccraft-ui-egui",
+ "pollster 0.4.0",
+ "rfd",
+ "serde_json",
+]
+
+[[package]]
+name = "metriccraft-cli"
+version = "0.0.0"
+
+[[package]]
+name = "metriccraft-core"
+version = "0.0.0"
+
+[[package]]
+name = "metriccraft-data"
+version = "0.0.0"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-schema",
+ "arrow-select",
+ "bytes",
+ "calamine",
+ "csv",
+ "encoding_rs",
+ "metriccraft-core",
+ "metriccraft-m",
+ "parquet",
+ "quick-xml",
+ "rust_xlsxwriter",
+ "sysinfo",
+ "zip",
+]
+
+[[package]]
+name = "metriccraft-dax"
+version = "0.0.0"
+
+[[package]]
+name = "metriccraft-engine"
+version = "0.0.0"
+dependencies = [
+ "arrow-array",
+ "arrow-cast",
+ "arrow-schema",
+ "metriccraft-core",
+ "metriccraft-data",
+ "metriccraft-file",
+ "metriccraft-model",
+ "metriccraft-visuals",
+ "serde_json",
+]
+
+[[package]]
+name = "metriccraft-file"
+version = "0.0.0"
+dependencies = [
+ "arrow-array",
+ "arrow-cast",
+ "arrow-schema",
+ "metriccraft-data",
+ "metriccraft-model",
+ "parquet",
+ "serde_json",
+ "sha2",
+ "zip",
+]
+
+[[package]]
+name = "metriccraft-m"
+version = "0.0.0"
+
+[[package]]
+name = "metriccraft-mcp"
+version = "0.0.0"
+
+[[package]]
+name = "metriccraft-model"
+version = "0.0.0"
+dependencies = [
+ "arrow-array",
+ "arrow-cast",
+ "arrow-schema",
+ "metriccraft-core",
+ "metriccraft-data",
+ "metriccraft-dax",
+]
+
+[[package]]
+name = "metriccraft-ui-egui"
+version = "0.0.0"
+dependencies = [
+ "arrow-array",
+ "egui",
+ "egui_dock",
+ "egui_kittest",
+ "metriccraft-core",
+ "metriccraft-dax",
+ "metriccraft-engine",
+ "metriccraft-model",
+ "metriccraft-visuals",
+ "serde_json",
+]
+
+[[package]]
+name = "metriccraft-visuals"
+version = "0.0.0"
+dependencies = [
+ "ab_glyph",
+ "arrow-array",
+ "metriccraft-core",
+ "metriccraft-data",
+ "metriccraft-dax",
+ "metriccraft-model",
+ "serde_json",
+ "tiny-skia",
+]
+
+[[package]]
+name = "metriccraft-web"
+version = "0.0.0"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2724,137 +2855,6 @@ dependencies = [
  "is-wsl",
  "libc",
 ]
-
-[[package]]
-name = "opendash"
-version = "0.0.0"
-dependencies = [
- "eframe",
- "egui",
- "opendash-engine",
- "opendash-ui-egui",
- "pollster 0.4.0",
- "rfd",
- "serde_json",
-]
-
-[[package]]
-name = "opendash-cli"
-version = "0.0.0"
-
-[[package]]
-name = "opendash-core"
-version = "0.0.0"
-
-[[package]]
-name = "opendash-data"
-version = "0.0.0"
-dependencies = [
- "arrow-array",
- "arrow-buffer",
- "arrow-cast",
- "arrow-schema",
- "arrow-select",
- "bytes",
- "calamine",
- "csv",
- "encoding_rs",
- "opendash-core",
- "opendash-m",
- "parquet",
- "quick-xml",
- "rust_xlsxwriter",
- "sysinfo",
- "zip",
-]
-
-[[package]]
-name = "opendash-dax"
-version = "0.0.0"
-
-[[package]]
-name = "opendash-engine"
-version = "0.0.0"
-dependencies = [
- "arrow-array",
- "arrow-cast",
- "arrow-schema",
- "opendash-core",
- "opendash-data",
- "opendash-file",
- "opendash-model",
- "opendash-visuals",
- "serde_json",
-]
-
-[[package]]
-name = "opendash-file"
-version = "0.0.0"
-dependencies = [
- "arrow-array",
- "arrow-cast",
- "arrow-schema",
- "opendash-data",
- "opendash-model",
- "parquet",
- "serde_json",
- "sha2",
- "zip",
-]
-
-[[package]]
-name = "opendash-m"
-version = "0.0.0"
-
-[[package]]
-name = "opendash-mcp"
-version = "0.0.0"
-
-[[package]]
-name = "opendash-model"
-version = "0.0.0"
-dependencies = [
- "arrow-array",
- "arrow-cast",
- "arrow-schema",
- "opendash-core",
- "opendash-data",
- "opendash-dax",
-]
-
-[[package]]
-name = "opendash-ui-egui"
-version = "0.0.0"
-dependencies = [
- "arrow-array",
- "egui",
- "egui_dock",
- "egui_kittest",
- "opendash-core",
- "opendash-dax",
- "opendash-engine",
- "opendash-model",
- "opendash-visuals",
- "serde_json",
-]
-
-[[package]]
-name = "opendash-visuals"
-version = "0.0.0"
-dependencies = [
- "ab_glyph",
- "arrow-array",
- "opendash-core",
- "opendash-data",
- "opendash-dax",
- "opendash-model",
- "serde_json",
- "tiny-skia",
-]
-
-[[package]]
-name = "opendash-web"
-version = "0.0.0"
 
 [[package]]
 name = "orbclient"
@@ -4896,8 +4896,8 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "arrow-array",
- "opendash-model",
- "opendash-visuals",
+ "metriccraft-model",
+ "metriccraft-visuals",
  "parquet",
  "rust_xlsxwriter",
  "serde_json",

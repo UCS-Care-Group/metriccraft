@@ -13,17 +13,17 @@
 //!   Query and remove its Table; a Query that merges it still runs it, within the load.
 //!   Toggling it marks the Query Stale, as editing does: the Table goes (or comes) at the next
 //!   Close & Apply, as in Power BI.
-//! - Each loaded Table's text is folded first (`opendash_data::fold_case`, ADR 0006): values
+//! - Each loaded Table's text is folded first (`metriccraft_data::fold_case`, ADR 0006): values
 //!   differing only by case become one, spelled as the first row has it, so sort by,
 //!   Relationships and DAX see the folded values. Power Query doesn't: a Query's merges within
 //!   the load use the unfolded results, and a Preview never merges against a folded Table
 //!   ([`fresh`]).
-//! - Every loaded Table's model is updated after the load (`opendash_model::ModelTable::load`):
+//! - Every loaded Table's model is updated after the load (`metriccraft_model::ModelTable::load`):
 //!   column properties carried over by name, type overrides re-applied, sort by checked. A
 //!   failure there fails the whole load.
 //! - Then every Calculated column of the Model is computed again (`expression.rs`), in
 //!   dependency order: the new data changes their values.
-//! - Then the Relationships (`opendash_model`, `relationship.rs`): those whose Table or Column is
+//! - Then the Relationships (`metriccraft_model`, `relationship.rs`): those whose Table or Column is
 //!   gone are dropped; a one side that is no longer unique fails the whole load, naming the
 //!   Table and Column; with the Project's switch on, auto-detect adds Relationships for Tables
 //!   that weren't loaded before. Both are listed in the [`LoadReport`].
@@ -48,11 +48,11 @@
 
 use std::path::Path;
 
-use opendash_data::culture::Culture;
-use opendash_data::source::{Encoding, ExcelKind, File, Source, csv};
-use opendash_data::{Pass, Preview, Progress, Query, Table, fold_case};
-use opendash_file::cache::{Provenance, now_ms};
-use opendash_model::{ModelTable, Relationship};
+use metriccraft_data::culture::Culture;
+use metriccraft_data::source::{Encoding, ExcelKind, File, Source, csv};
+use metriccraft_data::{Pass, Preview, Progress, Query, Table, fold_case};
+use metriccraft_file::cache::{Provenance, now_ms};
+use metriccraft_model::{ModelTable, Relationship};
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -174,8 +174,8 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
 /// such Query. The culture shows only when it isn't the Project's default.
 pub fn query_m(doc: &Document, name: &str) -> Option<String> {
     let q = doc.queries.iter().find(|q| q.name == name)?;
-    let default = opendash_file::project::DEFAULT_CULTURE;
-    Some(opendash_data::m::print(&opendash_data::m::MQuery {
+    let default = metriccraft_file::project::DEFAULT_CULTURE;
+    Some(metriccraft_data::m::print(&metriccraft_data::m::MQuery {
         source: q.source.clone(),
         steps: q.steps.clone(),
         culture: (q.culture.name != default).then_some(q.culture),
@@ -186,16 +186,16 @@ pub fn query_m(doc: &Document, name: &str) -> Option<String> {
 /// Data's `item` and `itemKind` can name (Power BI's Navigator).
 pub fn excel_items(path: &str) -> Result<Vec<(String, &'static str)>> {
     let file = std::fs::File::open(path).map_err(|e| {
-        Error::Data(opendash_data::Error::Source {
+        Error::Data(metriccraft_data::Error::Source {
             source: path.into(),
             message: e.to_string(),
         })
     })?;
     let reader = std::io::BufReader::new(file);
-    let wb = opendash_data::source::xlsx::Workbook::open(
+    let wb = metriccraft_data::source::xlsx::Workbook::open(
         path,
         reader,
-        opendash_data::default_memory_cap(),
+        metriccraft_data::default_memory_cap(),
     )
     .map_err(Error::Data)?;
     let sheets = wb.sheets().into_iter().map(|s| (s, "sheet"));
@@ -447,7 +447,7 @@ fn delimiter(s: &str) -> Result<u8> {
 /// An encoding label M can name as a codepage: `utf-8`, `windows-1252`, `utf-16le`, `utf-16be`.
 fn encoding(s: &str) -> Result<&'static Encoding> {
     Encoding::for_label(s.as_bytes())
-        .filter(|e| opendash_data::m::codepage(e).is_some())
+        .filter(|e| metriccraft_data::m::codepage(e).is_some())
         .ok_or_else(|| invalid(GET_DATA, format!("unsupported `encoding` `{s}`")))
 }
 
@@ -465,7 +465,7 @@ mod tests {
 
     use arrow_array::StringArray;
     use arrow_array::types::Int8Type;
-    use opendash_data::step::{ColumnType, Step};
+    use metriccraft_data::step::{ColumnType, Step};
     use serde_json::json;
 
     use super::*;
@@ -478,7 +478,7 @@ mod tests {
             static N: AtomicUsize = AtomicUsize::new(0);
             let n = N.fetch_add(1, Ordering::Relaxed);
             let dir =
-                std::env::temp_dir().join(format!("opendash-load-{}-{n}", std::process::id()));
+                std::env::temp_dir().join(format!("metriccraft-load-{}-{n}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             Dir(dir)
         }
@@ -577,7 +577,7 @@ mod tests {
         let stopped = std::time::Instant::now();
         let cancelled = watcher.join().unwrap();
         assert!(
-            matches!(r, Err(Error::Data(opendash_data::Error::Cancelled))),
+            matches!(r, Err(Error::Data(metriccraft_data::Error::Cancelled))),
             "{r:?}"
         );
         assert!(app.document().queries.is_empty() && app.document().tables.is_empty());
@@ -953,7 +953,7 @@ mod tests {
         assert!(
             matches!(
                 &e,
-                Error::Refresh { query, error: opendash_data::Error::MemoryCap { table, .. } }
+                Error::Refresh { query, error: metriccraft_data::Error::MemoryCap { table, .. } }
                     if query == "Sales" && table == "Sales"
             ),
             "{e:?}"

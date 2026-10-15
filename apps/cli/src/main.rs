@@ -1,3 +1,3 @@
-//! OpenDash BI headless CLI.
+//! MetricCraft headless CLI.
 
 fn main() {}

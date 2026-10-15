@@ -3,7 +3,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use opendash_engine::App;
+use metriccraft_engine::App;
 use serde_json::Value;
 
 fn main() {

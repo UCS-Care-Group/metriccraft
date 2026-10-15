@@ -1,3 +1,3 @@
-//! OpenDash BI web app (WASM).
+//! MetricCraft web app (WASM).
 
 fn main() {}

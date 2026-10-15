@@ -3,8 +3,8 @@
 //! release) and arrow keys (merged into one undo step), clicked through to cross-filter.
 
 use egui::{Key, Pos2, Rect, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
-use opendash_engine::Page;
-use opendash_visuals::draw::Scene;
+use metriccraft_engine::Page;
+use metriccraft_visuals::draw::Scene;
 use serde_json::{Value, json};
 
 use crate::strings::Str;
@@ -67,7 +67,7 @@ pub struct Canvas {
 /// The size of the resize handle at a Visual's bottom-right corner, in screen points.
 const HANDLE: f32 = 10.0;
 /// Largest coordinate the engine accepts.
-const MAX: i32 = opendash_engine::MAX_COORD;
+const MAX: i32 = metriccraft_engine::MAX_COORD;
 
 impl Canvas {
     /// Screen points per logical pixel for `page` in `space`.
@@ -279,8 +279,8 @@ fn preview(d: &Drag) -> (i32, i32, i32, i32) {
 }
 
 /// A Visual type's display name.
-pub fn visual_name(kind: opendash_visuals::visual::VisualType) -> Str {
-    use opendash_visuals::visual::VisualType as V;
+pub fn visual_name(kind: metriccraft_visuals::visual::VisualType) -> Str {
+    use metriccraft_visuals::visual::VisualType as V;
     match kind {
         V::Table => Str::VisTable,
         V::Matrix => Str::VisMatrix,

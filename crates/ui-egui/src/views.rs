@@ -2,8 +2,8 @@
 //! `grid.rs` and `diagram.rs`.
 
 use egui::{Color32, RichText, Ui};
-use opendash_engine::Document;
-use opendash_visuals::FieldRef;
+use metriccraft_engine::Document;
+use metriccraft_visuals::FieldRef;
 
 use crate::strings::Str;
 use crate::theme::Tokens;
@@ -131,7 +131,7 @@ pub fn report_view(ui: &mut Ui, t: &Tokens, doc: &Document) {
 }
 
 /// The Page the report shows: the saved current one, else the first.
-pub fn current_page(doc: &Document) -> Option<&opendash_engine::Page> {
+pub fn current_page(doc: &Document) -> Option<&metriccraft_engine::Page> {
     let pages = &doc.report.pages;
     doc.report
         .current

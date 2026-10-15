@@ -1326,7 +1326,7 @@ mod tests {
     /// file must be rejected (or read) before any panic, as on wasm. Sampled to stay quick in
     /// debug builds; a full sweep of 2.7M cases (every byte × 12 flips and 9 values, 20,000
     /// random multi-byte edits a file, every cut) ran clean in release while this was written.
-    /// Soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`): the flip and cut
+    /// Soak with `MCRAFT_FUZZ_SCALE` / `MCRAFT_FUZZ_SEED` (see `crate::fuzz`): the flip and cut
     /// sweeps get `scale` times denser (a full sweep from about 100) and the random edits
     /// `scale` times more.
     #[test]

@@ -64,13 +64,13 @@ pub struct Case {
     pub sources: Vec<CsvSource>,
     /// The Culture (`Culture: en-GB`) Get Data reads the CSV files in.
     pub culture: Option<String>,
-    /// `## M` blocks: a Query's whole M as OpenDash BI prints it, its file named without a
+    /// `## M` blocks: a Query's whole M as MetricCraft prints it, its file named without a
     /// folder (`File.Contents("Sales.csv")`).
     pub m: Vec<String>,
     /// The DAX query; empty for a visual case.
     pub query: String,
     /// A visual case's Visual (`## Visual`, a ```` ```json ```` block in the report file's
-    /// visual shape, ADR 0003), run by `opendash_visuals::parity` instead of a query.
+    /// visual shape, ADR 0003), run by `metriccraft_visuals::parity` instead of a query.
     pub visual: Option<String>,
     /// `## Measures`: (Table, Measure, DAX) from `Table[Name] = DAX` lines.
     pub measures: Vec<(String, String, String)>,
@@ -190,7 +190,7 @@ pub fn parse(id: &str, text: &str) -> Result<Case> {
             }
             next_source = Some(file.to_string());
         } else if let Some(name) = line.strip_prefix("Culture:") {
-            let c = opendash_data::culture::Culture::get(name.trim())
+            let c = metriccraft_data::culture::Culture::get(name.trim())
                 .ok_or(format!("unknown Culture `{}`", name.trim()))?;
             culture = Some(c.name.to_string());
         } else if let Some(answer) = line.strip_prefix("M accepted:") {
@@ -387,7 +387,7 @@ fn evaluate(case: &Case) -> (Result<Table>, ColumnErrors) {
     let mut errors = ColumnErrors::new();
     let result = (|| {
         let db = dataset(case)?;
-        let query = opendash_dax::parse_query(&case.query).map_err(|e| e.to_string())?;
+        let query = metriccraft_dax::parse_query(&case.query).map_err(|e| e.to_string())?;
         let options = crate::dax::Options {
             cancel: None,
             memory_cap: LIMIT,
@@ -437,12 +437,12 @@ fn dataset(case: &Case) -> Result<crate::dax::Database> {
 }
 
 /// The case's Model (its *Enter data* tables and `## Measures`) and loaded tables.
-pub fn loaded(case: &Case) -> Result<(crate::Model, Vec<opendash_data::Table>)> {
+pub fn loaded(case: &Case) -> Result<(crate::Model, Vec<metriccraft_data::Table>)> {
     use arrow_array::{ArrayRef, RecordBatch, StringArray};
-    use opendash_data::TableBuilder;
-    use opendash_data::step::ColumnType;
+    use metriccraft_data::TableBuilder;
+    use metriccraft_data::step::ColumnType;
 
-    let culture = opendash_data::culture::Culture::get(DATASET_CULTURE)
+    let culture = metriccraft_data::culture::Culture::get(DATASET_CULTURE)
         .ok_or("the dataset Culture is missing")?;
     let mut model = crate::Model::default();
     let mut loaded = Vec::new();
@@ -507,8 +507,8 @@ fn copied(r: &crate::dax::ResultTable) -> Table {
 
 /// For a query that is one `EVALUATE ROW("A", a, "B", b, …)`: each column as its own query
 /// (same `DEFINE`s), with its name.
-fn row_columns(q: &opendash_dax::Query) -> Option<Vec<(String, opendash_dax::Query)>> {
-    use opendash_dax::{Evaluate, Expr, ExprKind};
+fn row_columns(q: &metriccraft_dax::Query) -> Option<Vec<(String, metriccraft_dax::Query)>> {
+    use metriccraft_dax::{Evaluate, Expr, ExprKind};
     let [ev] = q.evaluates.as_slice() else {
         return None;
     };
@@ -524,7 +524,7 @@ fn row_columns(q: &opendash_dax::Query) -> Option<Vec<(String, opendash_dax::Que
             let ExprKind::Text(text) = &n.kind else {
                 return None;
             };
-            let one = opendash_dax::Query {
+            let one = metriccraft_dax::Query {
                 defines: q.defines.clone(),
                 evaluates: vec![Evaluate {
                     table: Expr {

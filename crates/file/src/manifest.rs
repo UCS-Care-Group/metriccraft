@@ -1,11 +1,11 @@
-//! The Manifest (`project.odash.json`, CONTEXT.md) and Format versions (ADR 0003).
+//! The Manifest (`project.mcraft.json`, CONTEXT.md) and Format versions (ADR 0003).
 //!
 //! ```json
 //! {
 //!   "formatVersion": 1,
 //!   "parts": {
-//!     "model/model.odm": "sha256:…",
-//!     "queries/Sales.odq": "sha256:…"
+//!     "model/model.mcm": "sha256:…",
+//!     "queries/Sales.mcq": "sha256:…"
 //!   }
 //! }
 //! ```
@@ -29,7 +29,7 @@ use crate::syntax::Item;
 use crate::{Error, Result, check_path};
 
 /// The Manifest's file name, at the Project's root.
-pub const MANIFEST: &str = "project.odash.json";
+pub const MANIFEST: &str = "project.mcraft.json";
 /// The Format version this build writes, and the newest it reads.
 pub const FORMAT_VERSION: u64 = 1;
 /// Largest accepted Manifest, in bytes.
@@ -159,7 +159,7 @@ pub struct Tree {
     pub version: u64,
     /// Unknown Manifest keys.
     pub extra: Map<String, Value>,
-    /// `.odm` / `.odq` parts, parsed.
+    /// `.mcm` / `.mcq` parts, parsed.
     pub syntax: BTreeMap<String, Vec<Item>>,
     /// Every other part, as bytes.
     pub other: BTreeMap<String, Vec<u8>>,

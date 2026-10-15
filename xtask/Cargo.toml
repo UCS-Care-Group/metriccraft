@@ -12,8 +12,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-opendash-model = { path = "../crates/model" }
-opendash-visuals = { path = "../crates/visuals" }
+metriccraft-model = { path = "../crates/model" }
+metriccraft-visuals = { path = "../crates/visuals" }
 serde_json.workspace = true
 arrow-array.workspace = true
 parquet.workspace = true

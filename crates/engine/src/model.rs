@@ -2,13 +2,13 @@
 //! Column tools ribbon and Properties pane. All are [`Run::Edit`](crate::Run::Edit): undoable,
 //! and a change that fails changes nothing. Renames and deletes are in `rename.rs`.
 //!
-//! Data-type override: see `opendash_model` (`table.rs`) for the rules and parity
+//! Data-type override: see `metriccraft_model` (`table.rs`) for the rules and parity
 //! uncertainties.
 
-use opendash_data::culture::Culture;
-use opendash_data::step::ColumnType;
-use opendash_data::{Table, default_memory_cap};
-use opendash_model::{ModelTable, SummarizeBy};
+use metriccraft_data::culture::Culture;
+use metriccraft_data::step::ColumnType;
+use metriccraft_data::{Table, default_memory_cap};
+use metriccraft_model::{ModelTable, SummarizeBy};
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -64,8 +64,8 @@ pub(crate) fn set_hidden(doc: &mut Document, params: &Value) -> Result {
 
 /// A Column's or Measure's properties.
 enum Property<'a> {
-    Column(&'a mut opendash_model::Column),
-    Measure(&'a mut opendash_model::Measure),
+    Column(&'a mut metriccraft_model::Column),
+    Measure(&'a mut metriccraft_model::Measure),
 }
 
 /// The Column `name` of `table`, else its Measure `name`.
@@ -83,7 +83,7 @@ fn property<'a>(table: &'a mut ModelTable, name: &str) -> Result<Property<'a>> {
         .find(|m| m.name == name)
         .map(Property::Measure)
         .ok_or_else(|| {
-            Error::Model(opendash_model::Error {
+            Error::Model(metriccraft_model::Error {
                 table: t,
                 column: name.into(),
                 message: "there is no such column or measure".into(),
@@ -262,7 +262,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use arrow_array::{Array, Decimal32Array};
-    use opendash_model::Column;
+    use metriccraft_model::Column;
     use serde_json::json;
 
     use super::*;
@@ -275,7 +275,7 @@ mod tests {
             static N: AtomicUsize = AtomicUsize::new(0);
             let n = N.fetch_add(1, Ordering::Relaxed);
             let dir =
-                std::env::temp_dir().join(format!("opendash-model-{}-{n}", std::process::id()));
+                std::env::temp_dir().join(format!("metriccraft-model-{}-{n}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             Dir(dir)
         }

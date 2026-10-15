@@ -4,11 +4,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
-use opendash_core::Value;
-use opendash_data::step::ColumnType;
-use opendash_data::{TableBuilder, fold_case};
-use opendash_model::dax::{Database, FilterContext, Options};
-use opendash_model::{Column, Model, ModelTable};
+use metriccraft_core::Value;
+use metriccraft_data::step::ColumnType;
+use metriccraft_data::{TableBuilder, fold_case};
+use metriccraft_model::dax::{Database, FilterContext, Options};
+use metriccraft_model::{Column, Model, ModelTable};
 
 use super::*;
 use crate::query::{QueryInput, ResultRow, run_query};
@@ -46,7 +46,7 @@ fn cx_with<R>(f: impl FnOnce(&Context<'_>) -> R) -> R {
     let theme = Theme::light();
     f(&Context {
         theme: &theme,
-        locale: &opendash_core::EN_GB,
+        locale: &metriccraft_core::EN_GB,
     })
 }
 

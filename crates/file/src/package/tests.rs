@@ -2,8 +2,8 @@ use super::*;
 
 fn files() -> FileSet {
     let mut f = FileSet::new();
-    f.insert("project.odash.json".into(), b"{}\n".to_vec());
-    f.insert("queries/Sales.odq".into(), b"query Sales\n".repeat(100));
+    f.insert("project.mcraft.json".into(), b"{}\n".to_vec());
+    f.insert("queries/Sales.mcq".into(), b"query Sales\n".repeat(100));
     f.insert(".gitignore".into(), b".cache/\n".to_vec());
     f.insert(".cache/Sales.parquet".into(), vec![0, 1, 2, 3]);
     f.insert("empty.txt".into(), Vec::new());
@@ -73,7 +73,7 @@ fn path_traversal_is_refused() {
         "a//b",
         "a/./b",
     ] {
-        let zip = raw_zip(&[("project.odash.json", b"{}"), (name, b"x")]);
+        let zip = raw_zip(&[("project.mcraft.json", b"{}"), (name, b"x")]);
         let e = unpack(&zip).expect_err(name);
         assert!(matches!(e, Error::Package(_)), "{name}: {e}");
     }

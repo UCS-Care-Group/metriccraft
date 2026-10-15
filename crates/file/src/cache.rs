@@ -6,7 +6,7 @@
 //! .cache/<stem>.meta        its metadata (JSON, below)
 //! ```
 //!
-//! `<stem>` is the Table's file stem, as for `model/tables/<stem>.odm`. The folder is
+//! `<stem>` is the Table's file stem, as for `model/tables/<stem>.mcm`. The folder is
 //! gitignored and never listed in the Manifest; a Package carries it by default (Parquet stored,
 //! not deflated) unless saved without data.
 //!
@@ -58,12 +58,12 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::{Decimal32Type, Decimal64Type, Int64Type};
 use arrow_array::{Array, ArrayRef, Decimal64Array, Int64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use opendash_data::m::{self, MQuery};
-use opendash_data::source::File;
-use opendash_data::source::parquet::ChunkReader;
-use opendash_data::step::{ColumnType, FIXED};
-use opendash_data::{Query, Table};
-use opendash_model::ModelTable;
+use metriccraft_data::m::{self, MQuery};
+use metriccraft_data::source::File;
+use metriccraft_data::source::parquet::ChunkReader;
+use metriccraft_data::step::{ColumnType, FIXED};
+use metriccraft_data::{Query, Table};
+use metriccraft_model::ModelTable;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
@@ -460,7 +460,7 @@ pub fn encode_table(table: &Table) -> Result<Vec<u8>> {
     let batch = RecordBatch::try_new(Arc::clone(&schema), columns).map_err(|e| err(&e))?;
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(ZstdLevel::default()))
-        .set_created_by("OpenDash BI".into())
+        .set_created_by("MetricCraft".into())
         .build();
     let mut out = Vec::new();
     let mut w = ArrowWriter::try_new(&mut out, schema, Some(props)).map_err(|e| err(&e))?;
@@ -478,7 +478,7 @@ pub fn decode_table<R: ChunkReader + 'static>(
 ) -> std::result::Result<Table, String> {
     let name = meta.table.as_str();
     let mut table =
-        opendash_data::source::parquet::read(name, reader, limit).map_err(|e| e.to_string())?;
+        metriccraft_data::source::parquet::read(name, reader, limit).map_err(|e| e.to_string())?;
     let schema = table.batch().schema();
     if schema.fields().len() != meta.columns.len()
         || u64::try_from(table.rows()).ok() != Some(meta.rows)

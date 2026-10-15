@@ -1,7 +1,7 @@
 //! Headless screenshots of the window (wgpu, offscreen): what the UI looks like without opening
 //! a window on anyone's screen.
 //!
-//! `cargo run -p opendash-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]`
+//! `cargo run -p metriccraft-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]`
 //!
 //! The script is JSON lines, run in order: `{"run": "<command>", "params": {…}}` runs a command
 //! and waits for it; `{"dark": true}` switches to the dark App theme; `{"view": "table"}` picks a
@@ -13,9 +13,9 @@
 
 use std::time::{Duration, Instant};
 
-use opendash_engine::App;
-use opendash_ui_egui::worker::Engine;
-use opendash_ui_egui::{Prefs, Shell};
+use metriccraft_engine::App;
+use metriccraft_ui_egui::worker::Engine;
+use metriccraft_ui_egui::{Prefs, Shell};
 use serde_json::Value;
 
 type Harness<'a> = egui_kittest::Harness<'a, Shell>;

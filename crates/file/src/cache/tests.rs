@@ -1,8 +1,8 @@
 use arrow_array::{BooleanArray, Float64Array, Int64Array, StringArray};
-use opendash_data::TableBuilder;
-use opendash_data::culture::Culture;
-use opendash_data::source::Bytes;
-use opendash_data::step::{Step, fixed_array};
+use metriccraft_data::TableBuilder;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::source::Bytes;
+use metriccraft_data::step::{Step, fixed_array};
 
 use super::*;
 
@@ -148,7 +148,7 @@ fn hostile_metadata_and_parquet_are_errors_not_panics() {
 #[test]
 fn the_m_hash_ignores_paths_and_covers_merged_queries() {
     let file = |p: &str| File::Path(PathBuf::from(p));
-    let source = |p: &str| opendash_data::source::Source::Parquet { file: file(p) };
+    let source = |p: &str| metriccraft_data::source::Source::Parquet { file: file(p) };
     let culture = Culture::get("en-US").unwrap();
     let q = |name: &str, p: &str| Query {
         name: name.into(),
@@ -167,7 +167,7 @@ fn the_m_hash_ignores_paths_and_covers_merged_queries() {
 
 #[test]
 fn only_other_cache_files_are_removed() {
-    let dir = std::env::temp_dir().join(format!("opendash-cache-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("metriccraft-cache-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     write(&dir, "Keep", Some(b"p"), b"m").unwrap();
     write(&dir, "Gone", Some(b"p"), b"m").unwrap();

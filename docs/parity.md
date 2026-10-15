@@ -59,18 +59,18 @@ and compares with the copied result. Until a case is observed it has no Checks.
 - `Source: csv Sales.csv` + a ```` ```csv ```` block is the file, byte-exact (LF line ends). The
   Query and table are named after the file (`Sales`).
 - `Culture: en-GB` is the *Locale for import* to set before Get Data.
-- `## M` holds a Query's whole M exactly as OpenDash BI prints it, with the file named bare
+- `## M` holds a Query's whole M exactly as MetricCraft prints it, with the file named bare
   (`File.Contents("Sales.csv")`); the gate fails if it isn't our printer's output. `--export`
   writes it as `<Query>.m` with the **VM path**: copy `observations/cases/` to
-  **`C:\opendash-parity\`** in the VM, so `0003-csv-get-data/Sales.csv` is
-  `C:\opendash-parity\0003-csv-get-data\Sales.csv`. That folder is fixed: the `Get Data M`
+  **`C:\metriccraft-parity\`** in the VM, so `0003-csv-get-data/Sales.csv` is
+  `C:\metriccraft-parity\0003-csv-get-data\Sales.csv`. That folder is fixed: the `Get Data M`
   Check compares paths too.
 
 ### Running a shaping case
 
 The case folder's `README.txt` lists these steps with the names filled in.
 
-1. **Copy** `observations/cases/` (after `cargo xtask parity --export`) to `C:\opendash-parity\`.
+1. **Copy** `observations/cases/` (after `cargo xtask parity --export`) to `C:\metriccraft-parity\`.
 2. **New report**, then File → Options and settings → Options → *Current File* → Regional
    Settings → **Locale for import** = the case's `Culture`.
 3. **Get Data → Text/CSV** for each CSV in the case folder → **Transform Data** (for the second
@@ -79,7 +79,7 @@ The case folder's `README.txt` lists these steps with the names filled in.
    block as `Get Data M: <Query>` followed by an ```` ```m ```` block. This is Power BI's own M
    (detection, `Csv.Document` options, spacing).
 5. **If the case has `## M`**: in that Query's Advanced Editor select all, paste `<Query>.m`
-   (already pointing at `C:\opendash-parity\…`), Done. Check that it loads without error and
+   (already pointing at `C:\metriccraft-parity\…`), Done. Check that it loads without error and
    that **Applied Steps shows the same step names** as the `#"…"` names in the M. Record
    `M accepted: yes`, or `M accepted: no — <what happened, error text verbatim>`. If Power BI
    rewrites the M when you reopen the Advanced Editor, say so after `no` and paste what it shows
@@ -102,7 +102,7 @@ An Observed block for a shaping case looks like:
 
     ```m
     let
-        Source = Csv.Document(File.Contents("C:\opendash-parity\0009-cell-errors\Sales.csv"),…
+        Source = Csv.Document(File.Contents("C:\metriccraft-parity\0009-cell-errors\Sales.csv"),…
     …
     ```
 

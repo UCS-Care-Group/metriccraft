@@ -17,19 +17,19 @@ type Result<T = ()> = std::result::Result<T, String>;
 /// Layer of every workspace crate (`docs/plan/0001-mvp.md` §1). A crate may depend only on
 /// crates in the same or a lower layer. A crate missing here fails `layers`.
 const LAYERS: &[(&str, u8)] = &[
-    ("opendash-core", 0),
-    ("opendash-dax", 1),
-    ("opendash-m", 1),
-    ("opendash-data", 2),
-    ("opendash-model", 2),
-    ("opendash-file", 2),
-    ("opendash-visuals", 3),
-    ("opendash-engine", 5),
-    ("opendash-ui-egui", 6),
-    ("opendash-mcp", 6),
-    ("opendash", 7),
-    ("opendash-cli", 7),
-    ("opendash-web", 7),
+    ("metriccraft-core", 0),
+    ("metriccraft-dax", 1),
+    ("metriccraft-m", 1),
+    ("metriccraft-data", 2),
+    ("metriccraft-model", 2),
+    ("metriccraft-file", 2),
+    ("metriccraft-visuals", 3),
+    ("metriccraft-engine", 5),
+    ("metriccraft-ui-egui", 6),
+    ("metriccraft-mcp", 6),
+    ("metriccraft", 7),
+    ("metriccraft-cli", 7),
+    ("metriccraft-web", 7),
     ("xtask", 8),
 ];
 
@@ -44,13 +44,13 @@ const UI_ONLY: &[&str] = &[
 ];
 
 /// Native-only binaries left out of the wasm build.
-const NOT_WASM: &[&str] = &["opendash", "opendash-cli", "xtask"];
+const NOT_WASM: &[&str] = &["metriccraft", "metriccraft-cli", "xtask"];
 
 /// File extensions that count as assets and need an `ATTRIBUTION.md` row. Text data we write
 /// ourselves (JSON, CSV, parity values) is not an asset; binary media, fonts and documents are.
 const ASSET_EXTS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "icns", "svg", "ttf", "otf", "woff",
-    "woff2", "wav", "mp3", "ogg", "xlsx", "parquet", "pbix", "pbit", "odash",
+    "woff2", "wav", "mp3", "ogg", "xlsx", "parquet", "pbix", "pbit", "mcraft",
 ];
 
 fn main() -> ExitCode {
@@ -154,9 +154,9 @@ fn snapshot(update: bool) -> Result {
         .join("observations/snapshots");
     let mut cmd = Command::new("cargo");
     cmd.args(["test", "--workspace", "snapshot"])
-        .env("ODASH_SNAPSHOT_PNG", &png);
+        .env("MCRAFT_SNAPSHOT_PNG", &png);
     if update {
-        cmd.env("ODASH_SNAPSHOT_UPDATE", "1");
+        cmd.env("MCRAFT_SNAPSHOT_UPDATE", "1");
     }
     let status = cmd.status().map_err(|e| e.to_string())?;
     if !status.success() {
@@ -173,7 +173,7 @@ const COLD_START_MS: u128 = 1000;
 /// are reported but not budgeted.
 const IDLE_PRIVATE_BYTES: u64 = 100 << 20;
 
-/// Starts the release desktop app on a fresh profile (`ODASH_UI_BENCH=1`, see its `Bench`):
+/// Starts the release desktop app on a fresh profile (`MCRAFT_UI_BENCH=1`, see its `Bench`):
 /// cold start is spawn to first frame on screen, then idle memory after two seconds; both
 /// against the N-8 budgets. Needs a display: under `xvfb-run` where there is none, skipped
 /// where neither is available (so it can sit in any CI job).
@@ -186,10 +186,10 @@ fn ui_bench() -> Result {
         println!("ui-bench: skipped (no display and no xvfb-run)");
         return Ok(());
     }
-    cargo(&["build", "--release", "-p", "opendash", "--quiet"])?;
+    cargo(&["build", "--release", "-p", "metriccraft", "--quiet"])?;
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
-    let bin = Path::new(&target).join("release").join("opendash");
-    let profile = std::env::temp_dir().join(format!("odash-ui-bench-{}", std::process::id()));
+    let bin = Path::new(&target).join("release").join("metriccraft");
+    let profile = std::env::temp_dir().join(format!("mcraft-ui-bench-{}", std::process::id()));
     std::fs::create_dir_all(&profile).map_err(|e| format!("{}: {e}", profile.display()))?;
     let mut cmd = if display {
         Command::new(&bin)
@@ -208,7 +208,7 @@ fn ui_bench() -> Result {
     }
     let start = std::time::Instant::now();
     let mut child = cmd
-        .env("ODASH_UI_BENCH", "1")
+        .env("MCRAFT_UI_BENCH", "1")
         .stdout(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("starting {}: {e}", bin.display()))?;
@@ -505,7 +505,7 @@ fn bench(save: bool) -> Result {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let out = Command::new(cargo)
         .args(["bench", "--workspace", "--benches", "--quiet"])
-        .env("OPENDASH_BENCH_IMPORTS", bench_imports(reference)?)
+        .env("METRICCRAFT_BENCH_IMPORTS", bench_imports(reference)?)
         .output()
         .map_err(|e| format!("running cargo bench: {e}"))?;
     if !out.status.success() {
@@ -574,7 +574,7 @@ fn bench(save: bool) -> Result {
 }
 
 /// The import bench files, generated once per size into `<target>/bench-data/` (the reference
-/// file into `observations/reference/`), as `OPENDASH_BENCH_IMPORTS` lines `<name>\t<path>`.
+/// file into `observations/reference/`), as `METRICCRAFT_BENCH_IMPORTS` lines `<name>\t<path>`.
 fn bench_imports(reference: bool) -> Result<String> {
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
     let cache = Path::new(&target).join(format!("bench-data/v{}", dataset::VERSION));
@@ -614,9 +614,9 @@ fn parse_bench(out: &str, tag: &str) -> Vec<(String, f64)> {
         .collect()
 }
 
-/// `OPENDASH_BENCH_MACHINE`, else the hostname.
+/// `METRICCRAFT_BENCH_MACHINE`, else the hostname.
 fn machine_id() -> String {
-    std::env::var("OPENDASH_BENCH_MACHINE")
+    std::env::var("METRICCRAFT_BENCH_MACHINE")
         .ok()
         .or_else(|| std::fs::read_to_string("/proc/sys/kernel/hostname").ok())
         .or_else(|| std::env::var("COMPUTERNAME").ok())
@@ -647,13 +647,13 @@ fn machine_info(id: &str) -> serde_json::Value {
 // ---- parity ----
 
 /// Scoreboard of parity Checks per covered tag (ADR 0004). `--update` rewrites
-/// `parity/passing.txt` after an intended change; the gate itself is the `opendash-model` test.
+/// `parity/passing.txt` after an intended change; the gate itself is the `metriccraft-model` test.
 fn parity(update: bool, pending: bool) -> Result {
     let root = Path::new("parity");
-    let dax = opendash_model::parity::run(root)?;
+    let dax = metriccraft_model::parity::run(root)?;
     // Visual cases (M4.6) ratchet in their own list.
-    let visuals = opendash_visuals::parity::run(&root.join("visuals"))?;
-    let all: Vec<&opendash_model::parity::Check> =
+    let visuals = metriccraft_visuals::parity::run(&root.join("visuals"))?;
+    let all: Vec<&metriccraft_model::parity::Check> =
         dax.checks.iter().chain(&visuals.checks).collect();
     if pending {
         for c in all.iter().filter(|c| !c.pass) {
@@ -690,19 +690,19 @@ fn parity(update: bool, pending: bool) -> Result {
 }
 
 /// Writes one folder per case into the gitignored `observations/cases/` (cleared first), ready
-/// to copy to `C:\opendash-parity\` in the Windows VM: query, datasets, CSV files byte-exact,
-/// M with the VM path, and a README (`opendash_model::parity::export`, docs/parity.md).
+/// to copy to `C:\metriccraft-parity\` in the Windows VM: query, datasets, CSV files byte-exact,
+/// M with the VM path, and a README (`metriccraft_model::parity::export`, docs/parity.md).
 fn parity_export() -> Result {
     let out = Path::new("observations/cases");
     if out.exists() {
         std::fs::remove_dir_all(out).map_err(|e| format!("clearing {}: {e}", out.display()))?;
     }
-    let mut cases = opendash_model::parity::cases(Path::new("parity"))?;
-    cases.extend(opendash_model::parity::cases_in(Path::new(
+    let mut cases = metriccraft_model::parity::cases(Path::new("parity"))?;
+    cases.extend(metriccraft_model::parity::cases_in(Path::new(
         "parity/visuals",
     ))?);
     for case in cases {
-        for (name, body) in opendash_model::parity::export(&case)? {
+        for (name, body) in metriccraft_model::parity::export(&case)? {
             let path = out.join(&name);
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir)
@@ -715,7 +715,7 @@ fn parity_export() -> Result {
     eprintln!(
         "copy {} to {} in the VM",
         out.display(),
-        opendash_model::parity::VM_DIR
+        metriccraft_model::parity::VM_DIR
     );
     Ok(())
 }
@@ -734,27 +734,30 @@ mod tests {
     #[test]
     fn layers_allow_down_and_same_layer() {
         let ks = [
-            k("opendash-model", &["opendash-data", "opendash-core"]),
-            k("opendash-engine", &["opendash-model", "serde"]),
+            k(
+                "metriccraft-model",
+                &["metriccraft-data", "metriccraft-core"],
+            ),
+            k("metriccraft-engine", &["metriccraft-model", "serde"]),
         ];
         assert!(check_layers(&ks).is_empty());
     }
 
     #[test]
     fn layers_reject_upward_dependency() {
-        let errs = check_layers(&[k("opendash-core", &["opendash-engine"])]);
+        let errs = check_layers(&[k("metriccraft-core", &["metriccraft-engine"])]);
         assert_eq!(errs.len(), 1, "{errs:?}");
     }
 
     #[test]
     fn layers_reject_ui_crate_below_ui_layer() {
-        assert_eq!(check_layers(&[k("opendash-engine", &["egui"])]).len(), 1);
-        assert!(check_layers(&[k("opendash-ui-egui", &["egui"])]).is_empty());
+        assert_eq!(check_layers(&[k("metriccraft-engine", &["egui"])]).len(), 1);
+        assert!(check_layers(&[k("metriccraft-ui-egui", &["egui"])]).is_empty());
     }
 
     #[test]
     fn layers_reject_unknown_crate() {
-        assert_eq!(check_layers(&[k("opendash-new", &[])]).len(), 1);
+        assert_eq!(check_layers(&[k("metriccraft-new", &[])]).len(), 1);
     }
 
     const ATTR: &str = "| Asset | Author |\n|-------|--------|\n| `assets/logo.svg` | Martin |\n";

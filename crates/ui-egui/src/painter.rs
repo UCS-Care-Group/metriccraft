@@ -3,8 +3,8 @@
 //! so text stays sharp at any zoom. Text uses the bundled Inter the layout measured with.
 
 use egui::{Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
-use opendash_visuals::draw::{Align, Cmd, Color, Scene, Weight};
-use opendash_visuals::text;
+use metriccraft_visuals::draw::{Align, Cmd, Color, Scene, Weight};
+use metriccraft_visuals::text;
 
 /// The egui font families holding Inter (registered by [`crate::Shell::setup`]).
 pub const REGULAR: &str = "Inter";

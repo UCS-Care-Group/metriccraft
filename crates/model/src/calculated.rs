@@ -28,10 +28,10 @@ use arrow_array::{
     TimestampMicrosecondArray, new_null_array,
 };
 use arrow_schema::{Field, Schema};
-use opendash_core::Value;
-use opendash_data::culture::Culture;
-use opendash_data::step::{ColumnType, change_type};
-use opendash_data::{Table, TableBuilder};
+use metriccraft_core::Value;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::step::{ColumnType, change_type};
+use metriccraft_data::{Table, TableBuilder};
 
 use crate::dax::storage::{Col, DbColumn};
 use crate::dax::{Database, ErrorKind, Options, model_eval};
@@ -128,7 +128,11 @@ impl Model {
                 cancel,
                 memory_cap: db.loaded_bytes.saturating_add(left),
             };
-            let values = match column.expression.as_deref().map(opendash_dax::parse_expr) {
+            let values = match column
+                .expression
+                .as_deref()
+                .map(metriccraft_dax::parse_expr)
+            {
                 None => Err("no expression".to_string()),
                 Some(Err(e)) => Err(format!("The syntax is incorrect: {e}")),
                 Some(Ok(expr)) => match model_eval::evaluate_rows(&db, self, dbi, &expr, options) {
@@ -310,7 +314,7 @@ fn encode(table: &str, column: &str, array: ArrayRef, limit: usize) -> Result<Ar
         array.data_type().clone(),
         true,
     )]));
-    let err = |e: &opendash_data::Error| data_error(table, column, e);
+    let err = |e: &metriccraft_data::Error| data_error(table, column, e);
     let batch = RecordBatch::try_new(Arc::clone(&schema), vec![array]).map_err(|e| Error {
         table: table.into(),
         column: column.into(),
@@ -326,7 +330,7 @@ fn encode(table: &str, column: &str, array: ArrayRef, limit: usize) -> Result<Ar
     })
 }
 
-fn data_error(table: &str, column: &str, e: &opendash_data::Error) -> Error {
+fn data_error(table: &str, column: &str, e: &metriccraft_data::Error) -> Error {
     Error {
         table: table.into(),
         column: column.into(),
@@ -435,7 +439,7 @@ fn plain_array(values: &[Value]) -> std::result::Result<(ArrayRef, Option<Column
 #[cfg(test)]
 mod tests {
     use arrow_array::{Array, cast::AsArray};
-    use opendash_data::step::ColumnType;
+    use metriccraft_data::step::ColumnType;
 
     use super::*;
     use crate::{Measure, ModelTable};

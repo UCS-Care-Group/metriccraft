@@ -11,8 +11,8 @@ use arrow_array::{
     Array, ArrayRef, Date32Array, Decimal64Array, DictionaryArray, Float64Array, Int8Array,
     Int16Array, Int32Array, Int64Array, PrimitiveArray, RecordBatch, StringArray,
 };
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder};
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder};
 
 use super::*;
 use crate::Model;

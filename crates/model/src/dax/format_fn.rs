@@ -1,10 +1,10 @@
-//! `FORMAT(value, format_string[, locale_name])` (M3.8): `opendash_core::format` in a Locale.
+//! `FORMAT(value, format_string[, locale_name])` (M3.8): `metriccraft_core::format` in a Locale.
 //!
 //! Without a locale name the query's Locale is en-GB: the evaluator carries none yet, and parity
 //! cases are observed with English (United Kingdom) regional settings. BLANK formats to `""`
 //! (text, not BLANK), as documented.
 
-use opendash_core::{EN_GB, Locale, Value};
+use metriccraft_core::{EN_GB, Locale, Value};
 
 // A child of `functions` (its `#[path]` mod line), so the evaluator is reached through `crate`.
 use super::Call;
@@ -24,14 +24,14 @@ pub(super) fn format(ev: &mut Evaluator<'_, '_>, call: &Call<'_>) -> Result<Val>
                 DaxError::new(
                     arg.span,
                     format!(
-                        "FORMAT doesn't know the locale \"{name}\"; OpenDash BI has en-US, \
+                        "FORMAT doesn't know the locale \"{name}\"; MetricCraft has en-US, \
                          en-GB, de-DE and fr-FR"
                     ),
                 )
             })?
         }
     };
-    let text = opendash_core::format(&value, &code, locale)
+    let text = metriccraft_core::format(&value, &code, locale)
         .map_err(|e| DaxError::new(code_arg.span, format!("FORMAT: {e}")))?;
     Ok(Val::Scalar(Value::text(&text)))
 }

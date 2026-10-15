@@ -11,8 +11,8 @@
 //!   point) with its Tag, emitted after all the lines. Renderers draw nothing for it.
 //! - Axes, gridlines, legend and notices are untagged.
 
-use opendash_core::Value;
-use opendash_data::step::ColumnType;
+use metriccraft_core::Value;
+use metriccraft_data::step::ColumnType;
 
 use crate::draw::{Align, Cmd, Color, Scene, Tag, Weight};
 use crate::layout::axis::{date_ticks, nice_ticks, tick_labels};
@@ -511,7 +511,7 @@ fn number(v: &Value) -> Option<f64> {
     let d = match v {
         Value::Integer(i) => *i as f64,
         Value::Decimal(d) => *d,
-        Value::Currency(c) => *c as f64 / opendash_core::CURRENCY_SCALE as f64,
+        Value::Currency(c) => *c as f64 / metriccraft_core::CURRENCY_SCALE as f64,
         _ => return None,
     };
     d.is_finite().then_some(d)
@@ -777,7 +777,7 @@ fn chrome(visual: &Visual, result: &QueryResult, data: &Data, cx: &Context<'_>) 
 /// Our wording for a capped result: categories when rows were left out, else series.
 fn notice(result: &QueryResult, cx: &Context<'_>) -> String {
     let count = |n: usize| {
-        opendash_core::format(&Value::Integer(n as i64), "#,0", cx.locale)
+        metriccraft_core::format(&Value::Integer(n as i64), "#,0", cx.locale)
             .unwrap_or_else(|_| n.to_string())
     };
     if result.total_rows > result.rows.len() {

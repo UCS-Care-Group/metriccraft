@@ -1,4 +1,4 @@
-# OpenDash BI
+# MetricCraft
 
 ![stage](https://img.shields.io/badge/stage-pre--alpha%20%C2%B7%20M5%20done-orange)
 ![DAX parity](https://img.shields.io/badge/DAX%20MVP%20functions-17%20of%2017%20implemented-yellow)

@@ -1,5 +1,5 @@
 //! The query a Visual runs (M4.1; ADR 0006, 0007; grill Q5–Q7, Q25): its Fields resolved
-//! against the Model, grouped with `opendash_model`'s `summarize`, sorted, capped and pivoted
+//! against the Model, grouped with `metriccraft_model`'s `summarize`, sorted, capped and pivoted
 //! into a [`QueryResult`] that layout (M4.3–M4.5) reads.
 //!
 //! **Axes.** Every Visual is a grid of *row groups* × *column groups* × *values*:
@@ -39,15 +39,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::sync::Arc;
 
-use opendash_core::Value;
-use opendash_data::step::ColumnType;
-use opendash_dax::{Expr, ExprKind, Query, Span};
-use opendash_model::dax::functions::summarize::summarize_rows;
-use opendash_model::dax::model_eval::measure_defines;
-use opendash_model::dax::{
+use metriccraft_core::Value;
+use metriccraft_data::step::ColumnType;
+use metriccraft_dax::{Expr, ExprKind, Query, Span};
+use metriccraft_model::dax::functions::summarize::summarize_rows;
+use metriccraft_model::dax::model_eval::measure_defines;
+use metriccraft_model::dax::{
     Database, DaxError, ErrorKind, Evaluator, FilterContext, Key, Options, Result,
 };
-use opendash_model::{Model, SummarizeBy, same_name};
+use metriccraft_model::{Model, SummarizeBy, same_name};
 
 use crate::visual::{FieldRef, Sort, SortDirection, Visual, VisualType, Well};
 
@@ -377,7 +377,7 @@ fn model_column<'m>(
     model: &'m Model,
     table: &str,
     column: &str,
-) -> Option<&'m opendash_model::Column> {
+) -> Option<&'m metriccraft_model::Column> {
     model
         .tables
         .iter()

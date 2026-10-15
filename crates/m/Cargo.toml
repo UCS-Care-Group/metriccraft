@@ -1,5 +1,5 @@
 [package]
-name = "opendash-m"
+name = "metriccraft-m"
 description = "M-subset AST, printer and parser."
 version.workspace = true
 edition.workspace = true

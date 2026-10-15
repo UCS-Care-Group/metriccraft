@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder};
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder};
 
 use super::super::*;
 use crate::{Model, Relationship};

@@ -9,9 +9,9 @@ use arrow_array::{
     ArrayRef, BooleanArray, Date32Array, Decimal64Array, Float64Array, Int64Array, NullArray,
     RecordBatch, StringArray,
 };
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder, fold_case};
-use opendash_dax::{Expr, parse_expr};
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder, fold_case};
+use metriccraft_dax::{Expr, parse_expr};
 
 use super::{ColumnRef, FAST_HITS, FORCE_SLOW, summarize};
 use crate::dax::*;
@@ -368,7 +368,7 @@ fn one_pass_matches_per_group_on_random_queries() {
             let what = format!(
                 "seed {seed} case {case}: {gb:?} {:?} {:?}",
                 ms.iter()
-                    .map(|(_, e)| opendash_dax::print_expr(e))
+                    .map(|(_, e)| metriccraft_dax::print_expr(e))
                     .collect::<Vec<_>>(),
                 fc.filters
             );

@@ -181,7 +181,7 @@ mod tests {
             "",
             "~",
             "a\u{0}b",
-            "COM3.odm",
+            "COM3.mcm",
             "日本語",
             "😀",
         ];
@@ -191,7 +191,7 @@ mod tests {
             assert!(!stem.chars().any(char::is_control));
             assert!(!stem.ends_with(['.', ' ']) && !stem.starts_with(['.', ' ']));
             assert!(!is_reserved(&stem), "{stem}");
-            assert!(crate::check_path(&format!("queries/{stem}.odq")).is_ok());
+            assert!(crate::check_path(&format!("queries/{stem}.mcq")).is_ok());
         }
     }
 

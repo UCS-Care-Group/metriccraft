@@ -1,10 +1,10 @@
 use arrow_array::cast::AsArray;
-use opendash_core::Value as DaxValue;
-use opendash_data::Query;
-use opendash_data::culture::Culture;
-use opendash_data::source::{Bytes, File, Source, csv};
-use opendash_data::step::ColumnType;
-use opendash_model::ModelTable;
+use metriccraft_core::Value as DaxValue;
+use metriccraft_data::Query;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::source::{Bytes, File, Source, csv};
+use metriccraft_data::step::ColumnType;
+use metriccraft_model::ModelTable;
 use serde_json::json;
 
 use super::*;
@@ -377,17 +377,18 @@ fn calculated_columns_are_recomputed_on_open_not_cached() {
         json!({"table": "Sales", "name": "Rows", "expression": "COUNTROWS(Sales)"}),
     );
     let bytes = app.package_bytes().unwrap();
-    let files = opendash_file::unpack(&bytes).unwrap();
-    let meta = String::from_utf8(files[&opendash_file::cache::meta_path("Sales")].clone()).unwrap();
+    let files = metriccraft_file::unpack(&bytes).unwrap();
+    let meta =
+        String::from_utf8(files[&metriccraft_file::cache::meta_path("Sales")].clone()).unwrap();
     assert!(!meta.contains("Double"), "{meta}");
-    let odm = String::from_utf8(files["model/tables/Sales.odm"].clone()).unwrap();
+    let mcm = String::from_utf8(files["model/tables/Sales.mcm"].clone()).unwrap();
     assert!(
-        odm.contains("  column Double =\n      [Qty] * 2\n    dataType: whole\n"),
-        "{odm}"
+        mcm.contains("  column Double =\n      [Qty] * 2\n    dataType: whole\n"),
+        "{mcm}"
     );
     assert!(
-        odm.contains("  measure Rows =\n      COUNTROWS(Sales)\n"),
-        "{odm}"
+        mcm.contains("  measure Rows =\n      COUNTROWS(Sales)\n"),
+        "{mcm}"
     );
     let mut other = App::new();
     other.open_package_bytes(&bytes).unwrap();

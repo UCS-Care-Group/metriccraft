@@ -1,5 +1,5 @@
 //! DAX benches (spec N-3; `docs/bench.md`). Run via `cargo xtask bench`, which lists the bench
-//! files in `OPENDASH_BENCH_IMPORTS` (lines of `<name>\t<path>`); each `import/parquet_<n>`
+//! files in `METRICCRAFT_BENCH_IMPORTS` (lines of `<name>\t<path>`); each `import/parquet_<n>`
 //! file is loaded once (Get Data, as the import bench does) and every query below is timed on
 //! it: `BENCH dax/<query>_<n> <ns>`, the median of [`RUNS`]. Only query evaluation is timed
 //! (parse + evaluate), not the load or building the evaluator's [`Database`]. Without the
@@ -7,8 +7,8 @@
 
 use std::time::Instant;
 
-use opendash_engine::App;
-use opendash_model::dax::{Database, Options, run_query_text};
+use metriccraft_engine::App;
+use metriccraft_model::dax::{Database, Options, run_query_text};
 use serde_json::json;
 
 const RUNS: usize = 5;
@@ -28,7 +28,7 @@ const QUERIES: [(&str, &str); 3] = [
 ];
 
 fn main() {
-    let imports = std::env::var("OPENDASH_BENCH_IMPORTS").unwrap_or_default();
+    let imports = std::env::var("METRICCRAFT_BENCH_IMPORTS").unwrap_or_default();
     for (name, path) in imports.lines().filter_map(|l| l.split_once('\t')) {
         let Some(label) = name.strip_prefix("import/parquet_") else {
             continue;

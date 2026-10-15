@@ -19,8 +19,8 @@
 //! column, and `SUM`/`AVERAGE` of text, are errors here (the docs say `AVERAGE` of text gives
 //! BLANK); `AVERAGE` of a fixed decimal column is a decimal number; `SUM` of dates is a date.
 
-use opendash_core::{CURRENCY_SCALE, DataType, Value, ValueError};
-use opendash_dax::{ExprKind, Span};
+use metriccraft_core::{CURRENCY_SCALE, DataType, Value, ValueError};
+use metriccraft_dax::{ExprKind, Span};
 
 use crate::dax::eval::{Evaluator, Val};
 use crate::dax::functions::Call;

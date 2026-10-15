@@ -79,7 +79,7 @@ pub enum Step {
 
 /// Most conditions in one Filtered Rows step: a bound on hostile input (each condition is a
 /// column test per row), far past any hand-built filter. Its M is one flat `and`/`or` chain
-/// (`opendash_m::Expr::Chain`, one nesting level however long), well inside the M parser's
+/// (`metriccraft_m::Expr::Chain`, one nesting level however long), well inside the M parser's
 /// size and token caps. The command, the M reader and the step itself enforce it.
 pub const MAX_CONDITIONS: usize = 10_000;
 
@@ -548,7 +548,7 @@ impl ColumnType {
         Self::Boolean,
     ];
 
-    /// The name commands and `.odm` files use: `text`, `decimal`, `fixedDecimal`, `whole`,
+    /// The name commands and `.mcm` files use: `text`, `decimal`, `fixedDecimal`, `whole`,
     /// `date`, `datetime`, `boolean`.
     pub fn name(self) -> &'static str {
         match self {

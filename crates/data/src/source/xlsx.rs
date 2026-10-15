@@ -1224,7 +1224,7 @@ fn text(d: &Data, is_1904: bool, decimal: char) -> Option<String> {
     }
 }
 
-pub(crate) use opendash_core::date::civil;
+pub(crate) use metriccraft_core::date::civil;
 
 /// Power Query's header promotion: a blank header becomes `Column<n>` (1-based position), a
 /// repeat gets `_1`, `_2`… appended.
@@ -1679,7 +1679,7 @@ mod tests {
         ok
     }
 
-    /// Soak with `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`): the flip sweeps get
+    /// Soak with `MCRAFT_FUZZ_SCALE` / `MCRAFT_FUZZ_SEED` (see `crate::fuzz`): the flip sweeps get
     /// `scale` times denser and the random edits and attribute values `scale` times more.
     #[test]
     fn damaged_parts_never_panic() {

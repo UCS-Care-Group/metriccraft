@@ -1,5 +1,5 @@
 [package]
-name = "opendash-mcp"
+name = "metriccraft-mcp"
 description = "MCP server over the command set."
 version.workspace = true
 edition.workspace = true

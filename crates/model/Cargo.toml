@@ -1,5 +1,5 @@
 [package]
-name = "opendash-model"
+name = "metriccraft-model"
 description = "Tables, relationships, measures, calculated columns and the DAX evaluator."
 version.workspace = true
 edition.workspace = true
@@ -12,9 +12,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-opendash-core = { path = "../core" }
-opendash-dax = { path = "../dax" }
-opendash-data = { path = "../data" }
+metriccraft-core = { path = "../core" }
+metriccraft-dax = { path = "../dax" }
+metriccraft-data = { path = "../data" }
 arrow-array.workspace = true
 arrow-cast.workspace = true
 arrow-schema.workspace = true

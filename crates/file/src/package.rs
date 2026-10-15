@@ -1,4 +1,4 @@
-//! The `.odash` Package (ADR 0003): a zip of a Project's files, MIME type
+//! The `.mcraft` Package (ADR 0003): a zip of a Project's files, MIME type
 //! [`MIME`].
 //!
 //! **Writing** is deterministic: entries in path order, every timestamp 1980-01-01 00:00, Unix
@@ -22,9 +22,9 @@ use zip::{CompressionMethod, DateTime, System, ZipArchive, ZipWriter};
 use crate::{Error, FileSet, Result, check_path};
 
 /// The Package's MIME type, registered on install.
-pub const MIME: &str = "application/vnd.opendash.package+zip";
+pub const MIME: &str = "application/vnd.metriccraft.package+zip";
 /// The Package's file extension.
-pub const EXTENSION: &str = "odash";
+pub const EXTENSION: &str = "mcraft";
 /// The Deflate level for text entries; fixed, so output is reproducible.
 pub const LEVEL: i64 = 6;
 

@@ -5,8 +5,8 @@
 
 use std::collections::BTreeMap;
 
-use opendash_file::Error as FileError;
-use opendash_file::project::DIAGRAM;
+use metriccraft_file::Error as FileError;
+use metriccraft_file::project::DIAGRAM;
 use serde_json::{Map, Value, json};
 
 use crate::model::{invalid, text};
@@ -75,12 +75,12 @@ pub(crate) fn decode(bytes: Option<&[u8]>) -> Result<Diagram> {
 pub(crate) fn move_table(doc: &mut Document, params: &Value) -> Result {
     const ID: &str = "model.moveTable";
     let name = text(params, "table", ID)?;
-    let key = opendash_model::name_key(&name);
+    let key = metriccraft_model::name_key(&name);
     let table = doc
         .model
         .tables
         .iter()
-        .find(|t| opendash_model::name_key(&t.name) == key)
+        .find(|t| metriccraft_model::name_key(&t.name) == key)
         .ok_or_else(|| invalid(ID, format!("there is no table `{name}`")))?
         .name
         .clone();

@@ -8,8 +8,8 @@
 //!
 //! The grid helpers here (`Grid`, `fit`, `cell`, `notice`) are shared with the matrix.
 
-use opendash_core::{Locale, Value};
-use opendash_data::step::ColumnType;
+use metriccraft_core::{Locale, Value};
+use metriccraft_data::step::ColumnType;
 
 use super::{Context, PAD, frame, value_text};
 use crate::draw::{Align, Cmd, Color, Scene, Tag, Weight};
@@ -165,7 +165,7 @@ pub(super) fn notice(result: &QueryResult, locale: &Locale) -> Option<String> {
     }
     let n = |i: usize| {
         let v = Value::Integer(i64::try_from(i).unwrap_or(i64::MAX));
-        opendash_core::format(&v, "#,0", locale).unwrap_or_else(|_| i.to_string())
+        metriccraft_core::format(&v, "#,0", locale).unwrap_or_else(|_| i.to_string())
     };
     let shown = result.rows.len();
     let first = result.offset.saturating_add(1);
@@ -404,10 +404,10 @@ pub(super) mod test_support {
     use std::sync::Arc;
 
     use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
-    use opendash_data::step::ColumnType;
-    use opendash_data::{Table, TableBuilder, fold_case};
-    use opendash_model::dax::{Database, FilterContext, Options};
-    use opendash_model::{Column, Measure, Model, ModelTable, SummarizeBy};
+    use metriccraft_data::step::ColumnType;
+    use metriccraft_data::{Table, TableBuilder, fold_case};
+    use metriccraft_model::dax::{Database, FilterContext, Options};
+    use metriccraft_model::{Column, Measure, Model, ModelTable, SummarizeBy};
 
     use crate::draw::Scene;
     use crate::query::{QueryInput, QueryResult, run_query};
@@ -612,7 +612,7 @@ mod tests {
         let th = theme();
         let cx = Context {
             theme: &th,
-            locale: &opendash_core::EN_GB,
+            locale: &metriccraft_core::EN_GB,
         };
         let s = layout(v, r, &cx);
         assert_sane(&s);

@@ -2,8 +2,8 @@
 //! the Data pane's Field clicks, and Filters (the Page's slicer selections).
 
 use egui::{RichText, Ui};
-use opendash_engine::Page;
-use opendash_visuals::{FieldRef, Visual, VisualType, Well};
+use metriccraft_engine::Page;
+use metriccraft_visuals::{FieldRef, Visual, VisualType, Well};
 use serde_json::{Value, json};
 
 use crate::canvas::visual_name;

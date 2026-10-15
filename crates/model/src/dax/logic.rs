@@ -27,8 +27,8 @@
 
 use std::rc::Rc;
 
-use opendash_core::{Value, ValueError};
-use opendash_dax::{Expr, ExprKind, Span};
+use metriccraft_core::{Value, ValueError};
+use metriccraft_dax::{Expr, ExprKind, Span};
 
 use super::{Call, Function};
 use crate::dax::eval::{Evaluator, TableVal, Val};
@@ -409,7 +409,7 @@ impl Step for ContainsRow {
 }
 
 /// `l IN r`: whether table `r` has a row strictly equal to `l` (a value or a row tuple). The
-/// evaluator's arm for [`opendash_dax::BinOp::In`] (`e`); a [`drive`] loop of its own.
+/// evaluator's arm for [`metriccraft_dax::BinOp::In`] (`e`); a [`drive`] loop of its own.
 #[inline(never)]
 pub fn in_op(ev: &mut Evaluator<'_, '_>, e: &Expr, fc: &FilterContext) -> Result<Val> {
     let (ExprKind::Binary(_, l, r), span) = (&e.kind, e.span) else {
@@ -527,7 +527,7 @@ mod tests {
     use std::sync::Arc;
 
     use arrow_array::{ArrayRef, Int64Array, RecordBatch, StringArray};
-    use opendash_data::{Table, TableBuilder};
+    use metriccraft_data::{Table, TableBuilder};
 
     use crate::Model;
     use crate::dax::{Database, MAX_EVAL_DEPTH, Options, ResultTable, run_query_text};

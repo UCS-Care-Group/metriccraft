@@ -1,6 +1,6 @@
 # Commands
 
-Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -p opendash-engine commands_doc`); do not edit. `?` marks an optional param.
+Generated from the engine's command table (`MCRAFT_SNAPSHOT_UPDATE=1 cargo test -p metriccraft-engine commands_doc`); do not edit. `?` marks an optional param.
 
 ## `edit.undo` — Undo
 
@@ -22,7 +22,7 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 
 - Ribbon: File
 - Shortcut: Ctrl+O
-- `path`: path — a Project folder, its project.odash.json, or a .odash Package
+- `path`: path — a Project folder, its project.mcraft.json, or a .mcraft Package
 - `recover?`: staging | lastGood — after an interrupted save only: staging (the save that was being made) or lastGood (the state before it)
 
 ## `file.save` — Save
@@ -34,8 +34,8 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 ## `file.saveAs` — Save as
 
 - Ribbon: File
-- `path`: path — the Project folder or .odash Package to write
-- `package?`: logical — write a .odash Package (default: whether path ends in .odash)
+- `path`: path — the Project folder or .mcraft Package to write
+- `package?`: logical — write a .mcraft Package (default: whether path ends in .mcraft)
 - `data?`: logical — include the Data cache in a Package (default true; a Project folder always keeps it)
 
 ## `file.remapSource` — Remap source path
@@ -46,12 +46,12 @@ Generated from the engine's command table (`ODASH_SNAPSHOT_UPDATE=1 cargo test -
 ## `file.recover` — Recover
 
 - `id`: text — the recovery copy, as listed at launch
-- `dir?`: path — the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)
+- `dir?`: path — the recovery folder (default: the user's, e.g. ~/.cache/metriccraft/recovery)
 
 ## `file.discardRecovery` — Discard
 
 - `id`: text — the recovery copy, as listed at launch
-- `dir?`: path — the recovery folder (default: the user's, e.g. ~/.cache/opendash/recovery)
+- `dir?`: path — the recovery folder (default: the user's, e.g. ~/.cache/metriccraft/recovery)
 
 ## `home.getData` — Get Data
 

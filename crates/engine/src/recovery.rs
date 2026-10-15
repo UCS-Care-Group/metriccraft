@@ -8,11 +8,11 @@
 //! AutoRecovery information every N minutes*). At launch it lists [`App::recoverable`] copies
 //! and runs `file.recover` or `file.discardRecovery` on each the user picks.
 //!
-//! **Layout** (`<dir>` is [`recovery_dir`], e.g. `~/.cache/opendash/recovery`):
+//! **Layout** (`<dir>` is [`recovery_dir`], e.g. `~/.cache/metriccraft/recovery`):
 //!
 //! ```text
 //! <dir>/<id>/                    one Document's copy: a Project folder
-//!   project.odash.json, model/…, queries/…   its definitions, as a save writes them
+//!   project.mcraft.json, model/…, queries/…   its definitions, as a save writes them
 //!   .cache/<stem>.parquet|.meta  its Data cache (provenance kept, so Stale comes back exactly)
 //!   recovery.json                written last: where it came from, when, its tables and Stale
 //! ```
@@ -42,7 +42,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use opendash_file::{FileSet, Recover};
+use metriccraft_file::{FileSet, Recover};
 use serde_json::{Value, json};
 
 use crate::file::{CacheFrom, Location, Saved};
@@ -123,8 +123,8 @@ struct Info {
     stale: BTreeSet<String>,
 }
 
-/// The user's recovery folder: `$XDG_CACHE_HOME/opendash/recovery` (or `~/.cache/…`) on Linux,
-/// `%LOCALAPPDATA%\opendash\recovery` on Windows, `~/Library/Caches/opendash/recovery` on macOS.
+/// The user's recovery folder: `$XDG_CACHE_HOME/metriccraft/recovery` (or `~/.cache/…`) on Linux,
+/// `%LOCALAPPDATA%\metriccraft\recovery` on Windows, `~/Library/Caches/metriccraft/recovery` on macOS.
 /// `None` where there is none (the web build, or no home directory).
 pub fn recovery_dir() -> Option<PathBuf> {
     let var = |k: &str| {
@@ -138,7 +138,7 @@ pub fn recovery_dir() -> Option<PathBuf> {
     let base = var("HOME").map(|h| h.join("Library").join("Caches"));
     #[cfg(not(any(windows, target_os = "macos")))]
     let base = var("XDG_CACHE_HOME").or_else(|| var("HOME").map(|h| h.join(".cache")));
-    Some(base?.join("opendash").join("recovery"))
+    Some(base?.join("metriccraft").join("recovery"))
 }
 
 impl App {
@@ -194,7 +194,7 @@ impl App {
             && let (Ok(project), Ok(p)) = (std::path::absolute(project), std::path::absolute(&path))
             && p.starts_with(project)
         {
-            return Err(Error::File(opendash_file::Error::Save(
+            return Err(Error::File(metriccraft_file::Error::Save(
                 "the recovery folder can't be inside the Project".into(),
             )));
         }
@@ -232,7 +232,7 @@ impl App {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io(&info_path, e)),
             _ => {}
         }
-        opendash_file::write_folder(path, &files).map_err(Error::File)?;
+        metriccraft_file::write_folder(path, &files).map_err(Error::File)?;
         let cache = crate::file::write_cache(path, entries, prev, &self.stems())?;
         let doc = self.document();
         let info = Info {
@@ -260,7 +260,8 @@ impl App {
                     Location::Package(p) => ("package", p),
                 };
                 let p = std::path::absolute(p).unwrap_or_else(|_| p.clone());
-                let h = opendash_file::manifest::hash(format!("{kind}:{}", p.display()).as_bytes());
+                let h =
+                    metriccraft_file::manifest::hash(format!("{kind}:{}", p.display()).as_bytes());
                 let hex = h.strip_prefix("sha256:").unwrap_or(&h);
                 format!("project-{}", hex.get(..16).unwrap_or(hex))
             }
@@ -295,7 +296,7 @@ impl App {
             out.push(match read_info(&path) {
                 Ok(info) => RecoveryInfo {
                     id,
-                    problem: (!path.join(opendash_file::MANIFEST).is_file())
+                    problem: (!path.join(metriccraft_file::MANIFEST).is_file())
                         .then(|| "its definitions are missing".to_string()),
                     location: info.location,
                     saved_at: Some(info.saved_at),
@@ -322,7 +323,8 @@ impl App {
         let path = dir.join(id);
         let info = read_info(&path)
             .map_err(|m| invalid(cmd, format!("recovery copy `{id}` can't be used: {m}")))?;
-        let files: FileSet = opendash_file::read_folder(&path, Recover::No).map_err(Error::File)?;
+        let files: FileSet =
+            metriccraft_file::read_folder(&path, Recover::No).map_err(Error::File)?;
         let root = info.location.as_ref().and_then(Location::root);
         self.open_files(
             files,
@@ -392,7 +394,7 @@ impl App {
 }
 
 fn io(path: &Path, e: impl std::fmt::Display) -> Error {
-    Error::File(opendash_file::Error::Io {
+    Error::File(metriccraft_file::Error::Io {
         path: path.display().to_string(),
         message: e.to_string(),
     })

@@ -4,7 +4,7 @@
 //! them (`modeling.newRelationship`, either way round).
 
 use egui::{Align2, FontId, Rect, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
-use opendash_engine::Document;
+use metriccraft_engine::Document;
 use serde_json::{Value, json};
 
 use crate::strings::Str;
@@ -14,7 +14,7 @@ const WIDTH: f32 = 220.0;
 const HEAD: f32 = 28.0;
 const ROW: f32 = 20.0;
 /// Largest coordinate the engine accepts.
-const MAX: i32 = opendash_engine::MAX_COORD;
+const MAX: i32 = metriccraft_engine::MAX_COORD;
 
 #[derive(Default)]
 pub struct Diagram {

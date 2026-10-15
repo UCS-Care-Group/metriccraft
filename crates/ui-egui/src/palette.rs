@@ -2,8 +2,8 @@
 //! (spec C-3): how a command that needs params gets them from the user.
 
 use egui::{Key, RichText, Ui};
-use opendash_engine::param::{Kind, Param};
-use opendash_engine::{Command, Document};
+use metriccraft_engine::param::{Kind, Param};
+use metriccraft_engine::{Command, Document};
 use serde_json::{Map, Value};
 
 use crate::strings::Str;
@@ -216,7 +216,7 @@ impl Form {
             m.insert("itemKind".into(), Value::String((*kind).into()));
         }
         let v = Value::Object(m);
-        opendash_engine::param::validate(self.command.params, &v)?;
+        metriccraft_engine::param::validate(self.command.params, &v)?;
         Ok(v)
     }
 
@@ -344,7 +344,7 @@ fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opendash_engine::COMMANDS;
+    use metriccraft_engine::COMMANDS;
 
     fn command(id: &str) -> &'static Command {
         COMMANDS.iter().find(|c| c.id == id).unwrap_or(&COMMANDS[0])

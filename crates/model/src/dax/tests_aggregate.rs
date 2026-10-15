@@ -7,8 +7,8 @@ use arrow_array::{
     ArrayRef, BooleanArray, Date32Array, Decimal64Array, Float64Array, Int64Array, RecordBatch,
     StringArray,
 };
-use opendash_core::Value;
-use opendash_data::{Table, TableBuilder, fold_case};
+use metriccraft_core::Value;
+use metriccraft_data::{Table, TableBuilder, fold_case};
 
 use crate::Model;
 
@@ -430,7 +430,7 @@ fn large_scans_cross_chunks() {
     assert_eq!(one(&db, "MAX(T[N])"), Value::Integer(9));
 }
 
-/// 3,000 mutated aggregation queries (`ODASH_FUZZ_SCALE` multiplies) on the 0029/0030 data:
+/// 3,000 mutated aggregation queries (`MCRAFT_FUZZ_SCALE` multiplies) on the 0029/0030 data:
 /// none may panic or hang.
 #[test]
 fn fuzzed_aggregations_never_panic() {

@@ -4,11 +4,11 @@
 //! and the Stale flags together, and a step that can't run changes nothing.
 
 use arrow_schema::{DataType, Schema, TimeUnit};
-use opendash_data::step::{
+use metriccraft_data::step::{
     ColumnType, Combine, Condition, JoinKind, MAX_CONDITIONS, Merge, Op, Step,
     Value as FilterValue, too_many_conditions,
 };
-use opendash_data::{Table, default_memory_cap};
+use metriccraft_data::{Table, default_memory_cap};
 use serde_json::Value;
 
 use crate::{App, Document, Error, Result};
@@ -239,7 +239,7 @@ pub(crate) fn merge_queries(doc: &mut Document, params: &Value) -> Result {
                 doc.model
                     .table(&other)
                     .and_then(|t| t.column(c))
-                    .is_some_and(opendash_model::Column::is_calculated)
+                    .is_some_and(metriccraft_model::Column::is_calculated)
             };
             previewed
                 .or_else(loaded)
@@ -302,7 +302,7 @@ pub(crate) fn check_steps(doc: &Document, q: usize, id: &str) -> Result<String> 
         .ok_or_else(|| invalid(id, "no such query".into()))?;
     if let Some(last) = query.steps.len().checked_sub(1) {
         let limit = default_memory_cap().saturating_sub(loaded(doc));
-        if let Err(e @ opendash_data::Error::Step { .. }) =
+        if let Err(e @ metriccraft_data::Error::Step { .. }) =
             query.preview_with(&doc.queries, &crate::load::fresh(doc), Some(last), limit)
         {
             return Err(invalid(id, e.to_string()));
@@ -389,9 +389,9 @@ fn invalid(command: &str, message: String) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use opendash_data::Query;
-    use opendash_data::culture::Culture;
-    use opendash_data::source::{Bytes, File, Source, csv};
+    use metriccraft_data::Query;
+    use metriccraft_data::culture::Culture;
+    use metriccraft_data::source::{Bytes, File, Source, csv};
     use serde_json::json;
 
     use super::*;
@@ -658,12 +658,12 @@ mod tests {
                 ..
             })
         ));
-        let m = opendash_data::m::print(&opendash_data::m::MQuery {
+        let m = metriccraft_data::m::print(&metriccraft_data::m::MQuery {
             source: q.source.clone(),
             steps: q.steps.clone(),
             culture: None,
         });
-        let back = opendash_data::m::parse(&m).unwrap();
+        let back = metriccraft_data::m::parse(&m).unwrap();
         assert_eq!(back.steps, q.steps);
     }
 
@@ -874,7 +874,7 @@ mod tests {
 
     #[test]
     fn filters_are_capped_so_their_m_parses() {
-        use opendash_data::step::MAX_CONDITIONS;
+        use metriccraft_data::step::MAX_CONDITIONS;
         let conditions = |n: usize| -> Vec<Value> {
             (0..n)
                 .map(|i| json!({"column": "Qty", "op": "equals", "value": i.to_string()}))

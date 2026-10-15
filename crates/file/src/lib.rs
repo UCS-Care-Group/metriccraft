@@ -1,14 +1,14 @@
 //! Project and Package read/write (ADR 0003).
 //!
-//! Layer L2 — see `docs/plan/0001-mvp.md` §1. Depends on `opendash-data` (Queries, M) and
-//! `opendash-model` (Tables, Relationships), never the other way.
+//! Layer L2 — see `docs/plan/0001-mvp.md` §1. Depends on `metriccraft-data` (Queries, M) and
+//! `metriccraft-model` (Tables, Relationships), never the other way.
 //!
 //! The core is pure functions over an in-memory [`FileSet`] (path → bytes), so the web build,
 //! which has no file system, opens and saves Packages from bytes:
 //!
 //! ```text
-//! Project ──encode──▶ FileSet ──pack──▶ .odash bytes
-//! Project ◀─decode─── FileSet ◀─unpack─ .odash bytes
+//! Project ──encode──▶ FileSet ──pack──▶ .mcraft bytes
+//! Project ◀─decode─── FileSet ◀─unpack─ .mcraft bytes
 //!                       │ ▲
 //!          write_folder ▼ │ read_folder        (native glue: staged save, interrupted-save
 //!                     folder on disk            detection and recovery; `folder` module)
@@ -16,9 +16,9 @@
 //!
 //! - [`project`]: the mapping between a [`Project`] (Queries, Model, Project culture) and its
 //!   parts, with unknown content carried through ([`Preserved`]).
-//! - [`manifest`]: `project.odash.json`, part hashes, Format version and migrations.
+//! - [`manifest`]: `project.mcraft.json`, part hashes, Format version and migrations.
 //! - [`escape`]: deterministic file names for table and query names.
-//! - [`package`]: the `.odash` zip.
+//! - [`package`]: the `.mcraft` zip.
 //! - [`folder`]: the Project folder on disk.
 //! - [`cache`]: the Data cache (`.cache/`): Parquet per table and its metadata.
 //! - [`local`]: Local overrides (`.local/`): source-path remapping.
@@ -50,11 +50,11 @@ pub type FileSet = BTreeMap<String, Vec<u8>>;
 pub enum Error {
     /// The file system refused (or there is none, as on the web).
     Io { path: String, message: String },
-    /// There is no `project.odash.json` here.
+    /// There is no `project.mcraft.json` here.
     NotAProject(String),
     /// The Manifest is malformed.
     Manifest(String),
-    /// Written by a newer OpenDash BI: this one only reads Format versions up to `supported`.
+    /// Written by a newer MetricCraft: this one only reads Format versions up to `supported`.
     NewerFormat { found: u64, supported: u64 },
     /// An older Format version with no migration to the next one.
     NoMigration { from: u64 },
@@ -78,13 +78,13 @@ impl fmt::Display for Error {
         match self {
             Self::Io { path, message } => write!(f, "{path}: {message}"),
             Self::NotAProject(path) => {
-                write!(f, "{path} is not an OpenDash BI Project (no {MANIFEST})")
+                write!(f, "{path} is not an MetricCraft Project (no {MANIFEST})")
             }
             Self::Manifest(m) => write!(f, "{MANIFEST}: {m}"),
             Self::NewerFormat { found, supported } => write!(
                 f,
-                "this Project was saved by a newer OpenDash BI (format version {found}); this \
-                 version reads up to format version {supported}. Update OpenDash BI to open it"
+                "this Project was saved by a newer MetricCraft (format version {found}); this \
+                 version reads up to format version {supported}. Update MetricCraft to open it"
             ),
             Self::NoMigration { from } => write!(
                 f,
@@ -108,7 +108,7 @@ impl fmt::Display for Error {
                 parts.join(", ")
             ),
             Self::Part { path, message } => write!(f, "{path}: {message}"),
-            Self::Package(m) => write!(f, "not a valid .odash Package: {m}"),
+            Self::Package(m) => write!(f, "not a valid .mcraft Package: {m}"),
             Self::Save(m) => write!(f, "can't save: {m}"),
         }
     }

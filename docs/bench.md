@@ -118,7 +118,7 @@ folds the whole dictionary per query. Baselines not re-recorded (host load > 2).
 ## Desktop app (M5.5; spec N-8; ADR 0008)
 
 `cargo xtask ui-bench` builds the release app, starts it on a fresh profile with
-`ODASH_UI_BENCH=1` and checks the N-8 budgets for a blank window:
+`MCRAFT_UI_BENCH=1` and checks the N-8 budgets for a blank window:
 
 - **cold start**: spawn to the first frame on screen, under 1 s;
 - **idle private memory**: the app's own resident pages (`RssAnon`) two seconds after the

@@ -27,16 +27,16 @@ use arrow_array::types::{Date32Type, Float64Type, Int64Type, TimestampMicrosecon
 use arrow_array::{Array, ArrayRef};
 use arrow_cast::cast;
 use arrow_schema::{DataType, TimeUnit};
-use opendash_data::Query;
-use opendash_data::culture::Culture;
-use opendash_data::m::{self, MQuery};
-use opendash_data::source::{Bytes, File, Source, csv};
+use metriccraft_data::Query;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::m::{self, MQuery};
+use metriccraft_data::source::{Bytes, File, Source, csv};
 
 use super::{Case, NO_EVALUATOR, Result, Table};
 
 /// The VM folder `cargo xtask parity --export` output is copied to: case `0003-x`'s file
-/// `Sales.csv` is `C:\opendash-parity\0003-x\Sales.csv` there, and that is the path in the M.
-pub const VM_DIR: &str = r"C:\opendash-parity";
+/// `Sales.csv` is `C:\metriccraft-parity\0003-x\Sales.csv` there, and that is the path in the M.
+pub const VM_DIR: &str = r"C:\metriccraft-parity";
 
 /// Memory cap for a case's data: tiny files, generous cap.
 const LIMIT: usize = 256 << 20;
@@ -100,7 +100,7 @@ pub(crate) fn prepare(case: &Case) -> Result<Option<Shaping>> {
         });
         if ours != text.trim_end() {
             return Err(format!(
-                "## M for `{}` is not what OpenDash BI prints for it; expected:\n{ours}",
+                "## M for `{}` is not what MetricCraft prints for it; expected:\n{ours}",
                 q.name
             ));
         }
@@ -617,7 +617,7 @@ in
 
     const OBSERVED: &str = "\n## Observed\n\nPower BI Desktop version: 2.158 · Date: x\n\n\
         M accepted: yes\nLoad errors: Sales 1\nLoad errors: Regions 0\n\nGet Data M: Regions\n\n```m\n\
-        let\n    Source = Csv.Document(File.Contents(\"C:\\opendash-parity\\x\\Regions.csv\"),[Delimiter=\",\", Columns=2, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),\n    \
+        let\n    Source = Csv.Document(File.Contents(\"C:\\metriccraft-parity\\x\\Regions.csv\"),[Delimiter=\",\", Columns=2, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),\n    \
         #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),\n    \
         #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\",{{\"RegionId\", Int64.Type}, {\"Manager\", type text}})\n\
         in\n    #\"Changed Type\"\n```\n\n\
@@ -698,7 +698,7 @@ in
 
     #[test]
     fn the_gate_reports_shaping_checks() {
-        let dir = std::env::temp_dir().join(format!("opendash-parity-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("metriccraft-parity-{}", std::process::id()));
         let observed = dir.join("observed");
         std::fs::create_dir_all(&observed).unwrap();
         let text = CASE.replace("\nM\n", &format!("\n{M}\n")) + OBSERVED;
@@ -853,7 +853,7 @@ in
         );
         let m = String::from_utf8(files["x/Sales.m"].clone()).unwrap();
         assert!(
-            m.contains(r#"File.Contents("C:\opendash-parity\x\Sales.csv")"#),
+            m.contains(r#"File.Contents("C:\metriccraft-parity\x\Sales.csv")"#),
             "{m}"
         );
         assert!(m.contains("\r\n    #\"Changed Type1\""), "CRLF: {m}");

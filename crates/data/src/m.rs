@@ -21,7 +21,7 @@
 
 use std::collections::HashSet;
 
-use opendash_m::{BinOp, Binding, Error, Expr, Let};
+use metriccraft_m::{BinOp, Binding, Error, Expr, Let};
 
 use crate::culture::{Culture, days_from_civil};
 use crate::source::xlsx::civil;
@@ -340,7 +340,7 @@ pub fn print(q: &MQuery) -> String {
         }
     }
     let last = bindings.last().map_or_else(String::new, |b| b.name.clone());
-    opendash_m::print(&Expr::Let(Let {
+    metriccraft_m::print(&Expr::Let(Let {
         bindings,
         body: Box::new(Expr::Ident(last)),
     }))
@@ -437,7 +437,7 @@ fn csv_source(path: String, options: &Expr) -> Result<Source, SourceError> {
         Some(Expr::Ident(q)) if q == "QuoteStyle.Csv" => {}
         Some(Expr::Ident(q)) if q == "QuoteStyle.None" => {
             return Err(SourceError::Unsupported(
-                "`QuoteStyle.None` is not supported yet: OpenDash BI reads quotes as \
+                "`QuoteStyle.None` is not supported yet: MetricCraft reads quotes as \
                  `QuoteStyle.Csv`"
                     .into(),
             ));
@@ -653,7 +653,7 @@ fn expand_from(e: &Expr, merged: &str, column: &str) -> Option<Vec<(String, Stri
 
 /// A step from its M function and arguments after the input table (and the step's culture).
 fn step_from(func: &str, args: &[Expr]) -> Result<(Step, Option<String>), String> {
-    let bad = || format!("`{func}` has arguments OpenDash BI doesn't support yet");
+    let bad = || format!("`{func}` has arguments MetricCraft doesn't support yet");
     let step = match (func, args) {
         ("Table.PromoteHeaders", []) => Step::PromotedHeaders,
         ("Table.PromoteHeaders", [options]) => {
@@ -719,14 +719,14 @@ fn step_from(func: &str, args: &[Expr]) -> Result<(Step, Option<String>), String
             | "Table.SelectRows",
             _,
         ) => return Err(bad()),
-        _ => return Err(format!("`{func}` is not a step OpenDash BI supports yet")),
+        _ => return Err(format!("`{func}` is not a step MetricCraft supports yet")),
     };
     Ok((step, None))
 }
 
 /// Parses a Query's M. Errors name the line of the step at fault.
 pub fn parse(src: &str) -> Result<MQuery, Error> {
-    let Expr::Let(l) = opendash_m::parse(src)? else {
+    let Expr::Let(l) = metriccraft_m::parse(src)? else {
         return Err(Error::new(
             1,
             1,
@@ -760,7 +760,7 @@ pub fn parse(src: &str) -> Result<MQuery, Error> {
                 nav,
                 format!(
                     "expected `{}{{[Item=\"…\",Kind=\"…\"]}}[Data]`",
-                    opendash_m::quote_identifier(&first.name)
+                    metriccraft_m::quote_identifier(&first.name)
                 ),
             )
         })?;
@@ -789,7 +789,7 @@ pub fn parse(src: &str) -> Result<MQuery, Error> {
                     b,
                     format!(
                         "`{func}` must start from the previous step `{}`",
-                        opendash_m::quote_identifier(&prev.name)
+                        metriccraft_m::quote_identifier(&prev.name)
                     ),
                 ));
             }
@@ -827,7 +827,7 @@ pub fn parse(src: &str) -> Result<MQuery, Error> {
             prev,
             format!(
                 "the `in` expression must name the last step `{}`",
-                opendash_m::quote_identifier(&prev.name)
+                metriccraft_m::quote_identifier(&prev.name)
             ),
         ));
     }
@@ -1036,8 +1036,8 @@ in
                 ],
                 false,
             );
-            assert_eq!(opendash_m::print(&printed), opendash_m::print(&old));
-            assert!(m.contains(&opendash_m::print(&old)));
+            assert_eq!(metriccraft_m::print(&printed), metriccraft_m::print(&old));
+            assert!(m.contains(&metriccraft_m::print(&old)));
         }
     }
 
@@ -1281,7 +1281,7 @@ in
     /// The M printed for every step and Source kind, with tokens and characters deleted,
     /// inserted, duplicated or swapped: parsing returns Ok or Err, never panics, and whatever
     /// parses prints back to M that parses to the same Query. 2,000 cases a run; soak with
-    /// `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).
+    /// `MCRAFT_FUZZ_SCALE` / `MCRAFT_FUZZ_SEED` (see `crate::fuzz`).
     #[test]
     fn mutated_m_never_panics() {
         let mut fuzz = crate::fuzz::Fuzz::new("query-m", 0x5DEE_CE66_D1CE_4E5B);

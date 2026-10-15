@@ -742,8 +742,8 @@ mod tests {
         assert!(matches!(e, Err(Error::MemoryCap { .. })), "{:?}", e.err());
     }
 
-    /// Every byte × 4 flips and every cut, then random edits. Soak with `ODASH_FUZZ_SCALE` /
-    /// `ODASH_FUZZ_SEED` (see `crate::fuzz`): the random edits get `scale` times more.
+    /// Every byte × 4 flips and every cut, then random edits. Soak with `MCRAFT_FUZZ_SCALE` /
+    /// `MCRAFT_FUZZ_SEED` (see `crate::fuzz`): the random edits get `scale` times more.
     #[test]
     fn damaged_bytes_never_panic() {
         let mut fuzz = crate::fuzz::Fuzz::new("csv-bytes", 0x9E37_79B9_7F4A_7C15);
@@ -772,7 +772,7 @@ mod tests {
 
     /// Generated CSV across delimiters, quoting, line ends, encodings and cultures, then
     /// mutated (bytes deleted, inserted, swapped). 400 cases a run; soak with
-    /// `ODASH_FUZZ_SCALE` / `ODASH_FUZZ_SEED` (see `crate::fuzz`).
+    /// `MCRAFT_FUZZ_SCALE` / `MCRAFT_FUZZ_SEED` (see `crate::fuzz`).
     #[test]
     fn mutated_csv_never_panics() {
         let mut fuzz = crate::fuzz::Fuzz::new("csv-mutated", 0x2545_F491_4F6C_DD1D);

@@ -21,13 +21,13 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use opendash_core::{CURRENCY_SCALE, Value as Datum};
-use opendash_data::step::ColumnType;
-use opendash_model::Model;
-use opendash_model::dax::{Bitset, Database, DaxError, Filter, FilterContext, Key, Options};
-use opendash_visuals::hit::{dim, hit};
-use opendash_visuals::layout::{Context, card, chart, error_scene, matrix, slicer, table};
-use opendash_visuals::{
+use metriccraft_core::{CURRENCY_SCALE, Value as Datum};
+use metriccraft_data::step::ColumnType;
+use metriccraft_model::Model;
+use metriccraft_model::dax::{Bitset, Database, DaxError, Filter, FilterContext, Key, Options};
+use metriccraft_visuals::hit::{dim, hit};
+use metriccraft_visuals::layout::{Context, card, chart, error_scene, matrix, slicer, table};
+use metriccraft_visuals::{
     FieldRef, QueryCache, QueryInput, QueryResult, Scene, Tag, Visual, VisualType, Well,
 };
 use serde_json::{Value, json};
@@ -647,7 +647,7 @@ impl App {
     /// The running load's progress (rows read per Query) and cancel switch (spec U-3): read
     /// and cancel it from another thread. Each Get Data, Refresh and Close & Apply resets it; a
     /// cancelled one fails, changing nothing.
-    pub fn load_progress(&self) -> Arc<opendash_data::Progress> {
+    pub fn load_progress(&self) -> Arc<metriccraft_data::Progress> {
         Arc::clone(&self.progress)
     }
 }

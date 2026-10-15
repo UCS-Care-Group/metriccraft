@@ -1,8 +1,8 @@
 //! Snapshot tests (ADR 0007): a Scene's text form is compared with a committed file; PNGs are
 //! written only for eyeballing, to the gitignored `observations/snapshots/`.
 //!
-//! - `ODASH_SNAPSHOT_UPDATE=1` rewrites the committed text instead of comparing.
-//! - `ODASH_SNAPSHOT_PNG=<dir>` also renders each checked Scene to `<dir>/<name>.png`.
+//! - `MCRAFT_SNAPSHOT_UPDATE=1` rewrites the committed text instead of comparing.
+//! - `MCRAFT_SNAPSHOT_PNG=<dir>` also renders each checked Scene to `<dir>/<name>.png`.
 //!
 //! `cargo xtask snapshot [--update]` sets both for every crate's snapshot tests: those whose
 //! name has `snapshot` in it (its filter). [`check`] fails in a test named otherwise, so none is
@@ -28,13 +28,13 @@ pub fn check(dir: &Path, name: &str, scene: &Scene) -> Result<(), String> {
     let text = scene.to_text();
     let file = dir.join(format!("{name}.txt"));
     #[cfg(feature = "png")]
-    if let Some(png_dir) = std::env::var_os("ODASH_SNAPSHOT_PNG") {
+    if let Some(png_dir) = std::env::var_os("MCRAFT_SNAPSHOT_PNG") {
         let png_dir = Path::new(&png_dir);
         let bytes = crate::png::render(scene, 2.0, crate::Theme::light().background)?;
         std::fs::create_dir_all(png_dir).map_err(|e| e.to_string())?;
         std::fs::write(png_dir.join(format!("{name}.png")), bytes).map_err(|e| e.to_string())?;
     }
-    let update = std::env::var_os("ODASH_SNAPSHOT_UPDATE").is_some_and(|v| v == "1");
+    let update = std::env::var_os("MCRAFT_SNAPSHOT_UPDATE").is_some_and(|v| v == "1");
     match std::fs::read_to_string(&file) {
         Ok(old) if old == text => Ok(()),
         Ok(_) if update => write(&file, &text),
@@ -94,7 +94,8 @@ mod tests {
     /// named otherwise fails, so it can't be left out of `--update`.
     #[test]
     fn checks_only_in_tests_named_snapshot() {
-        let dir = std::env::temp_dir().join(format!("odash-snapshot-guard-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("mcraft-snapshot-guard-{}", std::process::id()));
         let run = |name: &str| {
             let dir = dir.clone();
             std::thread::Builder::new()

@@ -1,10 +1,10 @@
 //! M4.5 tests: slicers and data-point Selection cross-filtering a small loaded Page.
 
-use opendash_data::Query;
-use opendash_data::culture::Culture;
-use opendash_data::source::{Bytes, File, Source, csv};
-use opendash_model::ModelTable;
-use opendash_visuals::{Cmd, Theme};
+use metriccraft_data::Query;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::source::{Bytes, File, Source, csv};
+use metriccraft_model::ModelTable;
+use metriccraft_visuals::{Cmd, Theme};
 
 use super::*;
 use crate::Error;
@@ -137,7 +137,7 @@ fn draw(app: &mut App, page: &str) -> Vec<(String, Scene)> {
     let th = Theme::light();
     let cx = Context {
         theme: &th,
-        locale: &opendash_core::EN_GB,
+        locale: &metriccraft_core::EN_GB,
     };
     app.page_scene(page, &cx).unwrap()
 }
@@ -528,7 +528,7 @@ fn bad_params_are_errors() {
     let th = Theme::light();
     let cx = Context {
         theme: &th,
-        locale: &opendash_core::EN_GB,
+        locale: &metriccraft_core::EN_GB,
     };
     assert!(app.page_scene("nope", &cx).is_err());
 }
@@ -603,7 +603,7 @@ fn random_clicks_and_selections_never_panic() {
                 let th = Theme::light();
                 let cx = Context {
                     theme: &th,
-                    locale: &opendash_core::EN_GB,
+                    locale: &metriccraft_core::EN_GB,
                 };
                 let _ = app.page_scene(&ids.page, &cx);
             }
@@ -680,7 +680,7 @@ fn page_snapshot_after_a_bar_click() {
         .collect();
     let composed = Scene::compose(820.0, 640.0, &parts);
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots");
-    opendash_visuals::snapshot::check(&dir, "page_bar_click", &composed).unwrap();
+    metriccraft_visuals::snapshot::check(&dir, "page_bar_click", &composed).unwrap();
 }
 
 /// A data-point Selection goes, whole, when its Visual's group-by Fields or type change (a

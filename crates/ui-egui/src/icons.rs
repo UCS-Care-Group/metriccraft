@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn ribbon_commands_have_icons() {
-        for c in opendash_engine::COMMANDS
+        for c in metriccraft_engine::COMMANDS
             .iter()
             .filter(|c| c.ribbon.contains(" > "))
         {

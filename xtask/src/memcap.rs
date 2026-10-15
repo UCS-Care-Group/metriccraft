@@ -8,7 +8,7 @@
 
 use std::process::Command;
 
-/// Default per-test-process address-space cap, in MiB (`ODASH_TEST_MEM_MB` overrides).
+/// Default per-test-process address-space cap, in MiB (`MCRAFT_TEST_MEM_MB` overrides).
 const DEFAULT_MB: u64 = 4096;
 
 /// Environment variable `(name, value)` that makes cargo run test binaries under the cap, or
@@ -18,12 +18,12 @@ pub fn runner_env() -> Option<(String, String)> {
         eprintln!("note: test memory cap skipped (Linux only)");
         return None;
     }
-    let mb = match std::env::var("ODASH_TEST_MEM_MB") {
+    let mb = match std::env::var("MCRAFT_TEST_MEM_MB") {
         Ok(v) => match v.trim().parse::<u64>() {
             Ok(mb) if mb > 0 => mb,
             _ => {
                 eprintln!(
-                    "warning: ODASH_TEST_MEM_MB={v:?} is not a positive integer; using {DEFAULT_MB}"
+                    "warning: MCRAFT_TEST_MEM_MB={v:?} is not a positive integer; using {DEFAULT_MB}"
                 );
                 DEFAULT_MB
             }
@@ -47,7 +47,7 @@ pub fn runner_env() -> Option<(String, String)> {
         "CARGO_TARGET_{}_RUNNER",
         triple.to_uppercase().replace(['-', '.'], "_")
     );
-    eprintln!("note: test processes capped at {mb} MiB address space (ODASH_TEST_MEM_MB)");
+    eprintln!("note: test processes capped at {mb} MiB address space (MCRAFT_TEST_MEM_MB)");
     Some((name, format!("prlimit --as={bytes} --")))
 }
 
@@ -64,7 +64,7 @@ fn host_triple() -> Option<String> {
 #[cfg(test)]
 mod tests {
     /// Self-check for the cap, ignored by default. Run capped, it must FAIL (abort on allocation
-    /// failure): `ODASH_TEST_MEM_MB=512 cargo xtask test -p xtask -- --ignored memcap`.
+    /// failure): `MCRAFT_TEST_MEM_MB=512 cargo xtask test -p xtask -- --ignored memcap`.
     /// Uncapped it passes (the zeroed allocation is lazy and never touched).
     #[test]
     #[ignore = "demonstrates the test memory cap; expected to fail when run capped"]

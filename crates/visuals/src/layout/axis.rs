@@ -1,7 +1,7 @@
 //! Chart axes (M4.4): "nice" value ticks with consistent display units, and nice date ticks for
 //! a continuous line axis. Pure numbers in, numbers and labels out; no drawing.
 
-use opendash_core::{Locale, Value, date};
+use metriccraft_core::{Locale, Value, date};
 
 use crate::layout::value_text;
 use crate::query::Header;
@@ -114,7 +114,7 @@ pub fn tick_labels(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Dates: serials are days since 1899-12-30 (opendash_core::Value::DateTime).
+// Dates: serials are days since 1899-12-30 (metriccraft_core::Value::DateTime).
 
 /// The serials VBA can show (100-01-01..=9999-12-31); date ticks stay inside them.
 const MIN_SERIAL: f64 = -657_434.0;
@@ -215,7 +215,7 @@ fn label_dates(ticks: Vec<f64>, code: &str, locale: &Locale) -> Vec<(f64, String
         .into_iter()
         .map(|t| {
             let v = Value::DateTime(t);
-            let label = opendash_core::format(&v, code, locale).unwrap_or_else(|_| v.to_text());
+            let label = metriccraft_core::format(&v, code, locale).unwrap_or_else(|_| v.to_text());
             (t, label)
         })
         .collect()
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn tick_labels_share_one_unit() {
-        let en = &opendash_core::EN_GB;
+        let en = &metriccraft_core::EN_GB;
         let l = |t: &[f64]| tick_labels(t, None, true, en);
         assert_eq!(l(&[0.0, 5000.0, 10000.0]), ["0K", "5K", "10K"]);
         assert_eq!(l(&[0.0, 2500.0, 5000.0]), ["0.0K", "2.5K", "5.0K"]);
@@ -277,11 +277,11 @@ mod tests {
         assert_eq!(l(&[0.0, 20.0, 40.0]), ["0", "20", "40"]);
         assert_eq!(l(&[0.0, 1e300]), ["0T", "1e288T"]);
         assert_eq!(
-            tick_labels(&[0.0, 500.0], None, true, &opendash_core::DE_DE),
+            tick_labels(&[0.0, 500.0], None, true, &metriccraft_core::DE_DE),
             ["0", "500"]
         );
         assert_eq!(
-            tick_labels(&[0.0, 2500.0], None, true, &opendash_core::DE_DE),
+            tick_labels(&[0.0, 2500.0], None, true, &metriccraft_core::DE_DE),
             ["0,0K", "2,5K"]
         );
         assert_eq!(
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn date_ticks_at_nice_dates() {
-        let en = &opendash_core::EN_GB;
+        let en = &metriccraft_core::EN_GB;
         let jan = serial(2024, 1, 1);
         let t = date_ticks(jan, serial(2024, 12, 31), 6, en);
         let labels: Vec<&str> = t.iter().map(|(_, l)| l.as_str()).collect();

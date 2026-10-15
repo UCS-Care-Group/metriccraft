@@ -7,8 +7,8 @@
 //! are left out (a query naming one fails as for an unknown name); their parse error is shown
 //! where the Measure is ([`crate::Measure::parse`]).
 
-use opendash_core::Value;
-use opendash_dax::{Define, Expr, ExprKind, Query, Span};
+use metriccraft_core::Value;
+use metriccraft_dax::{Define, Expr, ExprKind, Query, Span};
 
 use super::eval::{Evaluator, RowFrame};
 use super::storage::CHUNK;
@@ -74,7 +74,7 @@ pub fn run_model_query_text(
     text: &str,
     options: Options<'_>,
 ) -> Result<Vec<ResultTable>> {
-    let query = opendash_dax::parse_query(text).map_err(syntax)?;
+    let query = metriccraft_dax::parse_query(text).map_err(syntax)?;
     run_model_query(db, model, &query, options)
 }
 
@@ -148,7 +148,7 @@ pub fn evaluate_rows(
     Ok(out)
 }
 
-fn syntax(e: opendash_dax::Error) -> DaxError {
+fn syntax(e: metriccraft_dax::Error) -> DaxError {
     DaxError {
         kind: ErrorKind::Syntax,
         span: e.span,
@@ -161,8 +161,8 @@ mod tests {
     use std::sync::Arc;
 
     use arrow_array::{ArrayRef, Int64Array, RecordBatch, StringArray};
-    use opendash_data::culture::Culture;
-    use opendash_data::{Table, TableBuilder};
+    use metriccraft_data::culture::Culture;
+    use metriccraft_data::{Table, TableBuilder};
 
     use super::*;
     use crate::{Measure, ModelTable};
@@ -241,7 +241,7 @@ mod tests {
     fn rows_are_evaluated_with_their_row_context() {
         let (model, data) = sales();
         let db = Database::new(&model, &data);
-        let e = opendash_dax::parse_expr("[Qty] * 10 & \"\"").unwrap();
+        let e = metriccraft_dax::parse_expr("[Qty] * 10 & \"\"").unwrap();
         let v = evaluate_rows(&db, &model, 0, &e, Options::default()).unwrap();
         assert_eq!(v, [Value::text("30"), Value::text("40"), Value::text("50")]);
         let tight = Options {

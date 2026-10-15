@@ -1,4 +1,4 @@
-//! The report's files (ADR 0003): JSON, read and written here because `opendash-file` (layer
+//! The report's files (ADR 0003): JSON, read and written here because `metriccraft-file` (layer
 //! 2) can't see the Visual definitions (layer 3); it carries them as opaque parts
 //! (`Project::report`).
 //!
@@ -31,9 +31,9 @@
 
 use std::collections::BTreeMap;
 
-use opendash_file::Error as FileError;
-use opendash_visuals::visual::{LegendPosition, SlicerStyle};
-use opendash_visuals::{FieldRef, Format, Sort, SortDirection, Visual, VisualType, Well};
+use metriccraft_file::Error as FileError;
+use metriccraft_visuals::visual::{LegendPosition, SlicerStyle};
+use metriccraft_visuals::{FieldRef, Format, Sort, SortDirection, Visual, VisualType, Well};
 use serde_json::{Map, Value};
 
 use super::{

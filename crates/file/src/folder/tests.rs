@@ -5,7 +5,8 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("opendash-file-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("metriccraft-file-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Self(dir)
@@ -40,17 +41,17 @@ fn with_gitignore(mut f: FileSet) -> FileSet {
 
 fn v1() -> FileSet {
     files(&[
-        ("model/model.odm", "model Model\n"),
-        ("queries/A.odq", "query A\n"),
-        ("queries/B.odq", "query B\n"),
+        ("model/model.mcm", "model Model\n"),
+        ("queries/A.mcq", "query A\n"),
+        ("queries/B.mcq", "query B\n"),
     ])
 }
 
 fn v2() -> FileSet {
     files(&[
-        ("model/model.odm", "model Model\n  culture: en-GB\n"),
-        ("queries/A.odq", "query A\n  load: false\n"),
-        ("queries/C.odq", "query C\n"),
+        ("model/model.mcm", "model Model\n  culture: en-GB\n"),
+        ("queries/A.mcq", "query A\n  load: false\n"),
+        ("queries/C.mcq", "query C\n"),
     ])
 }
 
@@ -71,7 +72,7 @@ fn write_then_read_gives_the_same_files() {
         with_gitignore(v2())
     );
     assert!(
-        !root.join("queries/B.odq").exists(),
+        !root.join("queries/B.mcq").exists(),
         "a part no longer listed is removed"
     );
 }
@@ -90,23 +91,23 @@ fn gitignore_is_written_on_create_only() {
     assert_eq!(fs::read(root.join(GITIGNORE)).unwrap(), b"mine\n");
 }
 
-/// Replays a save of `v2` over `v1` that stops after moving `queries/A.odq` into place.
+/// Replays a save of `v2` over `v1` that stops after moving `queries/A.mcq` into place.
 fn interrupted(root: &Path) {
     write_folder(root, &v1()).unwrap();
     let new = v2();
     let staging = root.join(STAGING);
     write_file(&staging.join(MANIFEST), &new[MANIFEST]).unwrap();
-    for part in ["model/model.odm", "queries/A.odq", "queries/C.odq"] {
+    for part in ["model/model.mcm", "queries/A.mcq", "queries/C.mcq"] {
         write_file(&join(&staging.join("new"), part), &new[part]).unwrap();
     }
     rename(
-        &root.join("queries/A.odq"),
-        &staging.join("old/queries/A.odq"),
+        &root.join("queries/A.mcq"),
+        &staging.join("old/queries/A.mcq"),
     )
     .unwrap();
     rename(
-        &staging.join("new/queries/A.odq"),
-        &root.join("queries/A.odq"),
+        &staging.join("new/queries/A.mcq"),
+        &root.join("queries/A.mcq"),
     )
     .unwrap();
 }
@@ -119,7 +120,7 @@ fn an_interrupted_save_is_detected_and_either_state_recovered() {
     assert_eq!(
         read_folder(&root, Recover::No),
         Err(Error::Interrupted {
-            parts: vec!["queries/A.odq".into()],
+            parts: vec!["queries/A.mcq".into()],
             staging: true
         })
     );
@@ -144,18 +145,18 @@ fn an_interrupted_save_is_detected_and_either_state_recovered() {
 
 #[test]
 fn an_interrupt_mid_move_is_still_recoverable() {
-    // Stopped between moving the old A.odq out and the new one in: A.odq is missing.
+    // Stopped between moving the old A.mcq out and the new one in: A.mcq is missing.
     let dir = TempDir::new("mid-move");
     let root = dir.0.join("P");
     write_folder(&root, &v1()).unwrap();
     let staging = root.join(STAGING);
     write_file(&staging.join(MANIFEST), &v2()[MANIFEST]).unwrap();
-    for part in ["model/model.odm", "queries/A.odq", "queries/C.odq"] {
+    for part in ["model/model.mcm", "queries/A.mcq", "queries/C.mcq"] {
         write_file(&join(&staging.join("new"), part), &v2()[part]).unwrap();
     }
     rename(
-        &root.join("queries/A.odq"),
-        &staging.join("old/queries/A.odq"),
+        &root.join("queries/A.mcq"),
+        &staging.join("old/queries/A.mcq"),
     )
     .unwrap();
     assert!(matches!(
@@ -177,11 +178,11 @@ fn a_hand_edited_part_without_staging_offers_only_damage() {
     let dir = TempDir::new("hand-edit");
     let root = dir.0.join("P");
     write_folder(&root, &v1()).unwrap();
-    fs::write(root.join("queries/B.odq"), "query B\n  load: false\n").unwrap();
+    fs::write(root.join("queries/B.mcq"), "query B\n  load: false\n").unwrap();
     assert_eq!(
         read_folder(&root, Recover::No),
         Err(Error::Interrupted {
-            parts: vec!["queries/B.odq".into()],
+            parts: vec!["queries/B.mcq".into()],
             staging: false
         })
     );
@@ -218,11 +219,11 @@ fn not_a_project_and_unsafe_manifests_are_errors() {
 #[test]
 fn packages_are_written_atomically_and_read_back() {
     let dir = TempDir::new("package");
-    let path = dir.0.join("Sales.odash");
+    let path = dir.0.join("Sales.mcraft");
     let f = with_gitignore(v1());
     write_package(&path, &f).unwrap();
     let first = fs::read(&path).unwrap();
-    assert!(!dir.0.join("Sales.odash.tmp").exists());
+    assert!(!dir.0.join("Sales.mcraft.tmp").exists());
     assert_eq!(read_package(&path).unwrap(), f);
     write_package(&path, &f).unwrap();
     assert_eq!(fs::read(&path).unwrap(), first, "byte-identical");
@@ -230,7 +231,7 @@ fn packages_are_written_atomically_and_read_back() {
     // Package → folder → Package.
     let root = dir.0.join("Unpacked");
     write_folder(&root, &read_package(&path).unwrap()).unwrap();
-    let again = dir.0.join("Again.odash");
+    let again = dir.0.join("Again.mcraft");
     write_package(&again, &read_folder(&root, Recover::No).unwrap()).unwrap();
     assert_eq!(fs::read(&again).unwrap(), first);
 }

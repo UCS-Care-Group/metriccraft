@@ -1,5 +1,5 @@
 [package]
-name = "opendash-dax"
+name = "metriccraft-dax"
 description = "DAX lexer, parser and AST."
 version.workspace = true
 edition.workspace = true

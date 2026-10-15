@@ -119,7 +119,7 @@ mod tests {
         let th = theme();
         let cx = Context {
             theme: &th,
-            locale: &opendash_core::EN_GB,
+            locale: &metriccraft_core::EN_GB,
         };
         let s = layout(v, r, &cx);
         assert_sane(&s);

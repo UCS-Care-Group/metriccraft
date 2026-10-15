@@ -23,8 +23,8 @@ pub mod aggregate;
 #[path = "summarize.rs"]
 pub mod summarize;
 
-use opendash_core::Value;
-use opendash_dax::{Expr, ExprKind, Span};
+use metriccraft_core::Value;
+use metriccraft_dax::{Expr, ExprKind, Span};
 
 use super::calculate;
 use super::eval::{Evaluator, Rows, RowsColumn, TableVal, Val};

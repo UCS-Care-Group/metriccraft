@@ -24,7 +24,7 @@ use arrow_array::types::{
 };
 use arrow_array::{Array, ArrayRef, ArrowPrimitiveType, BooleanArray, PrimitiveArray, StringArray};
 use arrow_schema::{DataType, TimeUnit};
-use opendash_core::{CURRENCY_SCALE, Value, fold};
+use metriccraft_core::{CURRENCY_SCALE, Value, fold};
 
 use super::{DaxError, Result};
 

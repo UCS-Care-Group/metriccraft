@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use opendash_engine::App;
-use opendash_ui_egui::worker::Engine;
-use opendash_ui_egui::{Prefs, Shell};
+use metriccraft_engine::App;
+use metriccraft_ui_egui::worker::Engine;
+use metriccraft_ui_egui::{Prefs, Shell};
 
 fn harness() -> Harness<'static, Shell> {
     let shell = Shell::new(
@@ -61,12 +61,18 @@ fn views_and_theme_switch() {
     let mut h = harness();
     h.get_by_label("Model").click();
     h.run();
-    assert_eq!(h.state().prefs().view, opendash_ui_egui::views::View::Model);
+    assert_eq!(
+        h.state().prefs().view,
+        metriccraft_ui_egui::views::View::Model
+    );
     h.get_by_label("View").click();
     h.run();
     h.get_by_label("Dark").click();
     h.run();
-    assert_eq!(h.state().prefs().theme, opendash_ui_egui::theme::Mode::Dark);
+    assert_eq!(
+        h.state().prefs().theme,
+        metriccraft_ui_egui::theme::Mode::Dark
+    );
 }
 
 #[test]
@@ -119,7 +125,7 @@ fn canvas_selects_drags_nudges_and_deletes() {
     );
     wait(&mut h, |s| geometry(s) == Some((100, 100, 400, 300)));
 
-    assert_eq!(h.state().zoom(), opendash_ui_egui::canvas::Zoom::FitPage);
+    assert_eq!(h.state().zoom(), metriccraft_ui_egui::canvas::Zoom::FitPage);
     // Clicking selects; the Visualizations pane shows its wells.
     h.get_by_label("Card visual").click();
     h.run();
@@ -151,7 +157,7 @@ fn canvas_selects_drags_nudges_and_deletes() {
 
 #[test]
 fn table_view_scrolls_by_keyboard() {
-    let dir = std::env::temp_dir().join(format!("odash-grid-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-grid-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let csv = dir.join("t.csv");
     let mut text = String::from("N\n");
@@ -184,7 +190,7 @@ fn table_view_scrolls_by_keyboard() {
 
 #[test]
 fn model_view_moves_tables_and_relates_columns_dragged_either_way() {
-    let dir = std::env::temp_dir().join(format!("odash-model-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-model-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut h = harness();
     h.state_mut().run(
@@ -225,7 +231,7 @@ fn model_view_moves_tables_and_relates_columns_dragged_either_way() {
 
 #[test]
 fn new_measure_opens_the_formula_bar_and_enter_commits() {
-    let dir = std::env::temp_dir().join(format!("odash-dax-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-dax-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("T.csv");
     std::fs::write(&path, "N\n1\n2\n").unwrap();
@@ -260,7 +266,7 @@ fn new_measure_opens_the_formula_bar_and_enter_commits() {
 
 #[test]
 fn a_running_load_shows_rows_read_and_cancels() {
-    let dir = std::env::temp_dir().join(format!("odash-cancel-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-cancel-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Big.csv");
     let mut text = String::from("Id,Name\n");
@@ -294,7 +300,7 @@ fn a_running_load_shows_rows_read_and_cancels() {
 
 #[test]
 fn get_data_picks_a_file_then_shows_its_source_form() {
-    let dir = std::env::temp_dir().join(format!("odash-getdata-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-getdata-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Sales.csv");
     std::fs::write(&path, "Region,Qty\nNorth,3\n").unwrap();
@@ -332,7 +338,7 @@ fn get_data_picks_a_file_then_shows_its_source_form() {
 
 #[test]
 fn power_query_editor_previews_steps_and_closes() {
-    let dir = std::env::temp_dir().join(format!("odash-pq-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-pq-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Sales.csv");
     // 200 good rows (the type detection sample), then a Qty that isn't a number.
@@ -370,7 +376,7 @@ fn power_query_editor_previews_steps_and_closes() {
 
 #[test]
 fn f6_cycles_focus_ribbon_view_panes() {
-    use opendash_ui_egui::keys::region_id;
+    use metriccraft_ui_egui::keys::region_id;
     let mut h = harness();
     let focused = |h: &Harness<'_, Shell>| h.ctx.memory(|m| m.focused());
     for n in [0, 1, 2, 0] {
@@ -411,7 +417,7 @@ fn alt_key_tips_open_a_tab_and_run_a_button() {
 #[test]
 fn a_visual_with_text_draws_without_an_explicit_setup() {
     // Regression: painting a Scene's text before `Shell::setup` registered Inter panicked.
-    let dir = std::env::temp_dir().join(format!("odash-fonts-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("mcraft-fonts-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("T.csv");
     std::fs::write(&path, "N\n1\n2\n").unwrap();

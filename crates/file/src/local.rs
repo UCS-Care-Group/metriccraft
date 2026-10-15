@@ -3,7 +3,7 @@
 //! Package.
 //!
 //! **Source-path remapping** (`.local/paths.odl`): a Source file the Project's Queries name at
-//! one path is read from another on this machine. In the `.odm` syntax ([`crate::syntax`]):
+//! one path is read from another on this machine. In the `.mcm` syntax ([`crate::syntax`]):
 //!
 //! ```text
 //! remap 'data/Sales.csv'
@@ -17,13 +17,13 @@
 //!
 //! The app applies a remap on open (to the Queries and to the Data cache's Source fingerprints)
 //! and reverses it on save, so the definitions and the cache metadata always hold the original
-//! paths: `.odq` files never change per user, and a remap alone never makes a table Stale.
+//! paths: `.mcq` files never change per user, and a remap alone never makes a table Stale.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use opendash_data::Query;
-use opendash_data::source::File;
+use metriccraft_data::Query;
+use metriccraft_data::source::File;
 
 use crate::cache::{Fingerprint, Provenance};
 use crate::folder::{exists, io, join, read_capped, rename, write_file};

@@ -4,9 +4,9 @@
 
 use arrow_array::RecordBatch;
 use egui::{Align2, FontId, Key, Rect, RichText, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType};
-use opendash_core::Value;
-use opendash_engine::Document;
-use opendash_model::dax::storage::Col;
+use metriccraft_core::Value;
+use metriccraft_engine::Document;
+use metriccraft_model::dax::storage::Col;
 
 use crate::strings::Str;
 use crate::theme::Tokens;
@@ -35,7 +35,7 @@ fn text(v: &Value, format: &str) -> String {
     if v.is_blank() {
         return String::new();
     }
-    opendash_core::format(v, format, &opendash_core::EN_US).unwrap_or_else(|_| v.to_text())
+    metriccraft_core::format(v, format, &metriccraft_core::EN_US).unwrap_or_else(|_| v.to_text())
 }
 
 impl Grid {

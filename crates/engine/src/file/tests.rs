@@ -12,7 +12,7 @@ impl Dir {
     fn new() -> Dir {
         static N: AtomicUsize = AtomicUsize::new(0);
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("opendash-file-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("metriccraft-file-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Dir(dir)
@@ -90,7 +90,7 @@ fn save_and_open_a_project_folder() {
     app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
         .unwrap();
     assert_eq!(app.location(), Some(&Location::Folder(dir.0.join("Proj"))));
-    let sales = std::fs::read_to_string(dir.0.join("Proj/queries/Sales.odq")).unwrap();
+    let sales = std::fs::read_to_string(dir.0.join("Proj/queries/Sales.mcq")).unwrap();
     assert!(
         sales.contains(r#"File.Contents("data/Sales.csv")"#),
         "{sales}"
@@ -290,9 +290,9 @@ fn opening_holds_the_cache_to_the_memory_cap() {
     let mut app = app(&dir);
     app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
         .unwrap();
-    app.run("file.saveAs", &json!({"path": dir.path("P.odash")}))
+    app.run("file.saveAs", &json!({"path": dir.path("P.mcraft")}))
         .unwrap();
-    for path in ["Proj", "P.odash"] {
+    for path in ["Proj", "P.mcraft"] {
         let mut other = App::new();
         other.set_memory_cap(64);
         other
@@ -317,7 +317,7 @@ fn saving_twice_writes_identical_files() {
     app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
         .unwrap();
     let first = snapshot(&dir.0.join("Proj"));
-    assert!(first.contains_key("project.odash.json") && first.contains_key(".gitignore"));
+    assert!(first.contains_key("project.mcraft.json") && first.contains_key(".gitignore"));
     let cache = [
         ".cache/Sales.parquet",
         ".cache/Sales.meta",
@@ -338,7 +338,7 @@ fn saving_twice_writes_identical_files() {
     other
         .run(
             "file.open",
-            &json!({"path": dir.path("Proj/project.odash.json")}),
+            &json!({"path": dir.path("Proj/project.mcraft.json")}),
         )
         .unwrap();
     other.run("file.save", &Value::Null).unwrap();
@@ -351,34 +351,34 @@ fn save_and_open_a_package() {
     let dir = Dir::new();
     let mut app = app(&dir);
     let original = app.document().clone();
-    app.run("file.saveAs", &json!({"path": dir.path("Sales.odash")}))
+    app.run("file.saveAs", &json!({"path": dir.path("Sales.mcraft")}))
         .unwrap();
     assert_eq!(
         app.location(),
-        Some(&Location::Package(dir.0.join("Sales.odash")))
+        Some(&Location::Package(dir.0.join("Sales.mcraft")))
     );
-    let bytes = std::fs::read(dir.0.join("Sales.odash")).unwrap();
+    let bytes = std::fs::read(dir.0.join("Sales.mcraft")).unwrap();
     assert_eq!(&bytes[..2], b"PK");
 
     let mut other = App::new();
     other
-        .run("file.open", &json!({"path": dir.path("Sales.odash")}))
+        .run("file.open", &json!({"path": dir.path("Sales.mcraft")}))
         .unwrap();
     assert_eq!(other.document(), &original, "with its data");
     other.run("file.save", &Value::Null).unwrap();
-    assert_eq!(std::fs::read(dir.0.join("Sales.odash")).unwrap(), bytes);
-    let files = opendash_file::read_package(&dir.0.join("Sales.odash")).unwrap();
+    assert_eq!(std::fs::read(dir.0.join("Sales.mcraft")).unwrap(), bytes);
+    let files = metriccraft_file::read_package(&dir.0.join("Sales.mcraft")).unwrap();
     assert!(files.contains_key(".cache/Sales.parquet"));
 
     // Without data: definitions only; opens empty and Stale.
     app.run(
         "file.saveAs",
-        &json!({"path": dir.path("Bare.odash"), "data": false}),
+        &json!({"path": dir.path("Bare.mcraft"), "data": false}),
     )
     .unwrap();
-    let files = opendash_file::read_package(&dir.0.join("Bare.odash")).unwrap();
+    let files = metriccraft_file::read_package(&dir.0.join("Bare.mcraft")).unwrap();
     assert!(!files.keys().any(|k| k.starts_with(".cache")), "{files:?}");
-    let bare = open(&dir, "Bare.odash");
+    let bare = open(&dir, "Bare.mcraft");
     assert_eq!(bare.document().model, original.model);
     assert_eq!(stale(&bare), ["Regions", "Sales"]);
     assert!(bare.document().tables.iter().all(|t| t.rows() == 0));
@@ -390,7 +390,7 @@ fn save_and_open_a_package() {
             &json!({"path": dir.path("Unpacked"), "package": false}),
         )
         .unwrap();
-    assert!(dir.0.join("Unpacked/project.odash.json").exists());
+    assert!(dir.0.join("Unpacked/project.mcraft.json").exists());
     assert_eq!(open(&dir, "Unpacked").document().tables, original.tables);
 }
 
@@ -406,7 +406,7 @@ fn the_web_build_opens_and_saves_package_bytes() {
     assert_eq!(web.package_bytes().unwrap(), bytes);
     assert!(matches!(
         web.open_package_bytes(b"junk"),
-        Err(Error::File(opendash_file::Error::Package(_)))
+        Err(Error::File(metriccraft_file::Error::Package(_)))
     ));
     assert_eq!(
         web.document().model,
@@ -422,8 +422,8 @@ fn an_interrupted_save_is_reported_and_recoverable() {
     app.run("file.saveAs", &json!({"path": dir.path("Proj")}))
         .unwrap();
     // The state a save leaves after moving one part in, before the Manifest.
-    let part = dir.0.join("Proj/queries/Regions.odq");
-    let old = dir.0.join("Proj/.staging/old/queries/Regions.odq");
+    let part = dir.0.join("Proj/queries/Regions.mcq");
+    let old = dir.0.join("Proj/.staging/old/queries/Regions.mcq");
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
     std::fs::rename(&part, &old).unwrap();
     std::fs::write(&part, "query Regions\n  load: false\n").unwrap();
@@ -434,8 +434,8 @@ fn an_interrupted_save_is_reported_and_recoverable() {
         .unwrap_err();
     assert_eq!(
         e,
-        Error::File(opendash_file::Error::Interrupted {
-            parts: vec!["queries/Regions.odq".into()],
+        Error::File(metriccraft_file::Error::Interrupted {
+            parts: vec!["queries/Regions.mcq".into()],
             staging: false
         })
     );
@@ -468,7 +468,7 @@ fn save_without_a_location_and_bad_params_are_errors() {
             json!({"path": dir.path("x"), "package": "yes"}),
         ),
         ("file.open", json!({})),
-        ("file.open", json!({"path": dir.path("missing.odash")})),
+        ("file.open", json!({"path": dir.path("missing.mcraft")})),
         ("file.open", json!({"path": dir.path("Regions.csv")})),
     ] {
         let before = app.document().clone();
@@ -553,15 +553,15 @@ fn a_remapped_project_loads_its_sources_without_touching_tracked_files() {
     assert_eq!(again.notice(), None);
     assert_eq!(
         again.document().queries[0].source.file(),
-        &opendash_data::source::File::Path(dir.0.join("share/Sales.csv"))
+        &metriccraft_data::source::File::Path(dir.0.join("share/Sales.csv"))
     );
 
     // A Package never carries `.local/` and keeps the Project's paths.
-    let files = opendash_file::unpack(&again.package_bytes().unwrap()).unwrap();
+    let files = metriccraft_file::unpack(&again.package_bytes().unwrap()).unwrap();
     assert!(files.keys().all(|k| !k.starts_with(".local")));
-    let odq = String::from_utf8(files["queries/Sales.odq"].clone()).unwrap();
+    let mcq = String::from_utf8(files["queries/Sales.mcq"].clone()).unwrap();
     let path = dir.0.join("B/data/Sales.csv").display().to_string();
-    assert!(odq.contains(&path), "{odq}");
+    assert!(mcq.contains(&path), "{mcq}");
 }
 
 #[test]
@@ -599,7 +599,7 @@ fn a_remap_alone_never_makes_a_table_stale() {
     assert!(!dir.0.join("Proj/.local/paths.odl").exists());
     assert_eq!(
         other.document().queries[0].source.file(),
-        &opendash_data::source::File::Path(dir.0.join("Proj/data/Sales.csv"))
+        &metriccraft_data::source::File::Path(dir.0.join("Proj/data/Sales.csv"))
     );
     assert_eq!(stale(&open(&dir, "Proj")), ["Sales"]);
 }
@@ -610,7 +610,7 @@ fn remap_needs_a_project_folder_and_good_params() {
     let mut app = app(&dir);
     let p = json!({"from": "a.csv", "to": "b.csv"});
     assert!(app.run("file.remapSource", &p).is_err(), "unsaved");
-    app.run("file.saveAs", &json!({"path": dir.path("P.odash")}))
+    app.run("file.saveAs", &json!({"path": dir.path("P.mcraft")}))
         .unwrap();
     assert!(app.run("file.remapSource", &p).is_err(), "a Package");
     app.run("file.saveAs", &json!({"path": dir.path("Proj")}))

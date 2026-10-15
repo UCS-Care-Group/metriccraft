@@ -1,19 +1,19 @@
 //! A Project's content ↔ its files (ADR 0003 and its M2 amendment).
 //!
 //! ```text
-//! project.odash.json        Manifest (manifest.rs)
-//! model/model.odm           model Model: culture, autodetectRelationships, ref query/table order
-//! model/relationships.odm   relationship Sales[Region] -> Regions[Region] (+ inactive); omitted
+//! project.mcraft.json        Manifest (manifest.rs)
+//! model/model.mcm           model Model: culture, autodetectRelationships, ref query/table order
+//! model/relationships.mcm   relationship Sales[Region] -> Regions[Region] (+ inactive); omitted
 //!                           when there are none
-//! model/tables/<t>.odm      table, its columns and their properties, its measures
-//! queries/<q>.odq           query: load, culture (when not the Project's), m: block
+//! model/tables/<t>.mcm      table, its columns and their properties, its measures
+//! queries/<q>.mcq           query: load, culture (when not the Project's), m: block
 //! model/diagram.json        Model view layout (ADR 0003, M5): JSON, carried as opaque bytes
 //! report/…                  the report (M4.2): JSON parts, carried here as opaque bytes
 //! .gitignore                .cache/, .local/, .staging/ — written on create, then the user's
 //! ```
 //!
 //! **Determinism.** Every part is printed by [`syntax::print`]; Queries, Tables and columns keep
-//! user order (Tables and Queries through `ref` lines in `model.odm`, since file names sort),
+//! user order (Tables and Queries through `ref` lines in `model.mcm`, since file names sort),
 //! Relationships keep Manage relationships order. Nothing machine- or time-dependent is written.
 //!
 //! **Column types.** `dataType` is the Model's; `queryType` (the Query's at the last load) is
@@ -38,7 +38,7 @@
 //! kept as they are; unknown Manifest keys too. A rename carries an object's unknown items to
 //! its new name ([`Preserved::rename_table`], [`Preserved::rename_column`]).
 //!
-//! **Report.** Parts under `report/` ([`Project::report`]) are JSON the app (`opendash-engine`)
+//! **Report.** Parts under `report/` ([`Project::report`]) are JSON the app (`metriccraft-engine`)
 //! reads and writes: this crate is below the Visual definitions (layer 2 < 3), so it only lists,
 //! hashes and carries them, like any part.
 //!
@@ -51,12 +51,12 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Schema as ArrowSchema};
-use opendash_data::culture::Culture;
-use opendash_data::m::{self, MQuery};
-use opendash_data::source::{File, Source};
-use opendash_data::step::ColumnType;
-use opendash_data::{Query, Table, TableBuilder};
-use opendash_model::{
+use metriccraft_data::culture::Culture;
+use metriccraft_data::m::{self, MQuery};
+use metriccraft_data::source::{File, Source};
+use metriccraft_data::step::ColumnType;
+use metriccraft_data::{Query, Table, TableBuilder};
+use metriccraft_model::{
     Column, Measure, Model, ModelTable, Relationship, SummarizeBy, measure_order, name_key,
 };
 use serde_json::{Map, Value as Json};
@@ -66,8 +66,8 @@ use crate::manifest::{FORMAT_VERSION, MANIFEST, MIGRATIONS, Manifest, Migration,
 use crate::syntax::{self, Item, Node, Value, quote_name, read_name};
 use crate::{Error, FileSet, Result};
 
-pub const MODEL: &str = "model/model.odm";
-pub const RELATIONSHIPS: &str = "model/relationships.odm";
+pub const MODEL: &str = "model/model.mcm";
+pub const RELATIONSHIPS: &str = "model/relationships.mcm";
 pub const TABLES: &str = "model/tables/";
 /// Model view layout: JSON the app reads and writes ([`Project::diagram`]).
 pub const DIAGRAM: &str = "model/diagram.json";
@@ -77,7 +77,7 @@ pub const REPORT: &str = "report/";
 pub const GITIGNORE: &str = ".gitignore";
 /// The `.gitignore` written when a Project is created.
 pub const GITIGNORE_TEXT: &str = ".cache/\n.local/\n.staging/\n";
-/// The Project culture when `model.odm` doesn't name one (Get Data's default).
+/// The Project culture when `model.mcm` doesn't name one (Get Data's default).
 pub const DEFAULT_CULTURE: &str = "en-US";
 
 /// What a Project holds (besides data).
@@ -518,7 +518,7 @@ pub fn encode(project: &Project, root: Option<&Path>, preserved: &Preserved) -> 
     for (q, stem) in project.queries.iter().zip(file_stems(&names)) {
         let items = vec![Item::Node(query_node(q, project, root))];
         if let Some(bytes) = print(items, &Key::Query(q.name.clone()), &QUERY_FILE) {
-            parts.insert(format!("{QUERIES}{stem}.odq"), bytes);
+            parts.insert(format!("{QUERIES}{stem}.mcq"), bytes);
         }
     }
     let names: Vec<&str> = project
@@ -530,7 +530,7 @@ pub fn encode(project: &Project, root: Option<&Path>, preserved: &Preserved) -> 
     for (t, stem) in project.model.tables.iter().zip(file_stems(&names)) {
         let items = vec![Item::Node(table_node(t))];
         if let Some(bytes) = print(items, &Key::Table(t.name.clone()), &TABLE_FILE) {
-            parts.insert(format!("{TABLES}{stem}.odm"), bytes);
+            parts.insert(format!("{TABLES}{stem}.mcm"), bytes);
         }
     }
     let rels = project
@@ -640,7 +640,7 @@ pub fn decode_with(
     };
     for path in manifest.parts.keys() {
         let bytes = files.get(path).cloned().unwrap_or_default();
-        if path.ends_with(".odm") || path.ends_with(".odq") {
+        if path.ends_with(".mcm") || path.ends_with(".mcq") {
             let text = std::str::from_utf8(&bytes).map_err(|_| part_err(path, "not UTF-8"))?;
             let items = syntax::parse(text).map_err(|e| part_err(path, e.to_string()))?;
             tree.syntax.insert(path.clone(), items);
@@ -950,14 +950,14 @@ fn decode_tree(
                 project.model.relationships.push(r);
             }
             pre.trees.insert(Key::Relationships, items);
-        } else if is_in(&path, TABLES, ".odm") {
+        } else if is_in(&path, TABLES, ".mcm") {
             let table = decode_table(&path, only_node(&path, &items, "table")?)?;
             if project.model.table(&table.name).is_some() {
                 return Err(part_err(&path, format!("table `{}` twice", table.name)));
             }
             pre.trees.insert(Key::Table(table.name.clone()), items);
             project.model.tables.push(table);
-        } else if is_in(&path, QUERIES, ".odq") {
+        } else if is_in(&path, QUERIES, ".mcq") {
             let node = only_node(&path, &items, "query")?;
             let (query, load) = decode_query(&path, node, project_culture, root)?;
             if project.queries.iter().any(|q| q.name == query.name) {
@@ -1050,7 +1050,7 @@ fn check(project: &Project) -> Result {
 /// An empty loaded table with `table`'s columns (not its Calculated columns, which the app
 /// computes) and Model types: what a Table is on open until it is refreshed, when it has no
 /// usable Data cache.
-pub fn empty_table(table: &ModelTable) -> opendash_data::Result<Table> {
+pub fn empty_table(table: &ModelTable) -> metriccraft_data::Result<Table> {
     let fields: Vec<Field> = table
         .columns
         .iter()

@@ -1,6 +1,6 @@
 [package]
-name = "opendash-cli"
-description = "OpenDash BI headless CLI."
+name = "metriccraft-cli"
+description = "MetricCraft headless CLI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

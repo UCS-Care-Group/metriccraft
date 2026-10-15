@@ -1,6 +1,6 @@
 //! Tables, relationships, measures, calculated columns and the DAX evaluator.
 //!
-//! Layer L2 — see `docs/plan/0001-mvp.md` §1. Depends on `opendash-data` (loaded tables,
+//! Layer L2 — see `docs/plan/0001-mvp.md` §1. Depends on `metriccraft-data` (loaded tables,
 //! column types), never the other way.
 
 mod calculated;

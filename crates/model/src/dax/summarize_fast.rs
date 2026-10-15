@@ -31,8 +31,8 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
 use arrow_array::{Array, ArrowPrimitiveType, PrimitiveArray, StringArray};
-use opendash_core::{Value, fold};
-use opendash_dax::{Expr, ExprKind, Span};
+use metriccraft_core::{Value, fold};
+use metriccraft_dax::{Expr, ExprKind, Span};
 
 use crate::dax::eval::Evaluator;
 use crate::dax::storage::{
@@ -1584,7 +1584,9 @@ impl<'a> Acc<'a> {
                 let exact = exact.get(g).copied().unwrap_or(0);
                 let mean = match kind {
                     Kind::Integer => exact as f64 / count,
-                    Kind::Currency => exact as f64 / opendash_core::CURRENCY_SCALE as f64 / count,
+                    Kind::Currency => {
+                        exact as f64 / metriccraft_core::CURRENCY_SCALE as f64 / count
+                    }
                     _ => float.get(g).copied().unwrap_or(0.0) / count,
                 };
                 if *kind == Kind::DateTime {

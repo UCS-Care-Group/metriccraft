@@ -1,5 +1,5 @@
 //! The DAX evaluator (ADR 0006): a **formula engine** ([`eval`]) interpreting the
-//! `opendash_dax` AST, over a **storage tier** ([`storage`]) that scans the encoded columns of
+//! `metriccraft_dax` AST, over a **storage tier** ([`storage`]) that scans the encoded columns of
 //! one Table under a row mask.
 //!
 //! - **Filter context** ([`FilterContext`]): a list of [`Filter`]s, each a single-column set of
@@ -35,9 +35,9 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::atomic::AtomicBool;
 
-use opendash_core::Value;
-use opendash_data::Table;
-use opendash_dax::{Query, Span};
+use metriccraft_core::Value;
+use metriccraft_data::Table;
+use metriccraft_dax::{Query, Span};
 
 use crate::Model;
 pub use eval::{Evaluator, Rows, RowsColumn, TableVal, Val};
@@ -293,7 +293,7 @@ impl FilterContext {
 pub struct Options<'c> {
     /// Set (from another thread) to stop the query with [`ErrorKind::Cancelled`].
     pub cancel: Option<&'c AtomicBool>,
-    /// The memory cap (`opendash_data::default_memory_cap`): intermediate tables may use what
+    /// The memory cap (`metriccraft_data::default_memory_cap`): intermediate tables may use what
     /// the loaded data leaves of it.
     pub memory_cap: usize,
 }
@@ -302,7 +302,7 @@ impl Default for Options<'_> {
     fn default() -> Self {
         Self {
             cancel: None,
-            memory_cap: opendash_data::default_memory_cap(),
+            memory_cap: metriccraft_data::default_memory_cap(),
         }
     }
 }
@@ -330,7 +330,7 @@ pub fn run_query(db: &Database, query: &Query, options: Options<'_>) -> Result<V
 
 /// Parses and runs DAX query text; a parse error is an [`ErrorKind::Syntax`] error.
 pub fn run_query_text(db: &Database, text: &str, options: Options<'_>) -> Result<Vec<ResultTable>> {
-    let query = opendash_dax::parse_query(text).map_err(|e| DaxError {
+    let query = metriccraft_dax::parse_query(text).map_err(|e| DaxError {
         kind: ErrorKind::Syntax,
         span: e.span,
         message: e.message,

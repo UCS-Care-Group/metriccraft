@@ -23,8 +23,8 @@ pub use cmd::{COMMANDS, Command, Run, reference};
 pub use diagram::Diagram;
 pub use file::Location;
 pub use load::{LoadReport, Loaded, excel_items, query_m};
-pub use opendash_data::step::Step;
-pub use opendash_data::{Preview, Progress};
+pub use metriccraft_data::step::Step;
+pub use metriccraft_data::{Preview, Progress};
 pub use recovery::{DEFAULT_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES, RecoveryInfo, recovery_dir};
 pub use report::{
     BrokenField, MAX_COORD, MAX_PAGES, MAX_VISUALS, PAGE_HEIGHT, PAGE_WIDTH, Page, Report, resolve,
@@ -42,21 +42,21 @@ pub enum Error {
     /// The params are missing, of the wrong type or out of range.
     InvalidParams { command: String, message: String },
     /// The data layer failed (e.g. a Query's result would exceed the memory cap).
-    Data(opendash_data::Error),
+    Data(metriccraft_data::Error),
     /// Refresh (or Close & Apply) stopped at this Query; nothing was changed.
     Refresh {
         query: String,
-        error: opendash_data::Error,
+        error: metriccraft_data::Error,
     },
     /// No Query has this name.
     UnknownQuery(String),
     /// A model change, or a load's model update (a type override that no longer converts, a
     /// sort by column that no longer holds, a Relationship's one side no longer unique), failed;
     /// nothing was changed.
-    Model(opendash_model::Error),
+    Model(metriccraft_model::Error),
     /// Opening or saving a Project or Package failed; nothing was changed. An interrupted save
-    /// ([`opendash_file::Error::Interrupted`]) is retried with `file.open`'s `recover`.
-    File(opendash_file::Error),
+    /// ([`metriccraft_file::Error::Interrupted`]) is retried with `file.open`'s `recover`.
+    File(metriccraft_file::Error),
 }
 
 impl std::fmt::Display for Error {

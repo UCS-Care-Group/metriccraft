@@ -1,5 +1,5 @@
 //! Model Tables and Columns (CONTEXT.md, spec D-1): the properties Power BI's Column tools and
-//! Properties pane set, kept beside the loaded data (`opendash_data::Table`, matched by name).
+//! Properties pane set, kept beside the loaded data (`metriccraft_data::Table`, matched by name).
 //!
 //! **After every load** ([`ModelTable::load`]) a Table's columns are matched to the previous
 //! ones by name: a column that is still there keeps its properties (and its data-type
@@ -28,9 +28,9 @@ use std::fmt;
 use arrow_array::{Array, ArrayRef, StringArray};
 use arrow_cast::cast;
 use arrow_schema::DataType;
-use opendash_data::Table;
-use opendash_data::culture::Culture;
-use opendash_data::step::{ColumnType, change_type};
+use metriccraft_data::Table;
+use metriccraft_data::culture::Culture;
+use metriccraft_data::step::{ColumnType, change_type};
 
 use crate::Relationship;
 
@@ -289,7 +289,7 @@ impl SummarizeBy {
         Self::DistinctCount,
     ];
 
-    /// The name commands and `.odm` use (TMDL's): `none`, `sum`, `average`, `min`, `max`,
+    /// The name commands and `.mcm` use (TMDL's): `none`, `sum`, `average`, `min`, `max`,
     /// `count`, `distinctCount`.
     pub fn name(self) -> &'static str {
         match self {
@@ -601,7 +601,7 @@ mod tests {
     use std::sync::Arc;
 
     use arrow_array::{Decimal32Array, Float64Array, Int64Array, RecordBatch};
-    use opendash_data::TableBuilder;
+    use metriccraft_data::TableBuilder;
 
     use super::*;
 
@@ -742,7 +742,7 @@ mod tests {
             .unwrap();
         assert_eq!(m.column("MonthNo").unwrap().summarize_by, SummarizeBy::None);
         assert!(
-            opendash_data::step::ColumnType::of_data_type(t3.batch().column(1).data_type())
+            metriccraft_data::step::ColumnType::of_data_type(t3.batch().column(1).data_type())
                 == Some(ColumnType::Text)
         );
     }
