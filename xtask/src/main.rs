@@ -224,9 +224,9 @@ fn ui_bench() -> Result {
             rss = n.trim().parse::<u64>().ok();
         }
     }
-    let _ = child.wait();
+    let status = child.wait();
     let _ = std::fs::remove_dir_all(&profile);
-    let cold = cold.ok_or("the app never showed a frame")?;
+    let cold = cold.ok_or_else(|| format!("the app never showed a frame (exit: {status:?})"))?;
     println!("  ui/cold_start: {cold} ms (budget {COLD_START_MS} ms)");
     let mut problems = Vec::new();
     if cold >= COLD_START_MS {
