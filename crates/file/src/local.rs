@@ -200,20 +200,24 @@ mod tests {
 
     #[test]
     fn paths_round_trip_relative_and_absolute() {
-        let root = Path::new("/p/Proj");
+        // Absolute on this platform: `/p` is relative on Windows.
+        let (root, share) = if cfg!(windows) {
+            (Path::new(r"C:\p\Proj"), r"C:\mnt\share\Sales.csv")
+        } else {
+            (Path::new("/p/Proj"), "/mnt/share/Sales.csv")
+        };
         let remaps = vec![
-            (
-                root.join("data/Sales.csv"),
-                PathBuf::from("/mnt/share/Sales.csv"),
-            ),
+            (root.join("data/Sales.csv"), PathBuf::from(share)),
             (resolve(root, r"C:\Data\it's.csv"), root.join("local/x.csv")),
         ];
         let bytes = print_paths(&remaps, root);
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert_eq!(
             text,
-            "remap 'data/Sales.csv'\n  to: '/mnt/share/Sales.csv'\nremap 'C:\\Data\\it''s.csv'\n  \
-             to: 'local/x.csv'\n"
+            format!(
+                "remap 'data/Sales.csv'\n  to: '{share}'\nremap 'C:\\Data\\it''s.csv'\n  \
+                 to: 'local/x.csv'\n"
+            )
         );
         assert_eq!(parse_paths(&bytes, root).unwrap(), remaps);
     }

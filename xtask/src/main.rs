@@ -129,7 +129,8 @@ fn test() -> Result {
 fn test_with(args: &[String]) -> Result {
     let mut full = vec!["test"];
     if args.is_empty() {
-        full.push("--workspace");
+        // Every crate's failures in one run, not just the first failing crate's.
+        full.extend(["--workspace", "--no-fail-fast"]);
     }
     full.extend(args.iter().map(String::as_str));
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());

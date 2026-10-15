@@ -6,6 +6,15 @@ use metriccraft_data::step::{Step, fixed_array};
 
 use super::*;
 
+/// `unix` as an absolute path on this platform (`C:` in front on Windows, where `/p` is relative).
+fn abs(unix: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("C:{}", unix.replace('/', "\\")))
+    } else {
+        PathBuf::from(unix)
+    }
+}
+
 /// A table as a load leaves it: text, whole, decimal, fixed decimal (narrow and wide), boolean.
 fn table() -> Table {
     let batch = RecordBatch::try_from_iter_with_nullable([
@@ -57,11 +66,11 @@ fn provenance() -> Provenance {
         m: hash(b"m"),
         sources: vec![
             Fingerprint::File {
-                path: PathBuf::from("/p/data/Sales.csv"),
+                path: abs("/p/data/Sales.csv"),
                 stat: Some((52, 1_760_000_000_123_456_789)),
             },
             Fingerprint::File {
-                path: PathBuf::from("/elsewhere/gone.csv"),
+                path: abs("/elsewhere/gone.csv"),
                 stat: None,
             },
             Fingerprint::Bytes {
@@ -101,7 +110,7 @@ fn tables_round_trip_exactly_through_the_cache_parquet() {
 fn metadata_round_trips_with_paths_relative_to_the_project() {
     let t = table();
     let meta = Meta::new(&t, &model(&t), provenance()).unwrap();
-    let root = Path::new("/p");
+    let root = &abs("/p");
     let text = String::from_utf8(meta.print(Some(root))).unwrap();
     assert!(text.contains("\"path\": \"data/Sales.csv\""), "{text}");
     assert!(text.contains("\"missing\": true"), "{text}");

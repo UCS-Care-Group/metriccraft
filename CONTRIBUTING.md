@@ -34,7 +34,8 @@ and the result Power BI Desktop gave, copied out as values. See `CONTEXT.md` and
 - **Layering** is enforced (`cargo xtask layers`): nothing below the UI layer depends on egui.
 - **Rust only**, and the web (WASM) build must keep compiling.
 - Before sending a pull request, run `cargo xtask ci` (fmt, layers, assets, strings, clippy, tests,
-  wasm, bench). The full rulebook, also used by AI coding agents, is [`AGENTS.md`](AGENTS.md).
+  wasm, bench). On macOS the wasm step needs LLVM's clang (`brew install llvm`, then
+  `export CC_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/clang`). The full rulebook, also used by AI coding agents, is [`AGENTS.md`](AGENTS.md).
 
 Planning happens as **glossary → specification → plan**: `CONTEXT.md`, `docs/spec/`,
 `docs/plan/`, with decisions in `docs/adr/`. For anything large, please open an issue first.

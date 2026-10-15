@@ -32,6 +32,12 @@ jobs:
       # Installs the channel, components and targets pinned in rust-toolchain.toml.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Apple's clang has no wasm32 target; zstd-sys (Parquet) needs one for the wasm build.
+      - if: matrix.os == 'macos'
+        run: |
+          brew install llvm
+          echo "CC_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
+          echo "AR_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/llvm-ar" >> "$GITHUB_ENV"
       - run: cargo xtask ci
       # The release build below needs the disk the debug build used (hosted runners have ~14 GB).
       - run: cargo clean --profile dev

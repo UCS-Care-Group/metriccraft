@@ -221,7 +221,7 @@ fn layout_follows_the_adr() {
     assert!(con.starts_with("query CON\n  load: false\n  m:\n"), "{con}");
     let regions = text(&files, "queries/Unit Regions.mcq");
     assert!(
-        regions.contains(&elsewhere().display().to_string().replace('\\', "\\\\")),
+        regions.contains(&elsewhere().display().to_string()),
         "outside the Project: absolute\n{regions}"
     );
     let manifest = text(&files, MANIFEST);
