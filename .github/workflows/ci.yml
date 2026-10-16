@@ -35,6 +35,8 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo apt-get update -q && sudo apt-get install -yq xvfb libgl1-mesa-dri libegl1 libxkbcommon-x11-0
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Installs the channel, components and targets pinned in rust-toolchain.toml.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -44,8 +46,25 @@ jobs:
           brew install llvm
           echo "CC_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
           echo "AR_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/llvm-ar" >> "$GITHUB_ENV"
+      # deny has its own job below.
       - run: cargo xtask ci
+        env:
+          XTASK_CI_SKIP: deny
       # The release build below needs the disk the debug build used (hosted runners have ~14 GB).
       - run: cargo clean --profile dev
       # Cold start and idle memory of the desktop app: skipped without a display or xvfb-run.
       - run: cargo xtask ui-bench
+
+  # cargo-deny (deny.toml): RustSec advisories, licences, duplicate crates, sources. Its own job,
+  # since it needs no build; `ci` skips the step it would otherwise run.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo xtask deny

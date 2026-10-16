@@ -1,0 +1,72 @@
+# cargo-deny: what the dependency tree may contain (`cargo xtask deny`, and the `deny` job in
+# .github/workflows/ci.yml). https://embarkstudios.github.io/cargo-deny/
+#
+# - advisories: a RustSec vulnerability fails the build; an unmaintained or yanked crate warns.
+#   An ignored advisory carries the reason and the date it was looked at.
+# - licenses: OSI-approved permissive licences only. No GPL, LGPL or AGPL, ever (clean room,
+#   AGENTS.md): a crate offered under "X OR GPL" is taken under X. Dev-dependencies never ship,
+#   so they are not checked. Non-OSI licences the tree needs are allowed for exactly that crate.
+# - bans: two versions of one crate warn (the GUI stack brings some).
+# - sources: crates.io only.
+
+[graph]
+all-features = true
+exclude-dev = true
+
+[advisories]
+version = 2
+db-urls = ["https://github.com/rustsec/advisory-db"]
+unmaintained = "all"
+yanked = "warn"
+ignore = [
+    # Unmaintained, not vulnerable; looked at 2026-10-16. Replace when the parent crate does.
+    # paste: a proc-macro of egui_dock (build time only).
+    { id = "RUSTSEC-2024-0436", reason = "paste: proc-macro of egui_dock, build time only, no known vulnerability" },
+    # ttf-parser: reads our bundled fonts (Inter, egui's) through ab_glyph; no untrusted fonts are
+    # parsed. Move to skrifa when ab_glyph or egui do.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: parses only bundled fonts via ab_glyph, no known vulnerability" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "OFL-1.1",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[[licenses.exceptions]]
+# egui's built-in fonts (Ubuntu Light among them, ATTRIBUTION.md): the Ubuntu Font Licence permits
+# redistribution; not OSI, used for this crate alone.
+name = "epaint_default_fonts"
+allow = ["Ubuntu-font-1.0"]
+
+[[licenses.exceptions]]
+# A public-domain dedication (CC0), not OSI: tiny-keccak, inside the const-random-macro proc-macro
+# (build time only, via ahash/arrow). Used for this crate alone.
+name = "tiny-keccak"
+allow = ["CC0-1.0"]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+# Workspace crates name each other by path alone; every crates.io dependency has a version.
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

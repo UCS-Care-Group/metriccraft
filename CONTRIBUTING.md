@@ -34,7 +34,7 @@ and the result Power BI Desktop gave, copied out as values. See `docs/parity.md`
 - **Layering** is enforced (`cargo xtask layers`): nothing below the UI layer depends on egui.
 - **Rust only**, and the web (WASM) build must keep compiling.
 - Before sending a pull request, run `cargo xtask ci` (fmt, layers, assets, strings, clippy, tests,
-  wasm, bench). On macOS the wasm step needs LLVM's clang (`brew install llvm`, then
+  wasm, bench, deny; cargo-deny: `cargo install cargo-deny --locked --version 0.20.2`). On macOS the wasm step needs LLVM's clang (`brew install llvm`, then
   `export CC_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/clang`). The full rulebook, also used by AI coding agents, is [`AGENTS.md`](AGENTS.md).
 
 Direction is in [`ROADMAP.md`](ROADMAP.md) and the issues (the maintainers' specs and plans are

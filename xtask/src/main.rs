@@ -1,6 +1,7 @@
 //! Repo automation: `cargo xtask <task>`.
 //!
-//! Tasks: `ci` (everything below, in order), `fmt`, `clippy`, `test`, `layers`, `assets`, `wasm`,
+//! Tasks: `ci` (everything below, in order; `XTASK_CI_SKIP=a,b` skips steps), `fmt`, `clippy`,
+//! `test`, `layers`, `assets`, `wasm`, `deny`,
 //! `bench [--save] [--reference]`, `snapshot [--update]`, `ui-bench`, `dist [--target T]…`,
 //! `parity [--update | --export]`; and
 //! `dataset [--rows N] [--out DIR] [--csv]` (the reference dataset, `docs/bench.md`).
@@ -65,6 +66,7 @@ fn main() -> ExitCode {
         "assets" => assets(),
         "strings" => strings(),
         "wasm" => wasm(),
+        "deny" => deny(),
         "dataset" => dataset::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         "bench" => bench(std::env::args().any(|a| a == "--save")),
         "snapshot" => snapshot(std::env::args().any(|a| a == "--update")),
@@ -76,7 +78,7 @@ fn main() -> ExitCode {
             std::env::args().any(|a| a == "--pending"),
         ),
         _ => {
-            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|ui-bench|dist|parity>".into())
+            Err("usage: cargo xtask <ci|fmt|clippy|test|layers|assets|strings|wasm|bench [--save]|snapshot [--update]|ui-bench|dist|deny|parity>".into())
         }
     };
     match result {
@@ -98,12 +100,44 @@ fn ci() -> Result {
         ("test", test),
         ("wasm", wasm),
         ("bench", || bench(false)),
+        ("deny", deny),
     ] {
+        if skipped(name) {
+            eprintln!("== {name}: skipped (XTASK_CI_SKIP)");
+            continue;
+        }
         eprintln!("== {name}");
         step().map_err(|e| format!("{name}: {e}"))?;
     }
     eprintln!("== ci ok");
     Ok(())
+}
+
+/// Whether `XTASK_CI_SKIP` (a comma-separated list) names step `name`: CI runs some steps as
+/// their own jobs.
+fn skipped(name: &str) -> bool {
+    std::env::var("XTASK_CI_SKIP").is_ok_and(|v| v.split(',').any(|s| s.trim() == name))
+}
+
+/// `cargo deny check` against `deny.toml` (advisories, licences, bans, sources). cargo-deny is a
+/// separate install: without it the step says how to get it and passes on a developer's machine,
+/// and fails where `CI` is set.
+fn deny() -> Result {
+    let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let installed = Command::new(&cargo_bin)
+        .args(["deny", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !installed {
+        let hint =
+            "cargo-deny is not installed: `cargo install cargo-deny --locked --version 0.20.2`";
+        if std::env::var_os("CI").is_some() {
+            return Err(hint.into());
+        }
+        eprintln!("deny: skipped, {hint}");
+        return Ok(());
+    }
+    cargo(&["deny", "check"])
 }
 
 fn fmt() -> Result {

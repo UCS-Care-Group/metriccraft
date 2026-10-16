@@ -1,0 +1,16 @@
+# CodeQL: what code scanning reads. Test-only code is left out: its fixtures, made-up inputs and
+# assertion messages are not production code. Rust is analysed with `build-mode: none`, for which
+# `paths-ignore` is honoured.
+#
+# Used by default setup through the `github-codeql-config-file` repository property (the value:
+# this file's path), set once this file is on main.
+name: MetricCraft CodeQL
+
+paths-ignore:
+  - "**/tests/**"
+  - "**/tests.rs"
+  - "**/*_tests.rs"
+  - "**/tests_*.rs"
+  - "**/benches/**"
+  - "**/examples/**"
+  - "xtask/**"
