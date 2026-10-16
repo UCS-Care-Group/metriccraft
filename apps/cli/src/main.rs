@@ -23,6 +23,8 @@ Usage: metriccraft-cli <verb> [args]
                                      draw a Page as PNG
   run P ID [--params JSON] [SAVE]    run one command
   script P FILE [SAVE]               run JSON lines {\"run\": id, \"params\": {...}}; FILE - is stdin
+  run|script --new ... --save-as PATH
+                                     the same on a new, empty Project instead of P
   commands [--json]                  every command and its params
 
 P is a Project folder, its project.mcraft.json, or a .mcraft Package.
@@ -94,20 +96,27 @@ fn cli(args: &[String]) -> Result {
         "refresh" => (&["--save-as"], &["--save"]),
         "dax" => (&["--format", "--max-rows"], &[]),
         "render" => (&["--out", "--page", "--scale", "--width"], &[]),
-        "run" => (&["--params", "--save-as"], &["--save"]),
-        "script" => (&["--save-as"], &["--save"]),
+        "run" => (&["--params", "--save-as"], &["--save", "--new"]),
+        "script" => (&["--save-as"], &["--save", "--new"]),
         _ => return usage(format!("unknown verb `{verb}`")),
     };
     let a = Args::parse(rest, takes, switches)?;
+    // `--new` starts from an empty Project instead of opening P.
+    let new = a.has("--new");
     let wants = match verb {
         "describe" | "refresh" | "render" => 1,
+        _ if new => 1,
         _ => 2,
     };
     let pos = a.positionals(wants)?;
     let save = a.save()?;
+    if new && save == Some(None) {
+        return usage("a --new Project has nowhere to --save; use --save-as PATH");
+    }
     let (project, arg) = match pos.as_slice() {
-        [p] => (p.as_str(), ""),
-        [p, x] => (p.as_str(), x.as_str()),
+        [x] if new => (None, x.as_str()),
+        [p] => (Some(p.as_str()), ""),
+        [p, x] => (Some(p.as_str()), x.as_str()),
         _ => return usage("wrong number of arguments"),
     };
     // Checked before opening, so a usage error never costs a load.
@@ -141,7 +150,9 @@ fn cli(args: &[String]) -> Result {
 
     let mut app = App::new();
     on_ctrl_c(&app);
-    run(&mut app, "file.open", &json!({"path": project}))?;
+    if let Some(project) = project {
+        run(&mut app, "file.open", &json!({"path": project}))?;
+    }
     let out = match verb {
         "describe" => pretty(&run(&mut app, "document.describe", &Value::Null)?),
         "refresh" => {

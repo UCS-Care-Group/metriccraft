@@ -17,7 +17,8 @@ servers and in CI. It writes nothing unless you pass `--save` (back where it was
 | `script P FILE [--save]`                      | Runs a JSON-lines file of `{"run": id, "params": {…}}`; `-` = stdin |
 | `commands [--json]`                           | Every command with its params                                       |
 
-`--save-as PATH` works wherever `--save` does.
+`--save-as PATH` works wherever `--save` does. `run` and `script` take `--new` in place of `P`
+to start from an empty Project; save it with `--save-as`.
 
 - **DAX output:** a table on a terminal, CSV when piped, or `--format table|csv|json`. BLANK is
   empty (`null` in JSON); `--max-rows` defaults to 10,000.
@@ -33,4 +34,5 @@ metriccraft-cli dax Sales/ 'EVALUATE SUMMARIZECOLUMNS(Sales[Region], "Total", [T
 metriccraft-cli refresh Sales/ --save
 metriccraft-cli render Sales.mcraft --out page.png --scale 2
 echo '{"run": "insert.newPage", "params": {"name": "Q3"}}' | metriccraft-cli script Sales/ - --save
+metriccraft-cli script --new build.jsonl --save-as Sales.mcraft
 ```

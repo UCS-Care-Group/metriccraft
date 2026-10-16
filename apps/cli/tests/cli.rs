@@ -67,17 +67,23 @@ fn cli_in(project: &Path, args: &[&str], stdin: Option<&str>) -> Output {
         }
         cmd.args(rest);
     }
+    piped(cmd, stdin.unwrap_or_default())
+}
+
+/// Runs `cmd` with `stdin` as its input.
+#[cfg(test)]
+fn piped(mut cmd: Command, stdin: &str) -> Output {
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().unwrap();
-    if let Some(text) = stdin {
+    if !stdin.is_empty() {
         use std::io::Write;
         child
             .stdin
             .take()
             .unwrap()
-            .write_all(text.as_bytes())
+            .write_all(stdin.as_bytes())
             .unwrap();
     }
     drop(child.stdin.take());
@@ -214,6 +220,28 @@ fn script_reads_stdin_and_stops_at_the_failing_line() {
     assert!(stderr(&o).contains("line 2"), "{}", stderr(&o));
     // Nothing saved: the Page from line 1 isn't there.
     assert_eq!(describe(&fx)["pages"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn script_new_builds_a_project_from_nothing() {
+    let fx = Fixture::new("new");
+    let csv = fx.dir.join("Sales.csv").display().to_string();
+    let steps = format!(
+        "{}\n{}\n",
+        json!({"run": "home.getData", "params": {"kind": "csv", "path": csv}}),
+        json!({"run": "modeling.newMeasure", "params": {"table": "Sales", "name": "N", "expression": "COUNTROWS(Sales)"}}),
+    );
+    let out = fx.dir.join("built.mcraft").display().to_string();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_metriccraft-cli"));
+    cmd.args(["script", "--new", "-", "--save-as", &out]);
+    let o = piped(cmd, &steps);
+    assert_eq!(code(&o), Some(0), "{}", stderr(&o));
+    let o = cli_in(Path::new(&out), &["dax", "EVALUATE ROW(\"n\", [N])"], None);
+    assert_eq!(stdout(&o), "n\n3\n", "{}", stderr(&o));
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_metriccraft-cli"));
+    cmd.args(["run", "--new", "insert.newPage", "--save"]);
+    assert_eq!(code(&piped(cmd, "")), Some(2));
 }
 
 #[test]
