@@ -18,6 +18,8 @@ pub struct Snapshot {
     /// Whether each command (in [`metriccraft_engine::COMMANDS`] order) can run now.
     pub enabled: Vec<bool>,
     pub dirty: bool,
+    /// What Undo would undo (`App::undo_label`).
+    pub undo: Option<String>,
     pub location: Option<Location>,
     /// The command running now, if any.
     pub busy: Option<&'static str>,
@@ -33,6 +35,7 @@ impl Snapshot {
             doc: app.document().clone(),
             enabled: app.commands().iter().map(|c| (c.enabled)(app)).collect(),
             dirty: app.is_dirty(),
+            undo: app.undo_label().map(str::to_string),
             location: app.location().cloned(),
             busy: None,
             scenes: Arc::new(draw(app)),
@@ -130,7 +133,7 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
             return;
         }
         Job::Run(id, params) => match app.run(&id, &params) {
-            Ok(()) => Event::Done {
+            Ok(_) => Event::Done {
                 notice: app.notice().map(str::to_string),
                 id,
             },

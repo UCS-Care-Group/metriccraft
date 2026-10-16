@@ -624,7 +624,7 @@ impl App {
                 json!([item])
             };
             let params = json!({"page": page_id, "visual": visual, "items": items, "add": add});
-            return self.run("slicer.select", &params);
+            return self.run("slicer.select", &params).map(drop);
         }
         // The point by its place in the result: `selection.select` queries again (a cache hit
         // under the same filters) and takes the same point.
@@ -632,9 +632,11 @@ impl App {
             Some(t) => {
                 let point = json!({"row": t.point, "series": t.series});
                 let params = json!({"page": page_id, "visual": visual, "point": point, "add": add});
-                self.run("selection.select", &params)
+                self.run("selection.select", &params).map(drop)
             }
-            None => self.run("selection.clear", &json!({"page": page_id})),
+            None => self
+                .run("selection.clear", &json!({"page": page_id}))
+                .map(drop),
         }
     }
 

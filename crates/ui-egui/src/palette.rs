@@ -33,6 +33,9 @@ pub fn matches<'a>(commands: &'a [Command], enabled: &[bool], query: &str) -> Ve
         .enumerate()
         .filter(|(i, _)| enabled.get(*i).copied().unwrap_or(false))
         .map(|(_, c)| c)
+        // Read commands and `batch` are for programs (CLI, Control channel, MCP): they return
+        // data or take a list of commands, which the palette has no way to show or ask for.
+        .filter(|c| !c.read_only() && c.id != "batch")
         .filter(|c| {
             let hay = format!("{} {} {}", c.label, c.id, c.ribbon).to_lowercase();
             words.iter().all(|w| hay.contains(w.as_str()))
@@ -378,6 +381,11 @@ mod tests {
         );
         let none = vec![false; COMMANDS.len()];
         assert!(matches(COMMANDS, &none, "").is_empty());
+        let found = matches(COMMANDS, &all, "");
+        assert!(
+            found.iter().all(|c| !c.read_only() && c.id != "batch"),
+            "Read commands and batch are for programs"
+        );
     }
 
     #[test]

@@ -12,13 +12,14 @@ mod load;
 mod model;
 pub mod param;
 mod query;
+mod read;
 mod recovery;
 mod relationship;
 mod rename;
 mod report;
 mod selection;
 
-pub use app::{App, Document, UNDO_LIMIT};
+pub use app::{App, Document, MAX_BATCH, Origin, UNDO_LIMIT};
 pub use cmd::{COMMANDS, Command, Run, reference};
 pub use diagram::Diagram;
 pub use file::Location;
@@ -57,6 +58,14 @@ pub enum Error {
     /// Opening or saving a Project or Package failed; nothing was changed. An interrupted save
     /// ([`metriccraft_file::Error::Interrupted`]) is retried with `file.open`'s `recover`.
     File(metriccraft_file::Error),
+    /// Step `index` (0 = first) of a Batch failed; nothing was changed.
+    Batch {
+        index: usize,
+        command: String,
+        error: Box<Error>,
+    },
+    /// A Read command failed: a DAX query error, a Page that can't be drawn.
+    Read { command: String, message: String },
 }
 
 impl std::fmt::Display for Error {
@@ -77,6 +86,16 @@ impl std::fmt::Display for Error {
             Self::UnknownQuery(name) => write!(f, "there is no query `{name}`"),
             Self::Model(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
+            Self::Batch {
+                index,
+                command,
+                error,
+            } => write!(
+                f,
+                "batch command {} (`{command}`) failed, nothing was changed: {error}",
+                index.saturating_add(1)
+            ),
+            Self::Read { command, message } => write!(f, "`{command}`: {message}"),
         }
     }
 }

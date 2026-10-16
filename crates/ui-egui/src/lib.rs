@@ -719,6 +719,10 @@ impl Shell {
                         if snap.dirty {
                             ui.label(RichText::new(Str::Unsaved.text()).color(t.muted));
                         }
+                        // What Undo would undo, with its Origin (`Undo: MCP — 30 changes`).
+                        if let Some(undo) = &snap.undo {
+                            ui.label(RichText::new(Str::UndoLabel.fill(&[undo])).color(t.muted));
+                        }
                         let pages = &snap.doc.report.pages;
                         if let Some(page) = views::current_page(&snap.doc) {
                             let n = pages.iter().position(|p| p.id == page.id).unwrap_or(0) + 1;

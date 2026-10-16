@@ -6,6 +6,46 @@ use serde_json::Value;
 
 use crate::{COMMANDS, Command, Error, LoadReport, Result, Run};
 
+/// Most commands in one Batch (hostile input: a Batch is a command's params).
+pub const MAX_BATCH: usize = 10_000;
+
+/// Who ran a command (CONTEXT.md: Origin), shown on undo labels and in the status bar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Origin {
+    #[default]
+    Ui,
+    Control,
+    Cli,
+    Mcp,
+}
+
+impl Origin {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ui => "UI",
+            Self::Control => "Control channel",
+            Self::Cli => "CLI",
+            Self::Mcp => "MCP",
+        }
+    }
+
+    /// An undo label: the command's own label from the UI, prefixed with the Origin otherwise
+    /// (`MCP — Rename column`).
+    fn label(self, what: &str) -> String {
+        match self {
+            Self::Ui => what.into(),
+            other => format!("{} — {what}", other.name()),
+        }
+    }
+}
+
+/// An undo or redo entry: the Document to go back to and what the change was.
+#[derive(Clone)]
+struct Step {
+    doc: Document,
+    label: String,
+}
+
 /// Everything that is saved and undoable. Filled in by later milestones (model, report).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
@@ -44,8 +84,12 @@ pub struct App {
     commands: &'static [Command],
     // ponytail: whole-Document snapshots — cheap because table columns are shared (ADR 0005).
     // Switch to inverse operations if cloning a Document shows up in benchmarks.
-    undo: VecDeque<Document>,
-    redo: Vec<Document>,
+    undo: VecDeque<Step>,
+    redo: Vec<Step>,
+    /// The undo label of the command running now (see [`Origin::label`]).
+    label: String,
+    /// Inside a Batch: edits record no undo step of their own; the Batch records one.
+    batching: bool,
     /// What the last Get Data or Refresh loaded (not part of the Document: not undone).
     last_load: Option<LoadReport>,
     /// The memory cap for loaded data (spec N-4), counted over the document, undo and redo.
@@ -93,6 +137,8 @@ impl App {
             commands,
             undo: VecDeque::new(),
             redo: Vec::new(),
+            label: String::new(),
+            batching: false,
             last_load: None,
             memory_cap: default_memory_cap(),
             notice: None,
@@ -136,8 +182,8 @@ impl App {
     /// not bring back.
     pub(crate) fn every_document(&mut self, mut f: impl FnMut(&mut Document)) {
         f(&mut self.doc);
-        self.undo.iter_mut().for_each(&mut f);
-        self.redo.iter_mut().for_each(&mut f);
+        self.undo.iter_mut().for_each(|s| f(&mut s.doc));
+        self.redo.iter_mut().for_each(|s| f(&mut s.doc));
     }
 
     pub fn document(&self) -> &Document {
@@ -165,7 +211,7 @@ impl App {
     /// Bytes of column data held: every distinct buffer of the document, undo and redo
     /// (snapshots share buffers, so each is counted once). What the memory cap is checked against.
     pub fn memory(&self) -> usize {
-        Held::new(self.undo.iter().chain(&self.redo).chain([&self.doc])).total
+        Held::new(steps(&self.undo, &self.redo).chain([&self.doc])).total
     }
 
     pub fn commands(&self) -> &'static [Command] {
@@ -179,8 +225,14 @@ impl App {
         self.commands.iter().find(|c| c.id == id)
     }
 
-    /// Runs a command by id. The single entry point for UI, control channel, CLI and MCP.
-    pub fn run(&mut self, id: &str, params: &Value) -> Result {
+    /// Runs a command by id from the UI: [`App::run_as`] with [`Origin::Ui`].
+    pub fn run(&mut self, id: &str, params: &Value) -> Result<Value> {
+        self.run_as(Origin::Ui, id, params)
+    }
+
+    /// Runs a command by id. The single entry point for UI, Control channel, CLI and MCP.
+    /// Returns a Read command's result, a Batch's results, and `null` for everything else.
+    pub fn run_as(&mut self, origin: Origin, id: &str, params: &Value) -> Result<Value> {
         let cmd = self
             .command(id)
             .ok_or_else(|| Error::UnknownCommand(id.into()))?;
@@ -192,6 +244,12 @@ impl App {
             command: id.into(),
             message,
         })?;
+        match cmd.run {
+            Run::Read(read) => return read(self, params),
+            Run::Batch => return self.batch(origin, params),
+            Run::Edit(_) | Run::App(_) => {}
+        }
+        self.label = origin.label(cmd.label);
         let moved = merge_key(id, params);
         let merge = moved.is_some()
             && moved == self.last_move
@@ -201,13 +259,111 @@ impl App {
         match cmd.run {
             Run::Edit(edit) => self.edit_noting(|doc| edit(doc, params).map(|()| None))?,
             Run::App(act) => act(self, params)?,
+            Run::Read(_) | Run::Batch => {}
         }
         // A merged move replaces the previous one in the history: undo goes back to before both.
         if merge && self.undo.len() > undo_before {
             self.undo.pop_back();
         }
         self.last_move = moved;
-        Ok(())
+        Ok(Value::Null)
+    }
+
+    /// Runs a Batch (CONTEXT.md): `commands`, a list of `{"run": id, "params": …}`, all or
+    /// nothing, as one undo step labelled `label` (default: how many changes). Fails before
+    /// running anything on a step that can't be batched; a failing step undoes the ones before it.
+    fn batch(&mut self, origin: Origin, params: &Value) -> Result<Value> {
+        let invalid = |message: String| Error::InvalidParams {
+            command: "batch".into(),
+            message,
+        };
+        let list = params
+            .get("commands")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("`commands` must be a list of {\"run\", \"params\"}".into()))?;
+        if list.len() > MAX_BATCH {
+            return Err(invalid(format!("more than {MAX_BATCH} commands")));
+        }
+        let mut steps = Vec::with_capacity(list.len());
+        for (i, step) in list.iter().enumerate() {
+            let id = step
+                .get("run")
+                .and_then(Value::as_str)
+                .ok_or_else(|| invalid(format!("command {}: `run` must be a command id", i + 1)))?;
+            let cmd = self
+                .command(id)
+                .ok_or_else(|| invalid(format!("command {}: unknown command `{id}`", i + 1)))?;
+            // These replace the document, write files or move through the undo history.
+            if matches!(cmd.run, Run::Batch) || id.starts_with("file.") || id.starts_with("edit.") {
+                return Err(invalid(format!(
+                    "command {}: `{id}` can't run in a batch",
+                    i + 1
+                )));
+            }
+            steps.push((cmd, step.get("params").unwrap_or(&Value::Null)));
+        }
+        let before = self.doc.clone();
+        let saved = (
+            self.undo.clone(),
+            self.redo.clone(),
+            self.last_load.clone(),
+            self.version,
+            self.clean,
+            self.last_move.clone(),
+        );
+        self.batching = true;
+        let mut results = Vec::with_capacity(steps.len());
+        let mut edits = 0usize;
+        for (i, (cmd, p)) in steps.into_iter().enumerate() {
+            match self.run_as(origin, cmd.id, p) {
+                Ok(v) => {
+                    if !matches!(cmd.run, Run::Read(_)) {
+                        edits = edits.saturating_add(1);
+                    }
+                    results.push(v);
+                }
+                Err(e) => {
+                    self.batching = false;
+                    self.doc = before;
+                    (
+                        self.undo,
+                        self.redo,
+                        self.last_load,
+                        self.version,
+                        self.clean,
+                        self.last_move,
+                    ) = saved;
+                    self.session.prune(&self.doc);
+                    return Err(Error::Batch {
+                        index: i,
+                        command: cmd.id.into(),
+                        error: Box::new(e),
+                    });
+                }
+            }
+        }
+        self.batching = false;
+        self.last_move = None;
+        if self.version != saved.3 {
+            let what = match params.get("label").and_then(Value::as_str) {
+                Some(label) if !label.is_empty() => label.to_string(),
+                _ if edits == 1 => "1 change".into(),
+                _ => format!("{edits} changes"),
+            };
+            self.label = origin.label(&what);
+            self.push_undo(before);
+        }
+        Ok(Value::Array(results))
+    }
+
+    /// What Undo would undo (`MCP — 30 changes`), if anything.
+    pub fn undo_label(&self) -> Option<&str> {
+        self.undo.back().map(|s| s.label.as_str())
+    }
+
+    /// What Redo would redo, if anything.
+    pub fn redo_label(&self) -> Option<&str> {
+        self.redo.last().map(|s| s.label.as_str())
     }
 
     /// Runs `edit` like a [`Run::Edit`] (on a copy, recorded for undo); its notice, if any,
@@ -256,16 +412,16 @@ impl App {
         estimate: usize,
         edit: impl Fn(&mut Document, usize) -> Result<LoadReport>,
     ) -> Result {
-        let mut held = Held::new(self.undo.iter().chain(&self.redo).chain([&self.doc]));
+        let mut held = Held::new(steps(&self.undo, &self.redo).chain([&self.doc]));
         // What dropping every undo step would leave.
-        let base = Held::new(self.redo.iter().chain([&self.doc])).total;
+        let base = Held::new(self.redo.iter().map(|s| &s.doc).chain([&self.doc])).total;
         let mut dropped = 0usize;
-        let mut room = |undo: &mut VecDeque<Document>, held: &mut Held, need: usize| {
+        let mut room = |undo: &mut VecDeque<Step>, held: &mut Held, need: usize| {
             while held.total.saturating_add(need) > self.memory_cap && held.total > base {
                 let Some(oldest) = undo.pop_front() else {
                     break;
                 };
-                held.remove(&oldest);
+                held.remove(&oldest.doc);
                 dropped = dropped.saturating_add(1);
             }
         };
@@ -316,7 +472,11 @@ impl App {
             .pop_back()
             .ok_or_else(|| Error::Disabled("edit.undo".into()))?;
         let current = self.doc.report.current.clone();
-        self.redo.push(std::mem::replace(&mut self.doc, prev));
+        let doc = std::mem::replace(&mut self.doc, prev.doc);
+        self.redo.push(Step {
+            doc,
+            label: prev.label,
+        });
         self.keep_current(current);
         self.last_load = None;
         self.changed();
@@ -329,7 +489,8 @@ impl App {
             .pop()
             .ok_or_else(|| Error::Disabled("edit.redo".into()))?;
         let current = self.doc.report.current.clone();
-        let prev = std::mem::replace(&mut self.doc, next);
+        let prev = std::mem::replace(&mut self.doc, next.doc);
+        self.label = next.label;
         self.push_undo(prev);
         self.keep_current(current);
         self.last_load = None;
@@ -348,11 +509,20 @@ impl App {
     }
 
     fn push_undo(&mut self, doc: Document) {
+        if self.batching {
+            return;
+        }
         if self.undo.len() >= UNDO_LIMIT {
             self.undo.pop_front();
         }
-        self.undo.push_back(doc);
+        let label = self.label.clone();
+        self.undo.push_back(Step { doc, label });
     }
+}
+
+/// The Documents of the undo and redo steps.
+fn steps<'a>(undo: &'a VecDeque<Step>, redo: &'a [Step]) -> impl Iterator<Item = &'a Document> {
+    undo.iter().chain(redo).map(|s| &s.doc)
 }
 
 /// What a move command moves (`model.moveTable`, `visual.move`, `visual.resize`), so that a
@@ -573,7 +743,7 @@ mod tests {
         assert_eq!(app.undo.len(), UNDO_LIMIT);
         let original = buffer(&app.doc);
         assert!(
-            app.undo.iter().all(|d| buffer(d) == original),
+            app.undo.iter().all(|s| buffer(&s.doc) == original),
             "every snapshot points at the same column buffer: no extra column memory"
         );
         assert_eq!(app.doc.tables[0].rows(), 10_000_000);

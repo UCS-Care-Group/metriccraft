@@ -6,6 +6,7 @@ use crate::load;
 use crate::model::{self, has_tables};
 use crate::param::{Kind, Param, null, opt, req};
 use crate::query::{self, has_queries};
+use crate::read;
 use crate::recovery;
 use crate::relationship;
 use crate::rename;
@@ -21,6 +22,11 @@ pub enum Run {
     Edit(fn(&mut Document, &Value) -> Result),
     /// Acts on the app itself (undo/redo; later selection and view state). Not recorded.
     App(fn(&mut App, &Value) -> Result),
+    /// A Read command (CONTEXT.md): only looks, returns its result; never changes the
+    /// Document, never undoable.
+    Read(fn(&mut App, &Value) -> Result<Value>),
+    /// `batch`: runs other commands as one undo step (`App::batch`).
+    Batch,
 }
 
 /// A user-visible action. Ids follow Power BI's ribbon (`home.getData`) plus primitives.
@@ -36,6 +42,13 @@ pub struct Command {
     pub params: &'static [Param],
     pub enabled: fn(&App) -> bool,
     pub run: Run,
+}
+
+impl Command {
+    /// Whether this is a Read command: it never changes the Project.
+    pub fn read_only(&self) -> bool {
+        matches!(self.run, Run::Read(_))
+    }
 }
 
 /// Every command, in menu order.
@@ -1242,6 +1255,75 @@ pub static COMMANDS: &[Command] = &[
         enabled: |_| true,
         run: Run::App(recovery::set_minutes),
     },
+    // Read commands (spec C-4, ADR 0009): for programs (CLI, Control channel, MCP), not the
+    // ribbon. They change nothing and are never undoable.
+    Command {
+        id: "dax.evaluate",
+        label: "Evaluate DAX query",
+        ribbon: "",
+        shortcut: None,
+        params: &[
+            req(
+                "query",
+                Kind::Text,
+                "a DAX query with one EVALUATE (DEFINE and ORDER BY allowed); the Model's Measures are in scope",
+            ),
+            opt(
+                "maxRows",
+                Kind::Integer,
+                "most rows returned, 0 to 1000000 (default 10000); `truncated` says if more were left out",
+            ),
+        ],
+        enabled: |_| true,
+        run: Run::Read(read::evaluate),
+    },
+    Command {
+        id: "document.describe",
+        label: "Describe document",
+        ribbon: "",
+        shortcut: None,
+        params: &[],
+        enabled: |_| true,
+        run: Run::Read(read::describe),
+    },
+    Command {
+        id: "page.render",
+        label: "Render page",
+        ribbon: "",
+        shortcut: None,
+        params: &[
+            opt("page", Kind::Page, "the Page (default: the current Page)"),
+            opt(
+                "width",
+                Kind::Number,
+                "image width in pixels (overrides scale)",
+            ),
+            opt("scale", Kind::Number, "pixels per Page pixel (default 1)"),
+        ],
+        enabled: has_pages,
+        run: Run::Read(read::render),
+    },
+    // A Batch (CONTEXT.md): one undo step for many commands, labelled with their Origin.
+    Command {
+        id: "batch",
+        label: "Batch",
+        ribbon: "",
+        shortcut: None,
+        params: &[
+            req(
+                "commands",
+                Kind::Json,
+                "a list of {\"run\": command id, \"params\": {...}}, run in order, all or nothing (no file.*, edit.* or batch); at most 10000",
+            ),
+            opt(
+                "label",
+                Kind::Text,
+                "the undo label (default: how many changes)",
+            ),
+        ],
+        enabled: |_| true,
+        run: Run::Batch,
+    },
 ];
 
 /// Every command as Markdown: id, label, where it is, its shortcut and its params. Kept in
@@ -1254,6 +1336,9 @@ pub fn reference() -> String {
     );
     for c in COMMANDS {
         out.push_str(&format!("\n## `{}` — {}\n\n", c.id, c.label));
+        if c.read_only() {
+            out.push_str("- Read command: changes nothing, not undoable\n");
+        }
         if !c.ribbon.is_empty() {
             out.push_str(&format!("- Ribbon: {}\n", c.ribbon));
         }

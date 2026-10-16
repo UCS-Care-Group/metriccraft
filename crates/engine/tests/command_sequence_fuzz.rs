@@ -958,7 +958,7 @@ mod fuzz {
                 "{id} {params} -> {}",
                 result
                     .as_ref()
-                    .map_or_else(|e| format!("Err({e})"), |()| "Ok".into())
+                    .map_or_else(|e| format!("Err({e})"), |_| "Ok".into())
             ));
             let fail = |what: String| -> ! {
                 panic!(

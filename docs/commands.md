@@ -405,3 +405,26 @@ Generated from the engine's command table (`MCRAFT_SNAPSHOT_UPDATE=1 cargo test 
 ## `options.autosaveMinutes` — Store AutoRecovery information every N minutes
 
 - `minutes?`: integer — 0 (off) to 1440; default 5
+
+## `dax.evaluate` — Evaluate DAX query
+
+- Read command: changes nothing, not undoable
+- `query`: text — a DAX query with one EVALUATE (DEFINE and ORDER BY allowed); the Model's Measures are in scope
+- `maxRows?`: integer — most rows returned, 0 to 1000000 (default 10000); `truncated` says if more were left out
+
+## `document.describe` — Describe document
+
+- Read command: changes nothing, not undoable
+- No params
+
+## `page.render` — Render page
+
+- Read command: changes nothing, not undoable
+- `page?`: Page — the Page (default: the current Page)
+- `width?`: number — image width in pixels (overrides scale)
+- `scale?`: number — pixels per Page pixel (default 1)
+
+## `batch` — Batch
+
+- `commands`: JSON — a list of {"run": command id, "params": {...}}, run in order, all or nothing (no file.*, edit.* or batch); at most 10000
+- `label?`: text — the undo label (default: how many changes)

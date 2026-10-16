@@ -16,7 +16,8 @@ metriccraft-core = { path = "../core" }
 metriccraft-data = { path = "../data" }
 metriccraft-model = { path = "../model" }
 metriccraft-file = { path = "../file" }
-metriccraft-visuals = { path = "../visuals", default-features = false }
+# `png`: the `page.render` Read command (spec C-4).
+metriccraft-visuals = { path = "../visuals" }
 arrow-schema.workspace = true
 serde_json.workspace = true
 
