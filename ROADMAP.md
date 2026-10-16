@@ -32,9 +32,9 @@ Measured on the reference machine (AMD Ryzen 5 5600X, 32 GB, Linux); details in
 | M3        | DAX: evaluator, MVP functions, parity cases                                  | done        |
 | M4        | Visuals: table, matrix, bar/column, line, card, slicer                       | done        |
 | M5        | Desktop UI: ribbon, Power Query editor, model view, canvas                   | done        |
-| M6        | Control channel, CLI, MCP, web build, release                                | 2/7         |
+| M6        | Control channel, CLI, MCP, web build, release                                | 3/7         |
 
-M6 in order: release workflow (done) → Read commands, Batch, Origin (done) → headless CLI →
+M6 in order: release workflow (done) → Read commands, Batch, Origin (done) → headless CLI (done) →
 Control channel → MCP server → web build → fuzz soak, acceptance run and v0.1.0.
 
 ## After v0.1
@@ -46,6 +46,8 @@ Control channel → MCP server → web build → fuzz soak, acceptance run and v
 
 ## Progress log
 
+- **2026-10-16** — M6.3: headless `metriccraft-cli` (`describe`, `refresh`, `dax`, `render`,
+  `run`, `script`, `commands`; [`docs/cli.md`](docs/cli.md)).
 - **2026-10-16** — M6.2: Read commands (`dax.evaluate`, `document.describe`, `page.render`),
   Batch (one undo step) and Origin on undo labels. M6.1: release workflow; archives 10.5–22.0 MB.
 - **2026-10-15** — M5 done: keyboard navigation, accessibility audit, UI snapshots and budgets.

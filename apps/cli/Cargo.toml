@@ -10,3 +10,13 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+metriccraft-engine = { path = "../../crates/engine" }
+serde_json.workspace = true
+csv.workspace = true
+# Ctrl+C cancels a load: the standard library can't catch signals without `unsafe`.
+ctrlc = "3.5"
+
+[dev-dependencies]
+metriccraft-engine = { path = "../../crates/engine" }

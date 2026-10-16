@@ -45,6 +45,9 @@ const UI_ONLY: &[&str] = &[
     "egui_kittest",
 ];
 
+/// Headless crates: no UI crates and no UI layer, even though their layer would allow it.
+const HEADLESS: &[&str] = &["metriccraft-cli"];
+
 /// Native-only binaries left out of the wasm build.
 const NOT_WASM: &[&str] = &["metriccraft", "metriccraft-cli", "xtask"];
 
@@ -389,14 +392,18 @@ fn check_layers(krates: &[Krate]) -> Vec<String> {
             continue;
         };
         for dep in &k.deps {
-            if let Some(dep_layer) = layer_of(dep) {
+            if HEADLESS.contains(&k.name.as_str()) && dep == "metriccraft-ui-egui" {
+                errors.push(format!("{} is headless; it can't use the UI crate", k.name));
+            } else if let Some(dep_layer) = layer_of(dep) {
                 if dep_layer > own {
                     errors.push(format!(
                         "{} (L{own}) depends on {dep} (L{dep_layer}), a higher layer",
                         k.name
                     ));
                 }
-            } else if own < 6 && UI_ONLY.contains(&dep.as_str()) {
+            } else if (own < 6 || HEADLESS.contains(&k.name.as_str()))
+                && UI_ONLY.contains(&dep.as_str())
+            {
                 errors.push(format!(
                     "{} (L{own}) depends on {dep}; only L6+ may use UI crates",
                     k.name
@@ -798,6 +805,11 @@ mod tests {
     fn layers_reject_ui_crate_below_ui_layer() {
         assert_eq!(check_layers(&[k("metriccraft-engine", &["egui"])]).len(), 1);
         assert!(check_layers(&[k("metriccraft-ui-egui", &["egui"])]).is_empty());
+        assert_eq!(check_layers(&[k("metriccraft-cli", &["eframe"])]).len(), 1);
+        assert_eq!(
+            check_layers(&[k("metriccraft-cli", &["metriccraft-ui-egui"])]).len(),
+            1
+        );
     }
 
     #[test]

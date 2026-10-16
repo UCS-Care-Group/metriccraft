@@ -33,6 +33,7 @@ git clone https://github.com/UCS-Care-Group/metriccraft
 cd metriccraft
 cargo run --release -p metriccraft             # empty window: Home > Get Data to load a CSV, XLSX or Parquet file
 cargo run --release -p metriccraft -- PROJECT  # open a Project folder or .mcraft Package
+cargo run --release -p metriccraft-cli -- dax PROJECT 'EVALUATE Sales'  # no window: see docs/cli.md
 ```
 
 On Linux the app needs a Wayland or X11 session. If OpenGL misbehaves, try the wgpu renderer:
@@ -52,7 +53,7 @@ Found a bug or a DAX result that differs from Power BI? Please
 | M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M5        | **Desktop UI**: ribbon, Power Query editor, model view, canvas     | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M6        | **Control, CLI, MCP, web, release**                                | ![2/7](https://img.shields.io/badge/-2%2F7-yellow)                    |
+| M6        | **Control, CLI, MCP, web, release**                                | ![3/7](https://img.shields.io/badge/-3%2F7-yellow)                    |
 
 Not affiliated with or endorsed by Microsoft. Power BI is a trademark of Microsoft Corporation.
 
