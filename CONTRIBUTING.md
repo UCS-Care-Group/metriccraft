@@ -39,7 +39,7 @@ and the result Power BI Desktop gave, copied out as values. See `docs/parity.md`
 
 Direction is in [`ROADMAP.md`](ROADMAP.md) and the issues (the maintainers' specs and plans are
 kept outside the repository). For anything large, please open an issue first so we can agree the
-approach.
+approach. Every change is read by a maintainer before they land it.
 
 ## Licence
 
