@@ -11,7 +11,7 @@ use metriccraft_ui_egui::{FileAsk, FileHook, Prefs, Shell};
 use serde_json::json;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-/// The per-user preferences file (ADR 0008): `$XDG_CONFIG_HOME/metriccraft/prefs.json` (or
+/// The per-user preferences file: `$XDG_CONFIG_HOME/metriccraft/prefs.json` (or
 /// `~/.config/…`) on Linux, `%APPDATA%\metriccraft` on Windows, `~/Library/Application Support/…` on
 /// macOS.
 fn prefs_path() -> Option<PathBuf> {

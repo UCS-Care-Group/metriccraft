@@ -1,4 +1,4 @@
-//! The report (spec R-1, F-1, F-2, D-4; ADR 0003, 0007): Pages of Visuals, their Fields and the
+//! The report (0007): Pages of Visuals, their Fields and the
 //! Pages' saved slicer selections, and the commands that edit them. All undoable; a command that
 //! fails changes nothing; empty params run with defaults or are an error, never a dialog.
 //!
@@ -12,7 +12,7 @@
 //!   the Model and stores its own spelling of the names. Renaming a Table, Column or Measure
 //!   rewrites every Field (and sort) naming it, in the same undoable command (`rename.rs`,
 //!   `expression.rs`). Deleting one leaves its Fields in place: [`Document::broken_fields`]
-//!   lists them (spec R-1: a missing Field shows as broken), as does renaming a column in Power
+//!   lists them (a missing Field shows as broken), as does renaming a column in Power
 //!   Query (its model Column goes at the next Close & Apply, as in Power BI).
 //! - **Wells** follow [`VisualType::wells`]: only Values takes a Measure; a one-Field well
 //!   (Legend, a card's Values, a slicer's Field) has its Field replaced, as dropping on it does in
@@ -75,7 +75,7 @@ pub struct Page {
     pub height: i32,
     /// Sorted by id; `z` is the draw order.
     pub visuals: Vec<Visual>,
-    /// Saved slicer selections (CONTEXT.md: Selection), by slicer Visual id: the selected
+    /// Saved slicer selections (glossary: Selection), by slicer Visual id: the selected
     /// values. No entry: nothing selected.
     pub selections: BTreeMap<String, Vec<Value>>,
     /// Unknown members of `page.json`.
@@ -244,7 +244,7 @@ pub struct BrokenField {
 
 impl Document {
     /// Every Field whose Column or Measure is gone (deleted, or renamed outside the model), in
-    /// report order: kept, shown as broken (spec R-1).
+    /// report order: kept, shown as broken.
     pub fn broken_fields(&self) -> Vec<BrokenField> {
         let mut out = Vec::new();
         for p in &self.report.pages {

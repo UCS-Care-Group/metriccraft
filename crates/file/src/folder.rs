@@ -2,7 +2,7 @@
 //! functions. (It compiles everywhere; on the web, where there is no file system, every call
 //! returns [`Error::Io`], and the app uses [`crate::pack`]/[`crate::unpack`] on bytes instead.)
 //!
-//! **Save safety (ADR 0003).** [`write_folder`]:
+//! **Save safety.** [`write_folder`]:
 //! 1. writes the new Manifest to `.staging/project.mcraft.json` and every part whose bytes differ
 //!    from the file on disk to `.staging/new/<part>`;
 //! 2. moves each changed part into place, first moving the file it replaces to

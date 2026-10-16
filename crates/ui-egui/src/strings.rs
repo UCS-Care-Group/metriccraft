@@ -1,4 +1,4 @@
-//! The string catalogue (spec A-2): every word the UI shows that isn't a command's own label
+//! The string catalogue: every word the UI shows that isn't a command's own label
 //! (those are keyed by command id in the engine's command table). English only in v0.1;
 //! `cargo xtask ci` rejects string literals passed to widgets anywhere else in this crate.
 
@@ -16,7 +16,7 @@ pub enum Str {
     TabHelp,
     TabColumnTools,
     TabTransform,
-    // Views and Panes (CONTEXT.md).
+    // Views and Panes (glossary).
     ViewReport,
     ViewTable,
     ViewModel,
@@ -41,7 +41,7 @@ pub enum Str {
     Browse,
     MetricCraftFiles,
     DataFiles,
-    // Recovery and closing (spec U-7).
+    // Recovery and closing.
     RecoveryFound,
     RecoveryUnsaved,
     Recover,

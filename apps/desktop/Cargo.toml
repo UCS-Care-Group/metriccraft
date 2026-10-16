@@ -12,7 +12,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-# glow (OpenGL) by default: smaller and lighter at idle (spec N-8, ADR 0008); wgpu if glow misbehaves.
+# glow (OpenGL) by default: smaller and lighter at idle; wgpu if glow misbehaves.
 default = ["glow"]
 glow = ["eframe/glow"]
 wgpu = ["eframe/wgpu"]

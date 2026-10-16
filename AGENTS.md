@@ -2,11 +2,11 @@
 
 MetricCraft is a clean-room, open-source, Rust-native business-intelligence authoring app: a Power BI Desktop alternative that connects to data, shapes it, models it, and builds interactive report pages. DAX results match Power BI exactly; the UI follows Power BI's workflow but may improve on it. Desktop (Linux, Windows, macOS) is the product; the web build (WASM) is a reduced, file-only variant. Publishing, sharing and scheduled refresh (the Power BI Service half) is a separate, later product.
 
-Independent project (ADR 0002). Its engineering rules were adapted from the storytold crafting apps (`storytold/gridcraft`; verbatim copies in `docs/agents/upstream/` for reference only) and are now our own.
+Independent project. Its engineering rules were adapted from the storytold crafting apps (`storytold/gridcraft`; verbatim copies in `docs/agents/upstream/` for reference only) and are now our own.
 
 ## Start every session here
-1. `CONTEXT.md` — the glossary. Use its terms; challenge drift.
-2. `docs/spec/` — what we're building. `docs/plan/` — how and in what order. `docs/adr/` — decisions expensive to reverse.
+1. `plan/` if it exists: maintainers' local working notes, gitignored, never committed. `plan/CONTEXT.md` is the glossary (use its terms; challenge drift), `plan/spec-*.md` what we're building, `plan/plan-*.md` how and in what order, `plan/adr/` decisions expensive to reverse. Without it, start from `ROADMAP.md` and the issues.
+2. Never commit anything from `plan/`, nor copy specs, plans or ADRs into tracked files.
 3. Tasks are GitHub issues (`docs/agents/issue-tracker.md`).
 
 Work is planned **Glossary → Specification → Implementation Plan** before code; an ADR for anything expensive to reverse.
@@ -30,7 +30,7 @@ People trust MetricCraft with their numbers; a crash loses their work. **This ou
 
 ## Non-negotiables
 - **Clean-room.** Power BI Desktop is *observed* black-box only, in a Windows VM: run it, use its UI with synthetic datasets. Screenshots live only in the gitignored `observations/` folder. Never read, disassemble or copy anything inside the Power BI install, never commit files produced by Power BI, never copy GPL/AGPL/LGPL code. DAX, M and file-format behaviour comes from public documentation and observation.
-- **Parity cases** (see `CONTEXT.md`, ADR 0004): synthetic dataset (inline text in the case, or generated in code) + DAX query + the result copied out of Power BI Desktop. Commit only the values. `cargo xtask parity` shows the scoreboard; `--update` records newly passing Checks; `--export` writes copy-ready files to `observations/cases/` for the VM.
+- **Parity cases** (`docs/parity.md`): synthetic dataset (inline text in the case, or generated in code) + DAX query + the result copied out of Power BI Desktop. Commit only the values. `cargo xtask parity` shows the scoreboard; `--update` records newly passing Checks; `--export` writes copy-ready files to `observations/cases/` for the VM.
 - **Test corpora** (real Power BI-authored files) live outside this repo, fetched pinned and sha256-verified. Never commit large binary fixtures; build test datasets and reports in code.
 - **Everything is a command.** User-visible behaviour = a command (id, label, ribbon path, shortcut, params doc, `enabled`, `run`) + tests. Ids follow Power BI's ribbon (`home.getData`, `insert.newVisual`, `modeling.newMeasure`) plus primitives. The control channel, CLI and MCP reach all of them.
 - **Programmatic calls never open dialogs**: a command with empty params runs with defaults or returns an error; only menu-style invocation opens a dialog.
@@ -43,13 +43,15 @@ People trust MetricCraft with their numbers; a crash loses their work. **This ou
 ## Running and looking at the app
 - **Desktop app:** `cargo run -p metriccraft -- [PROJECT]` (a Project folder or `.mcraft` Package). `--no-default-features --features wgpu` swaps the OpenGL renderer for wgpu.
 - **Look without opening a window:** `cargo run -p metriccraft-ui-egui --example ui_shot -- OUT.png [SCRIPT.jsonl]` renders the window offscreen (wgpu) to PNG; the script runs commands (`{"run": id, "params": {…}}`), switches theme or View, selects Visuals, invokes Ribbon buttons, types, opens the Power Query editor and takes more shots (see the example's docs). **For UI work, look at the result.**
-- **UI tests** drive the window through AccessKit labels (`crates/ui-egui/tests/`, `egui_kittest`). `tests/a11y.rs` fails on any control without a worded label (spec A-1): give symbol-only controls one with `icons::name`.
+- **UI tests** drive the window through AccessKit labels (`crates/ui-egui/tests/`, `egui_kittest`). `tests/a11y.rs` fails on any control without a worded label: give symbol-only controls one with `icons::name`.
 - **UI snapshots:** `cargo xtask snapshot` writes PNGs of every View (light, dark) and the Power Query editor to `observations/snapshots/`.
 - **UI budgets:** `cargo xtask ui-bench` (cold start < 1 s on the reference machine, idle private memory ≤ 100 MB; opens a window for ~2 s, or runs under `xvfb-run`).
 - Still to come: the control port (M6) and the headless CLI.
 
 ## Roadmap
-`ROADMAP.md` (committed, once work starts) is the one-page summary: stage, headline numbers, progress log. Detail lives in `docs/spec/` and `docs/plan/`. Update the affected docs whenever work lands.
+`ROADMAP.md` (committed) is the one-page public summary: status line, headline numbers, progress log, revision history. Update it, and the local `plan/`, whenever work lands.
+
+Specs, plans, ADRs and the glossary are private: they live in plan/ (gitignored) and are never committed, nor quoted in commit messages, PR bodies, issues or release notes beyond a task id. ROADMAP.md shows the overall direction; each contributor keeps their own specs privately for clean-room work. Public docs say what the program does, not how the next step will be built.
 
 ## Markdown
 Tables must be space-padded so columns align in plain text — they are read raw (terminals, diffs) at least as often as rendered.

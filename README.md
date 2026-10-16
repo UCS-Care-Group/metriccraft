@@ -16,9 +16,8 @@ work saves to an open, text-based file. Native on Linux, Windows and macOS; a re
 WASM.
 
 **Status:** pre-alpha. The desktop app connects to CSV/XLSX/Parquet, shapes data in a Power Query
-editor, models relationships, evaluates DAX and draws six visual types. Scope:
-[`docs/spec/`](docs/spec/). Plan: [`docs/plan/`](docs/plan/). Contributor and agent rules:
-[`AGENTS.md`](AGENTS.md).
+editor, models relationships, evaluates DAX and draws six visual types. Roadmap:
+[`ROADMAP.md`](ROADMAP.md). Contributor and agent rules: [`AGENTS.md`](AGENTS.md).
 
 **Limitations:** not yet released, and not a drop-in replacement. It does not open `.pbix`/`.pbip`
 files, and supports only file data sources, a subset of DAX and M, and six visuals. There is no
@@ -53,7 +52,7 @@ Found a bug or a DAX result that differs from Power BI? Please
 | M3        | **DAX**: evaluator, MVP functions, parity cases                    | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M4        | **Visuals**: table, matrix, bar/column, line, card, slicer         | ![done](https://img.shields.io/badge/-done-brightgreen)               |
 | M5        | **Desktop UI**: ribbon, Power Query editor, model view, canvas     | ![done](https://img.shields.io/badge/-done-brightgreen)               |
-| M6        | **Control, CLI, MCP, web, release**                                | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
+| M6        | **Control, CLI, MCP, web, release**                                | ![2/7](https://img.shields.io/badge/-2%2F7-yellow)                    |
 
 Not affiliated with or endorsed by Microsoft. Power BI is a trademark of Microsoft Corporation.
 

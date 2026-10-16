@@ -1,6 +1,6 @@
-//! Preview (CONTEXT.md, spec Q-2): a Query's result at a selected Applied Step, on the first
+//! Preview (glossary): a Query's result at a selected Applied Step, on the first
 //! [`PREVIEW_ROWS`] Source rows, with its Cell errors per cell — an error mask plus messages per
-//! column (ADR 0005). Derived and cheap: nothing is stored.
+//! column. Derived and cheap: nothing is stored.
 //!
 //! A Cell error is a value a Changed Type step couldn't produce, or an Excel error cell in the
 //! Source (both null in the data). Later steps carry it: renames and Promoted Headers follow the

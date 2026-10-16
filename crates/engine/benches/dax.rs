@@ -1,4 +1,4 @@
-//! DAX benches (spec N-3; `docs/bench.md`). Run via `cargo xtask bench`, which lists the bench
+//! DAX benches (`docs/bench.md`). Run via `cargo xtask bench`, which lists the bench
 //! files in `METRICCRAFT_BENCH_IMPORTS` (lines of `<name>\t<path>`); each `import/parquet_<n>`
 //! file is loaded once (Get Data, as the import bench does) and every query below is timed on
 //! it: `BENCH dax/<query>_<n> <ns>`, the median of [`RUNS`]. Only query evaluation is timed

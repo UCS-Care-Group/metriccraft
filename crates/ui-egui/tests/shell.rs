@@ -1,5 +1,5 @@
 //! The window driven the way a screen reader or keyboard user would: every control found by its
-//! AccessKit label (spec A-1), every action reaching the engine as a command.
+//! AccessKit label, every action reaching the engine as a command.
 
 use std::time::{Duration, Instant};
 

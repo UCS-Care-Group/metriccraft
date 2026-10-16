@@ -1,6 +1,6 @@
 # Parity case 0037 — integer overflow and type promotion
 
-Spec X-2 (M3.2): whole-number arithmetic at the 64-bit edge, `/` always decimal, mixed comparisons. If a column errors, note the message and remove it so the rest can be copied. Workflow: `docs/parity.md`.
+M3.2: whole-number arithmetic at the 64-bit edge, `/` always decimal, mixed comparisons. If a column errors, note the message and remove it so the rest can be copied. Workflow: `docs/parity.md`.
 
 Covers: +, -, *, /, ^, =
 

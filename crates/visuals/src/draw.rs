@@ -1,4 +1,4 @@
-//! Draw commands (ADR 0007): what a Visual's layout produces and every renderer consumes.
+//! Draw commands: what a Visual's layout produces and every renderer consumes.
 
 use std::fmt::Write;
 

@@ -1,8 +1,8 @@
 //! M-subset AST, printer and parser.
 //!
-//! Layer L1 — see `docs/plan/0001-mvp.md` §1.
+//! Layer L1 — see the `LAYERS` table in `xtask/src/main.rs`.
 //!
-//! The subset is what Power Query writes for the Applied Steps we support (ADR 0005): `let … in`,
+//! The subset is what Power Query writes for the Applied Steps we support: `let … in`,
 //! identifiers (regular, dotted like `Table.PromoteHeaders`, and quoted `#"Promoted Headers"`),
 //! text/number/logical/null literals, lists, records, calls, item access `x{…}`, field access
 //! `x[F]` and `[F]`, `each`, primitive types (`type text`), unary `not`/`-`, and the logical,

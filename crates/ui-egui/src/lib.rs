@@ -1,4 +1,4 @@
-//! The MetricCraft window (layer 6, ADR 0008): egui panels over the engine. Thin: everything
+//! The MetricCraft window (layer 6): egui panels over the engine. Thin: everything
 //! the user does goes to the engine as a command ([`worker::Engine::run`]); panels only read the
 //! published [`worker::Snapshot`]. Swappable: nothing below depends on it.
 
@@ -32,14 +32,14 @@ use crate::theme::{Mode, Tokens};
 use crate::views::{Pane, View};
 use crate::worker::{Engine, Event, Snapshot};
 
-/// A message in the bottom-right corner; stays until dismissed (spec U-7).
+/// A message in the bottom-right corner; stays until dismissed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Toast {
     pub text: String,
     pub error: bool,
 }
 
-/// Preferences kept per user, outside the Project (ADR 0008).
+/// Preferences kept per user, outside the Project.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Prefs {
     pub theme: Mode,
@@ -93,7 +93,7 @@ enum Closing {
     Saving,
 }
 
-/// The commands that load data, with progress and Cancel (spec U-3).
+/// The commands that load data, with progress and Cancel.
 const LOADS: [&str; 3] = ["home.getData", "home.refresh", "home.closeApply"];
 
 /// The window.

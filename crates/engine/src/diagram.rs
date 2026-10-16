@@ -1,4 +1,4 @@
-//! The Model view layout (ADR 0003, M5 amendment): where each Table's box sits, saved in
+//! The Model view layout (M5 amendment): where each Table's box sits, saved in
 //! `model/diagram.json` as `{"tables": {"<Table>": {"x": 0, "y": 0}}}` (integer logical pixels,
 //! keys sorted). Tables without a position are placed by the UI; positions of Tables that no
 //! longer exist are dropped on save.

@@ -1,8 +1,8 @@
-//! Sources: CSV, Parquet, XLSX (spec S-1). A [`Source`] describes where a Query's data comes
+//! Sources: CSV, Parquet, XLSX. A [`Source`] describes where a Query's data comes
 //! from (the file and how to read it); [`Source::read`] streams it as plain Arrow batches of at
 //! most [`BATCH_ROWS`] rows (`Utf8`, `Int64`, `Float64`, `Boolean`, `Date32`,
 //! `Timestamp(Microsecond, None)`), stopping early when asked for fewer rows (Preview), so
-//! peak memory stays about one batch above what the caller keeps (ADR 0005).
+//! peak memory stays about one batch above what the caller keeps.
 //!
 //! A Source reads *raw*, as Power Query's source functions do: a CSV is `Column1..N`, all text,
 //! and an Excel sheet keeps its first row as data. The automatic *Promoted Headers* and *Changed
@@ -31,9 +31,9 @@ pub const BATCH_ROWS: usize = 8192;
 /// Text bytes after which a CSV or XLSX batch ends early, so long text can't make one batch
 /// huge.
 pub const BATCH_BYTES: usize = 64 << 20;
-/// Source rows a Preview runs on (CONTEXT.md).
+/// Source rows a Preview runs on (glossary).
 pub const PREVIEW_ROWS: usize = 1000;
-/// Rows the automatic Changed Type looks at to detect column types (ADR 0005).
+/// Rows the automatic Changed Type looks at to detect column types.
 pub const SAMPLE_ROWS: usize = 200;
 
 /// Where a Query's data comes from. Printed as M by the `m` module; each variant's doc gives the
@@ -267,7 +267,7 @@ impl Source {
         Ok((batch, errors))
     }
 
-    /// The automatic steps for a newly connected Source (ADR 0005), from its first
+    /// The automatic steps for a newly connected Source, from its first
     /// [`SAMPLE_ROWS`] + 1 rows: *Promoted Headers* when the first row looks like headers (CSV and
     /// Excel sheets, which have no headers of their own), then *Changed Type* with each column's
     /// type detected. Parquet columns are typed already: no steps.

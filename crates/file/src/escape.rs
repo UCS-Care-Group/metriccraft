@@ -1,4 +1,4 @@
-//! File names for table and query names (ADR 0003, Identity): deterministic, legal on Linux,
+//! File names for table and query names (Identity): deterministic, legal on Linux,
 //! Windows and macOS, and distinct on case-insensitive file systems. The real name lives inside
 //! the file; a file name is never read back as a name.
 //!

@@ -1,6 +1,6 @@
 # Parity case 0029 — aggregates over blanks, negatives and whole numbers
 
-Spec X-1 (M3.3): which aggregates skip blanks, what an all-blank or empty set gives, and whether a whole-number sum stays whole. Workflow: `docs/parity.md`.
+M3.3: which aggregates skip blanks, what an all-blank or empty set gives, and whether a whole-number sum stays whole. Workflow: `docs/parity.md`.
 
 Covers: SUM, AVERAGE, COUNT, COUNTA, COUNTROWS, MIN, MAX, CALCULATE, ISBLANK
 

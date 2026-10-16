@@ -1,4 +1,4 @@
-//! Headless renderer (ADR 0007): a [`Scene`] to PNG bytes with `tiny-skia`. Text is the bundled
+//! Headless renderer: a [`Scene`] to PNG bytes with `tiny-skia`. Text is the bundled
 //! font's glyph outlines filled as paths, so clipping treats text like any other mark.
 
 use ab_glyph::{Font, OutlineCurve, PxScale, ScaleFont};

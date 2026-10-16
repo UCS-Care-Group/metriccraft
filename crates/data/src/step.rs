@@ -1,4 +1,4 @@
-//! Applied Steps (CONTEXT.md) and their execution on Arrow data: the automatic steps a Source
+//! Applied Steps (glossary) and their execution on Arrow data: the automatic steps a Source
 //! adds (*Promoted Headers*, *Changed Type*) and the shaping steps rename, remove, reorder.
 //!
 //! Parity uncertainties, to settle with M1.10 cases in the VM:
@@ -56,7 +56,7 @@ pub enum Step {
     /// `Table.PromoteHeaders`: the first row becomes the column names.
     PromotedHeaders,
     /// `Table.TransformColumnTypes`: column name → type.
-    // ponytail: no per-step Culture override yet (CONTEXT.md allows one); the Query's applies.
+    // ponytail: no per-step Culture override yet (glossary allows one); the Query's applies.
     ChangedType(Vec<(String, ColumnType)>),
     /// `Table.RenameColumns`: old name → new name.
     RenamedColumns(Vec<(String, String)>),
@@ -604,7 +604,7 @@ impl ColumnType {
     /// Converts text to this type. Empty text becomes null; text that doesn't convert is a
     /// Cell error: null here, and counted.
     // ponytail: the load path only needs the count. A Preview (M1.8) needs the error mask and
-    // message per column (ADR 0005); return them from here then.
+    // message per column; return them from here then.
     pub fn convert(self, text: &StringArray, culture: &Culture) -> (ArrayRef, usize) {
         let mut errors = 0;
         let e = &mut errors;

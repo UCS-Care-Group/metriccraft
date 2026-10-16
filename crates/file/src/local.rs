@@ -1,4 +1,4 @@
-//! Local overrides (`.local/`, ADR 0003): per-user settings beside a Project folder, never part
+//! Local overrides (`.local/`): per-user settings beside a Project folder, never part
 //! of its content. Gitignored (`.gitignore` lists `.local/`), never in the Manifest, never in a
 //! Package.
 //!

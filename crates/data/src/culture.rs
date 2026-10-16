@@ -1,5 +1,5 @@
-//! Cultures: the locale rules used to read text as numbers and dates (CONTEXT.md). Our own
-//! small table, grown on demand — no ICU (ADR 0005).
+//! Cultures: the locale rules used to read text as numbers and dates (glossary). Our own
+//! small table, grown on demand — no ICU.
 //!
 //! Parity uncertainties, to settle with M1.10 cases in the VM:
 //! - thousands separators must group by three (`1,234`); .NET-style parsing may accept `1,2,3`;

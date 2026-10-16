@@ -1,4 +1,4 @@
-//! The `.mcm` / `.mcq` text syntax (ADR 0003, M2 amendment): a generic, order-preserving document
+//! The `.mcm` / `.mcq` text syntax (M2): a generic, order-preserving document
 //! tree with a parser and a deterministic printer. Mapping the tree to the model is the caller's
 //! job; this module knows nothing about tables or queries.
 //!

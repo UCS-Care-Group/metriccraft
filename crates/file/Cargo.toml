@@ -1,6 +1,6 @@
 [package]
 name = "metriccraft-file"
-description = "Project and Package read/write (ADR 0003)."
+description = "Project and Package read/write."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

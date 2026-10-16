@@ -1,6 +1,6 @@
 # Parity case 0043 — SUMMARIZECOLUMNS over two related Tables, ORDER BY two keys
 
-Spec X-4 (M3.9): group by a one-side column (`Regions[Region]`) and a many-side column
+M3.9: group by a one-side column (`Regions[Region]`) and a many-side column
 (`Sales[Product]`); each expression evaluated in its group's filter context; groups whose
 expressions are all BLANK are dropped (South/Apple and South/Plum here); a multi-row result
 sorted by two keys, one descending. Workflow: `docs/parity.md`.

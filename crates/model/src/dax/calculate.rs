@@ -1,5 +1,5 @@
 //! `CALCULATE`, `CALCULATETABLE`, `FILTER`, `ALL`, `ALLEXCEPT`, `REMOVEFILTERS`, `RELATED` and
-//! context transition (M3.4, ADR 0006).
+//! context transition (M3.4).
 //!
 //! **`CALCULATE(expr, args…)`** runs in DAX's order:
 //! 1. every filter argument is evaluated in the caller's filter context;

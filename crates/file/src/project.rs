@@ -1,4 +1,4 @@
-//! A Project's content ↔ its files (ADR 0003 and its M2 amendment).
+//! A Project's content ↔ its files (M2).
 //!
 //! ```text
 //! project.mcraft.json        Manifest (manifest.rs)
@@ -7,7 +7,7 @@
 //!                           when there are none
 //! model/tables/<t>.mcm      table, its columns and their properties, its measures
 //! queries/<q>.mcq           query: load, culture (when not the Project's), m: block
-//! model/diagram.json        Model view layout (ADR 0003, M5): JSON, carried as opaque bytes
+//! model/diagram.json        Model view layout (M5): JSON, carried as opaque bytes
 //! report/…                  the report (M4.2): JSON parts, carried here as opaque bytes
 //! .gitignore                .cache/, .local/, .staging/ — written on create, then the user's
 //! ```
@@ -19,7 +19,7 @@
 //! **Column types.** `dataType` is the Model's; `queryType` (the Query's at the last load) is
 //! written only when it differs, i.e. when the Model overrides it.
 //!
-//! **Measures and Calculated columns** (ADR 0003, M3.6). In a `table` block, a Calculated
+//! **Measures and Calculated columns** (M3.6). In a `table` block, a Calculated
 //! column is `column 'Margin' =` and a Measure `measure 'Total Sales' =`, each followed by its
 //! DAX verbatim one level deeper than its properties (an expression block, [`syntax`]); a
 //! Calculated column then has the usual Column properties (`queryType` is the type its values

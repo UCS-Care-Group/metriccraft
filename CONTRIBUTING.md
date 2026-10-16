@@ -20,8 +20,8 @@ If you have seen Power BI's internals or source, please don't contribute code in
 ## Reporting a DAX difference
 
 The most useful issue is a **parity case**: a small synthetic dataset (inline text), the DAX query,
-and the result Power BI Desktop gave, copied out as values. See `CONTEXT.md` and
-`docs/adr/0004-parity-case-format.md`.
+and the result Power BI Desktop gave, copied out as values. See `docs/parity.md` and any case in
+`parity/observed/`.
 
 ## Code
 
@@ -37,8 +37,9 @@ and the result Power BI Desktop gave, copied out as values. See `CONTEXT.md` and
   wasm, bench). On macOS the wasm step needs LLVM's clang (`brew install llvm`, then
   `export CC_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/clang`). The full rulebook, also used by AI coding agents, is [`AGENTS.md`](AGENTS.md).
 
-Planning happens as **glossary → specification → plan**: `CONTEXT.md`, `docs/spec/`,
-`docs/plan/`, with decisions in `docs/adr/`. For anything large, please open an issue first.
+Direction is in [`ROADMAP.md`](ROADMAP.md) and the issues (the maintainers' specs and plans are
+kept outside the repository). For anything large, please open an issue first so we can agree the
+approach.
 
 ## Licence
 

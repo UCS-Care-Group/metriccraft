@@ -22,7 +22,7 @@ pub enum Run {
     Edit(fn(&mut Document, &Value) -> Result),
     /// Acts on the app itself (undo/redo; later selection and view state). Not recorded.
     App(fn(&mut App, &Value) -> Result),
-    /// A Read command (CONTEXT.md): only looks, returns its result; never changes the
+    /// A Read command (glossary): only looks, returns its result; never changes the
     /// Document, never undoable.
     Read(fn(&mut App, &Value) -> Result<Value>),
     /// `batch`: runs other commands as one undo step (`App::batch`).
@@ -37,7 +37,7 @@ pub struct Command {
     /// Ribbon location, e.g. `"Home > Queries"`; empty if the command isn't on the ribbon.
     pub ribbon: &'static str,
     pub shortcut: Option<&'static str>,
-    /// What the command takes (spec C-3), checked by [`App::run`]. Empty params must run with
+    /// What the command takes, checked by [`App::run`]. Empty params must run with
     /// defaults or return [`crate::Error::InvalidParams`], never open a dialog.
     pub params: &'static [Param],
     pub enabled: fn(&App) -> bool,
@@ -71,7 +71,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: App::can_redo,
         run: Run::App(|app, _| app.redo()),
     },
-    // The File menu (ADR 0003, spec F-1). Open and New replace the document: not undoable.
+    // The File menu. Open and New replace the document: not undoable.
     Command {
         id: "file.new",
         label: "New",
@@ -161,7 +161,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: |_| true,
         run: Run::App(file::remap_source),
     },
-    // Autosave recovery (ADR 0003; `recovery.rs`): offered at launch, as Power BI's AutoRecovery.
+    // Autosave recovery (`recovery.rs`): offered at launch, as Power BI's AutoRecovery.
     Command {
         id: "file.recover",
         label: "Recover",
@@ -194,7 +194,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: |_| true,
         run: Run::App(recovery::discard),
     },
-    // Get Data and Refresh (spec S-1, S-2); both undoable, both report what they loaded.
+    // Get Data and Refresh; both undoable, both report what they loaded.
     Command {
         id: "home.getData",
         label: "Get Data",
@@ -259,7 +259,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: load::has_stale,
         run: Run::App(load::close_apply),
     },
-    // Applied Steps (spec Q-1), with the Power Query Editor's ribbon names. Each appends a step to
+    // Applied Steps, with the Power Query Editor's ribbon names. Each appends a step to
     // `query`, checks it on the Preview rows and marks the table Stale until Close & Apply.
     Command {
         id: "transform.useFirstRowAsHeaders",
@@ -433,7 +433,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_queries,
         run: Run::Edit(model::enable_load),
     },
-    // Power Query's Queries pane, right-click a query (spec D-4, C-1; `rename.rs`). A Query and
+    // Power Query's Queries pane, right-click a query (`rename.rs`). A Query and
     // its Table share their name: renaming or deleting one does both.
     Command {
         id: "query.rename",
@@ -477,7 +477,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_queries,
         run: Run::Edit(rename::duplicate_query),
     },
-    // The model (spec D-1): Column tools and the Properties pane.
+    // The model: Column tools and the Properties pane.
     Command {
         id: "columnTools.dataType",
         label: "Data type",
@@ -598,7 +598,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_tables,
         run: Run::Edit(model::set_description),
     },
-    // The Fields pane / Data view: right-click > Rename or Delete from model (spec D-4).
+    // The Fields pane / Data view: right-click > Rename or Delete from model.
     Command {
         id: "model.moveTable",
         label: "Move table",
@@ -667,7 +667,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_tables,
         run: Run::Edit(rename::delete_table),
     },
-    // Measures and Calculated columns (spec D-3; `expression.rs`): Modeling > Calculations,
+    // Measures and Calculated columns (`expression.rs`): Modeling > Calculations,
     // the formula bar, and the Fields pane's right-click > Rename / Delete from model.
     Command {
         id: "modeling.newMeasure",
@@ -764,7 +764,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: expression::has_model_tables,
         run: Run::App(expression::rename_measure),
     },
-    // Relationships (spec D-2): Modeling > Manage relationships.
+    // Relationships: Modeling > Manage relationships.
     Command {
         id: "modeling.newRelationship",
         label: "New relationship",
@@ -863,7 +863,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_tables,
         run: Run::App(relationship::autodetect),
     },
-    // The report (spec R-1; `report.rs`): Pages and Visuals, all undoable.
+    // The report (`report.rs`): Pages and Visuals, all undoable.
     Command {
         id: "insert.newPage",
         label: "New page",
@@ -1255,7 +1255,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: |_| true,
         run: Run::App(recovery::set_minutes),
     },
-    // Read commands (spec C-4, ADR 0009): for programs (CLI, Control channel, MCP), not the
+    // Read commands: for programs (CLI, Control channel, MCP), not the
     // ribbon. They change nothing and are never undoable.
     Command {
         id: "dax.evaluate",
@@ -1303,7 +1303,7 @@ pub static COMMANDS: &[Command] = &[
         enabled: has_pages,
         run: Run::Read(read::render),
     },
-    // A Batch (CONTEXT.md): one undo step for many commands, labelled with their Origin.
+    // A Batch (glossary): one undo step for many commands, labelled with their Origin.
     Command {
         id: "batch",
         label: "Batch",

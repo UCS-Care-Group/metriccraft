@@ -1,6 +1,6 @@
 # Parity case 0040 — BLANK in operators and comparisons
 
-Spec X-2 (M3.2): follow-up to case 0001's BLANK rows: subtraction, negation, concatenation, ordering and logical operators. Workflow: `docs/parity.md`.
+M3.2: follow-up to case 0001's BLANK rows: subtraction, negation, concatenation, ordering and logical operators. Workflow: `docs/parity.md`.
 
 Covers: BLANK, -, &, <, >, =, &&, ||, NOT
 

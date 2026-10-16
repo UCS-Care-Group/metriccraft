@@ -1,4 +1,4 @@
-//! A load's progress and cancel switch (spec U-3, ADR 0008), shared with the thread that shows
+//! A load's progress and cancel switch, shared with the thread that shows
 //! it: rows read per Query so far, and a flag the load checks on every batch it reads.
 
 use std::sync::atomic::{AtomicBool, Ordering};

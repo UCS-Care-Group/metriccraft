@@ -1,6 +1,6 @@
 # Parity case 0044 — aggregates over text, boolean and date columns
 
-Spec X-1 (M3.3): which aggregates accept text, boolean and date columns, and what they return.
+M3.3: which aggregates accept text, boolean and date columns, and what they return.
 Errors are wrapped in ISERROR so one unsupported form doesn't fail the whole query. Workflow:
 `docs/parity.md`.
 

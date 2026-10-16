@@ -12,7 +12,7 @@
 //! Query: reason `DataFormat.Error`, message `Invalid cell value '#REF!'.`). A date cell outside
 //! Excel's range is a Cell error too; its message is ours (parity uncertainty).
 //!
-//! **Hostile files** (spec N-1, N-4). [`Workbook::open`] reads every XML part calamine will
+//! **Hostile files**. [`Workbook::open`] reads every XML part calamine will
 //! parse (relationships, workbook, shared strings, styles, each sheet — or with
 //! [`Workbook::open_item`], only the sheet read) once itself first, with quick-xml through a
 //! metered reader: no single XML event (tag or text run) may exceed [`MAX_EVENT`] bytes, and

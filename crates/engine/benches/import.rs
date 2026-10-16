@@ -1,4 +1,4 @@
-//! Import benches (spec N-2, N-8; ADR 0005). Run via `cargo xtask bench`, which generates the
+//! Import benches. Run via `cargo xtask bench`, which generates the
 //! files and lists them in `METRICCRAFT_BENCH_IMPORTS` (lines of `<name>\t<path>`); without it only
 //! the idle bench runs.
 //!
@@ -10,7 +10,7 @@
 //! - `BENCHMEM <name>/steady <bytes>`: RSS afterwards, the table held (`VmRSS`);
 //! - `BENCHMEM <name>/table <bytes>`: the loaded table's column buffers.
 //!
-//! `engine/idle/steady` is a new App's RSS (N-8's idle floor before there is a window). Memory
+//! `engine/idle/steady` is a new App's RSS (the idle floor before there is a window). Memory
 //! comes from `/proc/self/status`; elsewhere only the time is printed.
 
 use std::process::Command;

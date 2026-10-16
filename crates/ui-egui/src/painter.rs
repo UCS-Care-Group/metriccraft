@@ -1,4 +1,4 @@
-//! The vector Scene painter (ADR 0008): a Visual's draw commands (ADR 0007) as egui shapes,
+//! The vector Scene painter: a Visual's draw commands as egui shapes,
 //! scaled by the canvas zoom. Layout stays at the Visual's logical size; only painting scales,
 //! so text stays sharp at any zoom. Text uses the bundled Inter the layout measured with.
 

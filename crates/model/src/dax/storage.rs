@@ -1,8 +1,8 @@
-//! The storage tier (ADR 0006): the model's Tables as encoded column readers, row masks
+//! The storage tier: the model's Tables as encoded column readers, row masks
 //! ([`Bitset`]), the filter context's filters, and the **storage scan** — one pass over one
 //! Table under a row mask, checking the cancel flag between scans and every [`CHUNK`] rows.
 //!
-//! Columns are read in their loaded encoding (ADR 0005): dictionary text by code (filters on
+//! Columns are read in their loaded encoding: dictionary text by code (filters on
 //! text are code bitsets, a Relationship key match is decided once per dictionary entry), narrow
 //! integers and fixed decimals widened per value.
 //!
@@ -454,7 +454,7 @@ pub enum Allowed {
     Values { keys: HashSet<Key>, blank: bool },
 }
 
-/// One filter of a filter context (ADR 0006): a table over a set of columns.
+/// One filter of a filter context: a table over a set of columns.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Filter {
     /// Rows of Table `table` whose column `column` holds an allowed value.

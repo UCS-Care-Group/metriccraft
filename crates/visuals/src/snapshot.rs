@@ -1,4 +1,4 @@
-//! Snapshot tests (ADR 0007): a Scene's text form is compared with a committed file; PNGs are
+//! Snapshot tests: a Scene's text form is compared with a committed file; PNGs are
 //! written only for eyeballing, to the gitignored `observations/snapshots/`.
 //!
 //! - `MCRAFT_SNAPSHOT_UPDATE=1` rewrites the committed text instead of comparing.

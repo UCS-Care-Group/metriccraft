@@ -1,6 +1,6 @@
 # Visual parity case v0001 — matrix subtotals of a non-additive measure
 
-Spec R-2, CONTEXT.md **Total** (M4.6): a matrix's subtotals are the measure over the whole group,
+M4.6, glossary **Total**: a matrix's subtotals are the measure over the whole group,
 not the sum of its rows. `Customers` (DISTINCTCOUNT) at North is 2 (Ann, Bob), though its
 products show 2 and 1. Workflow: `docs/parity.md` (visual cases).
 

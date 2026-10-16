@@ -1,4 +1,4 @@
-//! The Data cache (ADR 0003 and its M2 amendment): a Project's imported data, beside its
+//! The Data cache (M2): a Project's imported data, beside its
 //! definitions, so opening doesn't re-import.
 //!
 //! ```text

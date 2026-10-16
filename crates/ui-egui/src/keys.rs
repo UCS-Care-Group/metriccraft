@@ -1,4 +1,4 @@
-//! Keyboard navigation beyond Tab (spec U-2, A-1): F6 / Shift+F6 cycle focus Ribbon → View →
+//! Keyboard navigation beyond Tab: F6 / Shift+F6 cycle focus Ribbon → View →
 //! Panes, and key tips: Alt pressed and released alone shows a letter on each Ribbon tab;
 //! typing one opens that tab and shows a letter on each of its buttons; typing one of those runs
 //! it. Esc steps back.

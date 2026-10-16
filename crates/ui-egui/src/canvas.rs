@@ -1,4 +1,4 @@
-//! The report canvas (spec R-1, R-3, U-4): the current Page with its Visuals painted from the
+//! The report canvas: the current Page with its Visuals painted from the
 //! engine's Scenes, selected by click, moved and resized by mouse (previewed here, one command on
 //! release) and arrow keys (merged into one undo step), clicked through to cross-filter.
 

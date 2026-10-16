@@ -1,4 +1,4 @@
-//! Hit-testing and dimming over a [`Scene`] (M4.5, ADR 0007): what a click at a point picks,
+//! Hit-testing and dimming over a [`Scene`] (M4.5): what a click at a point picks,
 //! and a Selection's source Visual with its unselected marks faded. Both read the marks' [`Tag`]s,
 //! so every renderer agrees on what a click selects.
 

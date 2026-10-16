@@ -1,4 +1,4 @@
-//! Shaping cases (ADR 0004, "Shaping cases"): datasets given as CSV files, loaded through our
+//! Shaping cases ("Shaping cases"): datasets given as CSV files, loaded through our
 //! real Get Data path, so type detection, Culture parsing, Cell errors, Applied Steps and the M
 //! printer are checked against Power BI before there is a DAX evaluator.
 //!
@@ -15,7 +15,7 @@
 //! (Power BI took the case's M unchanged), `Load errors <Query>` (the Cell error count Close &
 //! Apply reports) and `Column order`.
 //!
-//! **Guesses the Observed pastes decide** (ADR 0004 open threads): dates and datetimes copy as
+//! **Guesses the Observed pastes decide** (open questions): dates and datetimes copy as
 //! `dd/MM/yyyy HH:mm:ss` (UK regional settings; a date is a datetime at midnight in DAX);
 //! `ORDER BY` puts blanks first and compares text case-insensitively; NaN copies as `NaN`.
 

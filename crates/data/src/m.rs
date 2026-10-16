@@ -1,4 +1,4 @@
-//! Queries ↔ Power Query's own M (ADR 0005): a Source and its Applied Steps print as the
+//! Queries ↔ Power Query's own M: a Source and its Applied Steps print as the
 //! `let … in` Power Query writes, which pastes into Power BI's Advanced Editor, and parse back.
 //! M that isn't one of these forms is an error naming the line; there are no opaque steps.
 //!

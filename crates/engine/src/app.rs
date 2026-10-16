@@ -9,7 +9,7 @@ use crate::{COMMANDS, Command, Error, LoadReport, Result, Run};
 /// Most commands in one Batch (hostile input: a Batch is a command's params).
 pub const MAX_BATCH: usize = 10_000;
 
-/// Who ran a command (CONTEXT.md: Origin), shown on undo labels and in the status bar.
+/// Who ran a command (glossary: Origin), shown on undo labels and in the status bar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Origin {
     #[default]
@@ -53,7 +53,7 @@ pub struct Document {
     pub tables: Vec<Table>,
     /// Queries; each one's result is the table of the same name in `tables`.
     pub queries: Vec<Query>,
-    /// Queries edited since their table loaded (Stale, CONTEXT.md): the table is still the
+    /// Queries edited since their table loaded (Stale, glossary): the table is still the
     /// previous result until Close & Apply or Refresh.
     pub stale: BTreeSet<String>,
     /// Queries with *Enable load* off: no Table, but they can still be merged from.
@@ -82,7 +82,7 @@ pub const UNDO_LIMIT: usize = 100;
 pub struct App {
     pub(crate) doc: Document,
     commands: &'static [Command],
-    // ponytail: whole-Document snapshots — cheap because table columns are shared (ADR 0005).
+    // ponytail: whole-Document snapshots — cheap because table columns are shared.
     // Switch to inverse operations if cloning a Document shows up in benchmarks.
     undo: VecDeque<Step>,
     redo: Vec<Step>,
@@ -92,7 +92,7 @@ pub struct App {
     batching: bool,
     /// What the last Get Data or Refresh loaded (not part of the Document: not undone).
     last_load: Option<LoadReport>,
-    /// The memory cap for loaded data (spec N-4), counted over the document, undo and redo.
+    /// The memory cap for loaded data, counted over the document, undo and redo.
     memory_cap: usize,
     /// A warning from the last command, which still succeeded (e.g. a Relationship created
     /// inactive). Not part of the Document.
@@ -198,12 +198,12 @@ impl App {
         }
     }
 
-    /// The memory cap for loaded data (spec N-4): half of physical RAM unless set.
+    /// The memory cap for loaded data: half of physical RAM unless set.
     pub fn memory_cap(&self) -> usize {
         self.memory_cap
     }
 
-    /// Sets the memory cap for loaded data (spec N-4); checked by the next load.
+    /// Sets the memory cap for loaded data; checked by the next load.
     pub fn set_memory_cap(&mut self, bytes: usize) {
         self.memory_cap = bytes;
     }
@@ -269,7 +269,7 @@ impl App {
         Ok(Value::Null)
     }
 
-    /// Runs a Batch (CONTEXT.md): `commands`, a list of `{"run": id, "params": …}`, all or
+    /// Runs a Batch (glossary): `commands`, a list of `{"run": id, "params": …}`, all or
     /// nothing, as one undo step labelled `label` (default: how many changes). Fails before
     /// running anything on a step that can't be batched; a failing step undoes the ones before it.
     fn batch(&mut self, origin: Origin, params: &Value) -> Result<Value> {

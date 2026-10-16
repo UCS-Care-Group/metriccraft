@@ -37,7 +37,7 @@ fn err(message: String) -> Error {
 /// Joins `right` (the other Query's result) into `left` for the Query `table`. The output may use
 /// at most `limit` bytes; a larger result (e.g. duplicate keys multiplying rows) is
 /// [`Error::MemoryCap`] naming `table`, found by counting before anything is allocated.
-// ponytail: the hash table is always built on the other table. ADR 0005's "holds only its smaller
+// ponytail: the hash table is always built on the other table. The design's "holds only its smaller
 // side" would build on whichever is smaller; worth it once merges show up in memory benches.
 pub(crate) fn join(
     left: &RecordBatch,

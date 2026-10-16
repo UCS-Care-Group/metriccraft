@@ -1,4 +1,4 @@
-//! The File menu (ADR 0003): New, Open, Save and Save As, over `metriccraft_file`.
+//! The File menu: New, Open, Save and Save As, over `metriccraft_file`.
 //!
 //! The Document maps to an `metriccraft_file::Project` (Queries, Enable load, Model, Project
 //! culture, and the report as JSON parts, `report/json.rs`); what the files held beyond it (unknown content) and where they live stay in
@@ -10,11 +10,11 @@
 //! **Data cache** (`metriccraft_file::cache`, M2.6). Saving writes each Table's data (as loaded,
 //! after Model type overrides) as Parquet, with its provenance (`Document::provenance`) as
 //! metadata. In a Project folder only what changed since the last save there is written: data
-//! by buffer identity (columns are immutable and shared, ADR 0005, so changed data is different
+//! by buffer identity (columns are immutable and shared, so changed data is different
 //! buffers; [`FileState`] keeps the buffer set last written), metadata by its bytes. A Package
 //! is written whole, with the cache unless `file.saveAs` is given `data: false`.
 //!
-//! Calculated columns are never in the cache (ADR 0006): saving leaves them out, and opening
+//! Calculated columns are never in the cache: saving leaves them out, and opening
 //! computes them again over the cached data (`expression.rs`).
 //!
 //! Opening loads each Table from the cache, within the memory cap, without reading any Source:
@@ -110,7 +110,7 @@ pub(crate) struct Saved {
 }
 
 /// Which data a table holds: its columns and their buffers (address, size). Columns are
-/// immutable and shared (ADR 0005), so different data means different buffers.
+/// immutable and shared, so different data means different buffers.
 #[derive(Clone, Debug, PartialEq)]
 struct DataKey {
     columns: Vec<String>,
@@ -238,7 +238,7 @@ impl App {
             let Some(table) = doc.tables.iter().find(|t| t.name() == model.name) else {
                 continue;
             };
-            // Calculated columns are computed on open, never cached (ADR 0006).
+            // Calculated columns are computed on open, never cached.
             let table = if model.has_calculated() {
                 &table
                     .without_columns(|n| model.column(n).is_some_and(|c| c.is_calculated()))

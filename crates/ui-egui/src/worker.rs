@@ -1,6 +1,6 @@
-//! The engine behind the window (ADR 0008): one worker thread owns the [`App`]; the UI sends it
+//! The engine behind the window: one worker thread owns the [`App`]; the UI sends it
 //! commands and reads only the [`Snapshot`] it publishes after each one, so a long Get Data or
-//! Refresh never freezes the window. On wasm (no threads, spec N-5) the same interface runs
+//! Refresh never freezes the window. On wasm (no threads) the same interface runs
 //! commands inline.
 
 use std::path::PathBuf;
@@ -54,7 +54,7 @@ impl Snapshot {
 }
 
 /// The current Page drawn with the default Report theme.
-// ponytail: en-US formatting until Projects carry a Culture (spec R-4).
+// ponytail: en-US formatting until Projects carry a Culture.
 fn draw(app: &mut App) -> (String, Vec<(String, Scene)>) {
     let Some(page) = crate::views::current_page(app.document()).map(|p| p.id.clone()) else {
         return Default::default();

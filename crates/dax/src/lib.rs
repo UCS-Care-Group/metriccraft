@@ -1,10 +1,10 @@
 //! DAX lexer, parser and AST.
 //!
-//! Layer L1 — see `docs/plan/0001-mvp.md` §1.
+//! Layer L1 — see the `LAYERS` table in `xtask/src/main.rs`.
 //!
 //! Expressions (Measures, Calculated columns) and DAX queries (`DEFINE`, `EVALUATE`, `ORDER BY`).
 //! Every node carries the byte [`Span`] it was parsed from, so the evaluator can locate its errors
-//! (spec X-3). Names (functions, keywords) are case-insensitive; the AST keeps the spelling the
+//!. Names (functions, keywords) are case-insensitive; the AST keeps the spelling the
 //! author wrote. Parentheses are not kept: the printer adds them where precedence needs them.
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! The Ribbon (CONTEXT.md): tabs of command buttons, built from each command's `ribbon` path
+//! The Ribbon (glossary): tabs of command buttons, built from each command's `ribbon` path
 //! (`"Home > Data"` is the Data group of the Home tab). Every button runs a command.
 
 use egui::{RichText, Ui};

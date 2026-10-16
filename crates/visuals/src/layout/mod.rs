@@ -1,4 +1,4 @@
-//! Layout: a Visual's [`QueryResult`] into a [`Scene`] (M4.3–M4.5, ADR 0007). This module holds
+//! Layout: a Visual's [`QueryResult`] into a [`Scene`] (M4.3–M4.5). This module holds
 //! what every Visual shares: the frame and title, value text, auto display units and the error
 //! state; each Visual type has its own submodule.
 
@@ -24,7 +24,7 @@ pub const PAD: f32 = 8.0;
 #[derive(Clone, Copy, Debug)]
 pub struct Context<'a> {
     pub theme: &'a Theme,
-    /// The Project's Culture, for formatting values (spec R-4).
+    /// The Project's Culture, for formatting values.
     pub locale: &'a Locale,
 }
 
@@ -140,7 +140,7 @@ pub fn frame(visual: &Visual, result: Option<&QueryResult>, cx: &Context<'_>) ->
     (s, top)
 }
 
-/// The whole Visual as an error (X-3, grill Q16): the frame and the message, wrapped to fit.
+/// The whole Visual as an error (grill Q16): the frame and the message, wrapped to fit.
 pub fn error_scene(visual: &Visual, message: &str, cx: &Context<'_>) -> Scene {
     let (mut s, top) = frame(visual, None, cx);
     let size = cx.theme.label_size;

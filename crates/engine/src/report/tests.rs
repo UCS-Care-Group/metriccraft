@@ -1473,7 +1473,7 @@ fn fresh_reports_make_different_ids() {
     assert_ne!(a.new_id(), b.new_id());
 }
 
-// ---- UI state in the Project (M5.0, ADR 0003 amendment) ----
+// ---- UI state in the Project (M5.0) ----
 
 #[test]
 fn current_page_is_saved_survives_undo_and_does_not_dirty() {

@@ -1,6 +1,6 @@
 # Parity case 0039 — operator precedence
 
-Spec X-2: `^` against unary minus, associativity of `^`, `NOT` against `&&`, `&` against `+`. Workflow: `docs/parity.md`.
+`^` against unary minus, associativity of `^`, `NOT` against `&&`, `&` against `+`. Workflow: `docs/parity.md`.
 
 Covers: ^, -, NOT, &&, ||, &, +
 

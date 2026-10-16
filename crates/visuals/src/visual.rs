@@ -1,11 +1,11 @@
-//! Visual definitions (CONTEXT.md: Visual, Field well, Field): what a report file stores for a
+//! Visual definitions (glossary: Visual, Field well, Field): what a report file stores for a
 //! Visual and what its query and layout read. No data, no state of the Page.
 
 use std::collections::BTreeMap;
 
 use crate::query::{MAX_AXIS_FIELDS, MAX_VALUE_FIELDS};
 
-/// The R-2 visual types. Ids are what report files and commands use.
+/// The v0.1 visual types. Ids are what report files and commands use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum VisualType {
     Table,
@@ -114,7 +114,7 @@ impl Well {
     }
 }
 
-/// A Field: a Column or a Measure of the Model, by name (renames rewrite it, spec D-4). A Column
+/// A Field: a Column or a Measure of the Model, by name (renames rewrite it). A Column
 /// in a Values well is an Implicit measure.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FieldRef {
@@ -190,7 +190,7 @@ impl Default for Format {
 /// Fields per well, sort and format.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Visual {
-    /// Short stable id, unique in its Page (ADR 0003).
+    /// Short stable id, unique in its Page.
     pub id: String,
     pub kind: VisualType,
     pub x: i32,

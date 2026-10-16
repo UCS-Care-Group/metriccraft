@@ -1,4 +1,4 @@
-//! The `.mcraft` Package (ADR 0003): a zip of a Project's files, MIME type
+//! The `.mcraft` Package: a zip of a Project's files, MIME type
 //! [`MIME`].
 //!
 //! **Writing** is deterministic: entries in path order, every timestamp 1980-01-01 00:00, Unix

@@ -1,6 +1,6 @@
 # Parity case 0042 — FORMAT: named and custom codes, four locales
 
-Spec R-4 (M3.8): `FORMAT` named formats and custom numeric and date/time codes, with the report's
+M3.8: `FORMAT` named formats and custom numeric and date/time codes, with the report's
 regional settings (English (United Kingdom)) and the `locale_name` argument for en-US, de-DE and
 fr-FR. If a column errors, note the message verbatim and remove it so the rest can be copied.
 Workflow: `docs/parity.md`.

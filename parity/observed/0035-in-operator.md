@@ -1,6 +1,6 @@
 # Parity case 0035 — `IN` with table constructors
 
-Spec X-1/X-4 (M3.5): `IN` on single values and row tuples; text matching ignores case; BLANK against 0. Workflow: `docs/parity.md`.
+M3.5: `IN` on single values and row tuples; text matching ignores case; BLANK against 0. Workflow: `docs/parity.md`.
 
 Covers: IN, CALCULATE, SUM
 

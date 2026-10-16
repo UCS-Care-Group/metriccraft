@@ -1,4 +1,4 @@
-//! DAX values (ADR 0006): the scalar a DAX expression evaluates to, with DAX's type promotion,
+//! DAX values: the scalar a DAX expression evaluates to, with DAX's type promotion,
 //! checked arithmetic and BLANK rules.
 //!
 //! - **Promotion.** Integer → Currency → Decimal: an operation on two values takes the wider
@@ -519,7 +519,7 @@ impl Value {
         }
     }
 
-    /// The value as Power BI copies it out of a query result (ADR 0004): BLANK empty,
+    /// The value as Power BI copies it out of a query result: BLANK empty,
     /// `true`/`false`, numbers shortest round-trip through a double without an exponent below
     /// 10²¹ (parity case 0037), `Infinity`, dates as `Fri, 01 Mar 2024 00:00:00` (0041).
     pub fn copy_text(&self) -> String {

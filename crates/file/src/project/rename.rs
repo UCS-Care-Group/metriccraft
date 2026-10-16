@@ -1,4 +1,4 @@
-//! Unknown content follows a rename (spec D-4). [`Preserved`] is keyed by object name, so a
+//! Unknown content follows a rename. [`Preserved`] is keyed by object name, so a
 //! renamed Table, Query or Column would otherwise lose the unknown items read with it.
 //!
 //! **Copied, not moved.** The app keeps [`Preserved`] beside the Document, outside undo: after

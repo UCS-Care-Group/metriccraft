@@ -1,4 +1,4 @@
-//! The Power Query editor (spec Q-2, Q-3, U-3; ADR 0008): its own window on desktop (a window
+//! The Power Query editor: its own window on desktop (a window
 //! inside the app where there is only one, on the web). Queries on the left, the Preview of the
 //! selected Applied Step in the middle, Applied Steps on the right, the Query's M below. Its
 //! Ribbon runs the transform commands on the selected Query (and column).

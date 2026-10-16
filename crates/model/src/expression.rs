@@ -1,6 +1,6 @@
-//! Measures and Calculated columns (CONTEXT.md; ADR 0003's M3.6 amendment; ADR 0006): the DAX
+//! Measures and Calculated columns (glossary): the DAX
 //! the Model holds, the rules for their names, the dependencies between them, and the rewrite of
-//! their DAX when a Table, Column or Measure is renamed (spec D-4).
+//! their DAX when a Table, Column or Measure is renamed.
 //!
 //! - **Text is kept verbatim.** A Measure's or Calculated column's DAX is stored as written and
 //!   parsed when needed; one that doesn't parse is kept, with its error ([`Measure::parse`]).

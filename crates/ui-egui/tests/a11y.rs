@@ -1,4 +1,4 @@
-//! The A-1 audit: in every View, Pane and dialog, every control a keyboard or screen-reader
+//! The accessibility audit: in every View, Pane and dialog, every control a keyboard or screen-reader
 //! user can act on carries a label that says what it does (words, not just a symbol).
 
 use std::time::{Duration, Instant};

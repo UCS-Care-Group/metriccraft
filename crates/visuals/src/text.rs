@@ -1,4 +1,4 @@
-//! Text metrics over the bundled Inter (ADR 0007), so layout measures what renderers draw.
+//! Text metrics over the bundled Inter, so layout measures what renderers draw.
 //! No shaping: one glyph per char, advances plus pair kerning.
 
 use std::sync::OnceLock;
@@ -7,7 +7,7 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 
 use crate::draw::Weight;
 
-/// Inter Regular (OFL 1.1), the one bundled font (ADR 0007).
+/// Inter Regular (OFL 1.1), the one bundled font.
 pub static REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
 /// Inter Bold.
 pub static BOLD: &[u8] = include_bytes!("../fonts/Inter-Bold.ttf");

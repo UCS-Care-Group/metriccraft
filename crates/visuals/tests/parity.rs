@@ -1,4 +1,4 @@
-//! The visual parity gate (ADR 0004, M4.6): every case parses and runs on our side, and the
+//! The visual parity gate (M4.6): every case parses and runs on our side, and the
 //! ratchet in `parity/visuals/passing.txt` holds.
 
 use std::path::Path;

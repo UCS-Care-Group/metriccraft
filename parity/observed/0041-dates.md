@@ -1,6 +1,6 @@
 # Parity case 0041 — date arithmetic
 
-Spec X-2 (M3.2): dates are numbers of days; adding, subtracting and comparing them. Workflow: `docs/parity.md`.
+M3.2: dates are numbers of days; adding, subtracting and comparing them. Workflow: `docs/parity.md`.
 
 Covers: MIN, MAX, +, -, <, COUNTROWS
 

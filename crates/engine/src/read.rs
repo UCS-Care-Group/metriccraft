@@ -1,4 +1,4 @@
-//! Read commands (CONTEXT.md, spec C-4): `dax.evaluate`, `document.describe`, `page.render`.
+//! Read commands (glossary): `dax.evaluate`, `document.describe`, `page.render`.
 //! They only look: never change the Document, never undoable. What a program (CLI, Control
 //! channel, MCP) asks before and after it edits.
 
@@ -131,7 +131,7 @@ fn iso(d: f64) -> String {
 }
 
 /// `document.describe`: what the open Project holds, and `seq`, which changes with every change
-/// to the Document (clients poll it, ADR 0009).
+/// to the Document (clients poll it).
 pub(crate) fn describe(app: &mut App, _: &Value) -> Result<Value> {
     let doc = &app.doc;
     let tables: Vec<Value> = doc
@@ -247,7 +247,7 @@ pub(crate) fn render(app: &mut App, p: &Value) -> Result<Value> {
         (None, None) => 1.0,
     };
     let theme = metriccraft_visuals::Theme::light();
-    // ponytail: en-US formatting until Projects carry a Culture (spec R-4), as the window does.
+    // ponytail: en-US formatting until Projects carry a Culture, as the window does.
     let cx = Context {
         theme: &theme,
         locale: &metriccraft_core::EN_US,

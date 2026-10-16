@@ -1,6 +1,6 @@
 # Parity case 0033 — IF and SWITCH with BLANK and missing branches
 
-Spec X-1 (M3.5): a missing else is BLANK; a BLANK condition is false; SWITCH with no match and no default is BLANK; untaken branches are not evaluated. Workflow: `docs/parity.md`.
+M3.5: a missing else is BLANK; a BLANK condition is false; SWITCH with no match and no default is BLANK; untaken branches are not evaluated. Workflow: `docs/parity.md`.
 
 Covers: IF, SWITCH, BLANK, ISBLANK, /
 

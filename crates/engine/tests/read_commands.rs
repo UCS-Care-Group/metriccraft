@@ -1,4 +1,4 @@
-//! Read commands, Batch and Origin (spec C-1, C-4; ADR 0009).
+//! Read commands, Batch and Origin.
 
 use metriccraft_engine::{App, Error, Origin};
 use serde_json::{Value, json};

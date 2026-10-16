@@ -1,4 +1,4 @@
-//! Selection and cross-filter (CONTEXT.md: Selection; spec R-2, R-3; ADR 0007).
+//! Selection and cross-filter (glossary: Selection).
 //!
 //! - **Slicer selections** are the Page's (`Page::selections`): saved, undoable, changed by
 //!   `slicer.select`. Items are stored as JSON (text, number, logical, null for BLANK), checked
@@ -646,7 +646,7 @@ impl App {
         Arc::clone(&self.cancel)
     }
 
-    /// The running load's progress (rows read per Query) and cancel switch (spec U-3): read
+    /// The running load's progress (rows read per Query) and cancel switch: read
     /// and cancel it from another thread. Each Get Data, Refresh and Close & Apply resets it; a
     /// cancelled one fails, changing nothing.
     pub fn load_progress(&self) -> Arc<metriccraft_data::Progress> {

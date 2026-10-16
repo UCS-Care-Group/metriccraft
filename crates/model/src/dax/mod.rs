@@ -1,4 +1,4 @@
-//! The DAX evaluator (ADR 0006): a **formula engine** ([`eval`]) interpreting the
+//! The DAX evaluator: a **formula engine** ([`eval`]) interpreting the
 //! `metriccraft_dax` AST, over a **storage tier** ([`storage`]) that scans the encoded columns of
 //! one Table under a row mask.
 //!
@@ -6,7 +6,7 @@
 //!   allowed values (dictionary-code bitsets for text) or a row set of one Table. A Table's
 //!   visible rows ([`eval::Evaluator::mask`]) are its own filters ANDed with the filters of the
 //!   Tables it reaches through active Relationships (many → one), propagated one → many as a
-//!   key semijoin: the *expanded table* rule, single direction (spec D-2).
+//!   key semijoin: the *expanded table* rule, single direction.
 //! - **Row context**: a stack of (Table, row) frames; `T[C]` reads the innermost frame on `T`.
 //!   `CALCULATE` and Measure references apply context transition ([`calculate`]): each frame
 //!   becomes equality filters on its columns. A row-set filter (a table filter such as
@@ -51,7 +51,7 @@ pub const MAX_EVAL_DEPTH: usize = 512;
 /// cost more stack than usual, so evaluation fits a 1 MiB stack (a wasm build's, a host
 /// thread's) with room left for the work at the deepest level.
 pub const MAX_EVAL_STACK: usize = 640 << 10;
-/// Measures referencing Measures, deepest chain (ADR 0006).
+/// Measures referencing Measures, deepest chain.
 pub const MAX_MEASURE_CHAIN: usize = 64;
 /// Relationships followed in a row (a chain's depth, not the Tables reached) when propagating
 /// filters.
@@ -75,7 +75,7 @@ pub enum ErrorKind {
     Cancelled,
 }
 
-/// A DAX error with where in the expression it happened (spec X-3).
+/// A DAX error with where in the expression it happened.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DaxError {
     pub kind: ErrorKind,

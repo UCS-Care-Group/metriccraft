@@ -41,7 +41,7 @@ impl View {
     }
 }
 
-/// A Pane (CONTEXT.md): a dockable side panel.
+/// A Pane (glossary): a dockable side panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
     Filters,

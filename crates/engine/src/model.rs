@@ -1,4 +1,4 @@
-//! Model commands (spec D-1): Enable load, and the Table and Column properties of Power BI's
+//! Model commands: Enable load, and the Table and Column properties of Power BI's
 //! Column tools ribbon and Properties pane. All are [`Run::Edit`](crate::Run::Edit): undoable,
 //! and a change that fails changes nothing. Renames and deletes are in `rename.rs`.
 //!

@@ -1,4 +1,4 @@
-//! The Manifest (`project.mcraft.json`, CONTEXT.md) and Format versions (ADR 0003).
+//! The Manifest (`project.mcraft.json`, glossary) and Format versions.
 //!
 //! ```json
 //! {

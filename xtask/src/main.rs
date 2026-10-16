@@ -15,7 +15,7 @@ mod memcap;
 
 type Result<T = ()> = std::result::Result<T, String>;
 
-/// Layer of every workspace crate (`docs/plan/0001-mvp.md` §1). A crate may depend only on
+/// Layer of every workspace crate. A crate may depend only on
 /// crates in the same or a lower layer. A crate missing here fails `layers`.
 const LAYERS: &[(&str, u8)] = &[
     ("metriccraft-core", 0),
@@ -149,7 +149,7 @@ fn test_with(args: &[String]) -> Result {
     }
 }
 
-/// Runs every snapshot test (ADR 0007), writing PNGs to `observations/snapshots/` to look at;
+/// Runs every snapshot test, writing PNGs to `observations/snapshots/` to look at;
 /// `--update` re-records the committed text snapshots.
 fn snapshot(update: bool) -> Result {
     let png = std::env::current_dir()
@@ -169,7 +169,7 @@ fn snapshot(update: bool) -> Result {
     Ok(())
 }
 
-/// Spec N-8 budgets for the blank desktop app (ADR 0008).
+/// Budgets for the blank desktop app.
 const COLD_START_MS: u128 = 1000;
 /// Idle memory of the app's own (anonymous resident pages): what Power BI's ~451 MB was read
 /// as (Task Manager's private working set). Shared libraries, the graphics driver's above all,
@@ -178,7 +178,7 @@ const IDLE_PRIVATE_BYTES: u64 = 100 << 20;
 
 /// Starts the release desktop app on a fresh profile (`MCRAFT_UI_BENCH=1`, see its `Bench`):
 /// cold start is spawn to first frame on screen, then idle memory after two seconds; both
-/// against the N-8 budgets. Needs a display: under `xvfb-run` where there is none, skipped
+/// against the budgets. Needs a display: under `xvfb-run` where there is none, skipped
 /// where neither is available (so it can sit in any CI job).
 fn ui_bench() -> Result {
     let display = ["DISPLAY", "WAYLAND_DISPLAY"]
@@ -387,7 +387,7 @@ fn assets() -> Result {
     }))
 }
 
-/// Widget calls whose text must come from the string catalogue (spec A-2).
+/// Widget calls whose text must come from the string catalogue.
 const WIDGET_CALLS: &[&str] = &[
     "label(",
     "button(",
@@ -501,7 +501,7 @@ fn check_assets<'a>(
 
 /// A result more than this factor slower than the machine's baseline fails.
 const BENCH_TOLERANCE: f64 = 1.25;
-/// A result using more than this factor of the baseline's memory fails (ADR 0005).
+/// A result using more than this factor of the baseline's memory fails.
 const BENCH_MEMORY_TOLERANCE: f64 = 1.10;
 /// Rows of the import benches' files: Parquet, CSV, XLSX (`docs/bench.md`).
 const BENCH_IMPORTS: [(&str, usize); 3] =
@@ -510,7 +510,7 @@ const BENCH_IMPORTS: [(&str, usize); 3] =
 /// Runs every `harness = false` bench, compares with `bench/<machine>.json` and, with `--save`,
 /// records the results as that machine's new baseline (merged into it, so a default run keeps
 /// the `--reference` results). Machines without a baseline only report. `--reference` adds the
-/// 10M-row Parquet import (spec N-2), from `observations/reference/`.
+/// 10M-row Parquet import, from `observations/reference/`.
 fn bench(save: bool) -> Result {
     let reference = std::env::args().any(|a| a == "--reference");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -657,7 +657,7 @@ fn machine_info(id: &str) -> serde_json::Value {
 
 // ---- parity ----
 
-/// Scoreboard of parity Checks per covered tag (ADR 0004). `--update` rewrites
+/// Scoreboard of parity Checks per covered tag. `--update` rewrites
 /// `parity/passing.txt` after an intended change; the gate itself is the `metriccraft-model` test.
 fn parity(update: bool, pending: bool) -> Result {
     let root = Path::new("parity");

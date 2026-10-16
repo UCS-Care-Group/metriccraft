@@ -1,7 +1,7 @@
 # Observing Power BI Desktop (parity workflow)
 
-How expected values for **Parity cases** (`CONTEXT.md`) are obtained. The storage format for cases
-is ADR 0004: one markdown file per case in `parity/observed/`.
+How expected values for **Parity cases** are obtained. Each case is one markdown file in
+`parity/observed/`; copy an existing case as a template.
 
 ## Clean-room rules
 
@@ -50,7 +50,7 @@ Write these down whenever you notice them; they are parity facts too:
 ## Shaping cases (`Source: csv`)
 
 Cases 0003–0028 check Get Data, the Culture, Cell errors, every Applied Step and our M against
-Power BI (ADR 0004, "Shaping cases"; issue #23). They run **now**, without a DAX evaluator: the
+Power BI ("Shaping cases"; issue #23). They run **now**, without a DAX evaluator: the
 runner loads each CSV through our real Get Data, applies the case's M, sorts by the `ORDER BY`
 and compares with the copied result. Until a case is observed it has no Checks.
 
@@ -180,7 +180,7 @@ files) or generated in code; deferred. Open questions from `xlsx.rs` / `source.r
 
 ## Visual cases (M4.6)
 
-Cases in `parity/visuals/` check what a **Visual** shows, not a DAX query (ADR 0004, amended).
+Cases in `parity/visuals/` check what a **Visual** shows, not a DAX query (amended).
 Each has the dataset, optional `## Measures` (`Table[Name] = DAX` lines), a `## Visual` JSON block
 (our report file's visual shape: `type`, `wells`, `format`) and optional `Filter:` lines (slicer
 selections). `cargo xtask parity --export` writes `visual.json`, `measures.dax` and a README.

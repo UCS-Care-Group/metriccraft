@@ -1,6 +1,6 @@
 //! Arrow columnar store, Sources and Applied Step execution.
 //!
-//! Layer L2 — see `docs/plan/0001-mvp.md` §1.
+//! Layer L2 — see the `LAYERS` table in `xtask/src/main.rs`.
 
 mod cell;
 pub mod culture;
@@ -26,7 +26,7 @@ pub use table::{Table, TableBuilder, default_memory_cap};
 /// Errors from loading data.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
-    /// Loading this table would take loaded data past the memory cap (spec N-4).
+    /// Loading this table would take loaded data past the memory cap.
     MemoryCap { table: String, limit: usize },
     /// Arrow rejected the data (mismatched batch, too many distinct values…).
     Arrow { table: String, message: String },

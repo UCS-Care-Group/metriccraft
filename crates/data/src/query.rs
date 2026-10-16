@@ -1,4 +1,4 @@
-//! Queries (CONTEXT.md): an ordered list of Applied Steps that turns a Source into a table.
+//! Queries (glossary): an ordered list of Applied Steps that turns a Source into a table.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ pub struct Query {
 
 impl Query {
     /// A new Query over `source` with its automatic steps (*Promoted Headers*, *Changed Type*),
-    /// detected on the first [`SAMPLE_ROWS`] rows (ADR 0005). Nothing is loaded yet.
+    /// detected on the first [`SAMPLE_ROWS`] rows. Nothing is loaded yet.
     pub fn connect(
         name: &str,
         source: Source,
@@ -56,7 +56,7 @@ impl Query {
     /// Source; a Query that merges itself, directly or through others, is an error. To load
     /// several Queries, use one [`Pass`], so each Source is read once in all.
     ///
-    /// Streams (ADR 0005): the leading steps that work batch by batch run as each batch is read;
+    /// Streams: the leading steps that work batch by batch run as each batch is read;
     /// from the first step that needs the whole table on (a merge), steps run on the loaded
     /// result.
     pub fn run_with(&self, queries: &[Query], limit: usize) -> Result<(Table, usize)> {
@@ -400,7 +400,7 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// Steps that run batch by batch as the Source streams (ADR 0005). Any other step (and every
+/// Steps that run batch by batch as the Source streams. Any other step (and every
 /// step after it) runs once on the whole streamed result.
 fn streams(step: &Step) -> bool {
     matches!(

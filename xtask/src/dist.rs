@@ -9,7 +9,7 @@ use std::process::Command;
 
 use crate::{Result, cargo};
 
-/// Spec N-8: "Installer ≤ 50 MB".
+/// The release size budget: an archive is at most 50 MB.
 const MAX_BYTES: u64 = 50_000_000;
 const BINS: &[&str] = &["metriccraft", "metriccraft-cli"];
 const DOCS: &[&str] = &[
@@ -143,7 +143,7 @@ pub fn run(args: &[String]) -> Result {
     println!("{}: {:.1} MB", path.display(), size as f64 / 1e6);
     if size > MAX_BYTES {
         return Err(format!(
-            "{archive} is {size} bytes, over {MAX_BYTES} (spec N-8)"
+            "{archive} is {size} bytes, over {MAX_BYTES} (the 50 MB budget)"
         ));
     }
     Ok(())

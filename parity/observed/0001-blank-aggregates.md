@@ -1,6 +1,6 @@
 # Parity case 0001 — aggregates and BLANK
 
-Spec X-1/X-2: aggregates, DIVIDE, BLANK propagation and comparison. Workflow: `docs/parity.md`.
+aggregates, DIVIDE, BLANK propagation and comparison. Workflow: `docs/parity.md`.
 
 Covers: SUM, COUNT, COUNTA, COUNTROWS, AVERAGE, MIN, MAX, CALCULATE, DIVIDE, BLANK, /
 

@@ -1,4 +1,4 @@
-//! Page refresh bench (M4.7; spec N-3; `docs/bench.md`). For each `import/parquet_<n>` file in
+//! Page refresh bench (M4.7; `docs/bench.md`). For each `import/parquet_<n>` file in
 //! `METRICCRAFT_BENCH_IMPORTS` (see `dax.rs`), loads it once and builds the reference page: card,
 //! clustered bar (Country), line (OrderDate), table (Product, 500-row window), matrix
 //! (Region → Country × Channel, with subtotals) and a Category slicer. Then, median of [`RUNS`]:

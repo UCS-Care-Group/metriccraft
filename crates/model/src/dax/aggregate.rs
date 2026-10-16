@@ -1,7 +1,7 @@
 //! The column aggregations (M3.3): `SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `DISTINCTCOUNT`, `MIN`,
 //! `MAX`. Each is one storage scan ([`super::storage`]) of the column's encoded data over the
 //! rows its Table shows under the filter context; no column is materialised. A row context
-//! doesn't filter them (CONTEXT.md, Row context): only the filter context does.
+//! doesn't filter them (glossary, Row context): only the filter context does.
 //!
 //! BLANK, per Microsoft's documentation and parity cases 0001, 0029, 0030:
 //! - `SUM`, `AVERAGE`, `MIN`, `MAX` skip blanks and give BLANK when no value is left; `0` is a

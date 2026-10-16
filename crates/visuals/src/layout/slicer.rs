@@ -1,4 +1,4 @@
-//! The slicer (M4.5, spec R-2): its Field's values, ascending, as a list of checkboxes or a
+//! The slicer (M4.5): its Field's values, ascending, as a list of checkboxes or a
 //! closed dropdown. Which items are selected is the Page's saved Selection, passed in; clicking
 //! is the engine's (hit-testing the item marks, each tagged `Tag { series: 0, point: row }`).
 //!

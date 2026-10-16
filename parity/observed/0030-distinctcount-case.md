@@ -1,6 +1,6 @@
 # Parity case 0030 — DISTINCTCOUNT, blanks and letter case
 
-Spec X-1/X-2 (M3.3, M3.10): DISTINCTCOUNT counts BLANK as a value; `Apple`/`apple` and `Pear`/`pear` differ only by case, so the Model should hold them as one value. Before running, check in Table view which spelling Product shows for each (note it below). Workflow: `docs/parity.md`.
+M3.3, M3.10: DISTINCTCOUNT counts BLANK as a value; `Apple`/`apple` and `Pear`/`pear` differ only by case, so the Model should hold them as one value. Before running, check in Table view which spelling Product shows for each (note it below). Workflow: `docs/parity.md`.
 
 Covers: DISTINCTCOUNT, COUNTA, COUNTROWS, CALCULATE, MIN, MAX
 

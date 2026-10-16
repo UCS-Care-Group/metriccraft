@@ -1,4 +1,4 @@
-//! Parity-case runner (ADR 0004): parses `parity/observed/*.md`, evaluates each query, and
+//! Parity-case runner: parses `parity/observed/*.md`, evaluates each query, and
 //! compares every **Check** (result column) with the values copied out of Power BI Desktop.
 //!
 //! A Check passes when our result, rendered the way Power BI copies it, equals the pasted text
@@ -70,7 +70,7 @@ pub struct Case {
     /// The DAX query; empty for a visual case.
     pub query: String,
     /// A visual case's Visual (`## Visual`, a ```` ```json ```` block in the report file's
-    /// visual shape, ADR 0003), run by `metriccraft_visuals::parity` instead of a query.
+    /// visual shape), run by `metriccraft_visuals::parity` instead of a query.
     pub visual: Option<String>,
     /// `## Measures`: (Table, Measure, DAX) from `Table[Name] = DAX` lines.
     pub measures: Vec<(String, String, String)>,

@@ -1,4 +1,4 @@
-//! Loaded tables: immutable, reference-counted Arrow columns, encoded narrow (ADR 0005).
+//! Loaded tables: immutable, reference-counted Arrow columns, encoded narrow.
 
 use std::sync::Arc;
 

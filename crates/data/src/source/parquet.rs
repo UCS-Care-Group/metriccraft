@@ -1,4 +1,4 @@
-//! Parquet Source (spec S-1): streamed one row group at a time, [`super::BATCH_ROWS`] rows per batch.
+//! Parquet Source: streamed one row group at a time, [`super::BATCH_ROWS`] rows per batch.
 //! Codecs: uncompressed, snappy, gzip, lz4, brotli, zstd (all builds, web included).
 //!
 //! Column types are normalised to the plain Source set:
@@ -15,7 +15,7 @@
 //! The embedded Arrow schema (`ARROW:schema`, read by arrow-ipc's verifying flatbuffer
 //! decoder) is used as a type hint, so e.g. Date64 columns keep their type.
 //!
-//! **Hostile files** (spec N-1, N-4). The parquet/arrow 60 decoders panic on some corrupt
+//! **Hostile files**. The parquet/arrow 60 decoders panic on some corrupt
 //! input, and on wasm a panic aborts the app. So nothing reaches them unchecked:
 //! - the footer is walked first ([`thrift`]): every list, binary and nesting depth must fit the
 //!   bytes present (no allocation bombs), and schema child counts must fit the schema;

@@ -1,4 +1,4 @@
-//! Get Data, Close & Apply, Refresh and Preview (spec S-1, S-2, Q-2): Power Query's edit model.
+//! Get Data, Close & Apply, Refresh and Preview: Power Query's edit model.
 //!
 //! - **Get Data** connects to a file: a Query with its automatic steps, loaded as a table at
 //!   once (Power BI's "Load").
@@ -13,7 +13,7 @@
 //!   Query and remove its Table; a Query that merges it still runs it, within the load.
 //!   Toggling it marks the Query Stale, as editing does: the Table goes (or comes) at the next
 //!   Close & Apply, as in Power BI.
-//! - Each loaded Table's text is folded first (`metriccraft_data::fold_case`, ADR 0006): values
+//! - Each loaded Table's text is folded first (`metriccraft_data::fold_case`): values
 //!   differing only by case become one, spelled as the first row has it, so sort by,
 //!   Relationships and DAX see the folded values. Power Query doesn't: a Query's merges within
 //!   the load use the unfolded results, and a Preview never merges against a folded Table
@@ -29,7 +29,7 @@
 //!   that weren't loaded before. Both are listed in the [`LoadReport`].
 //!
 //! Loading is all-or-nothing: the new tables are built beside the old ones (≈ 2× memory
-//! briefly, ADR 0005) and replace them only if every Query succeeds; otherwise nothing changes
+//! briefly) and replace them only if every Query succeeds; otherwise nothing changes
 //! and the error names the Query. Queries a Query merges load first, and a load reads each
 //! Source once, sharing a merged-from Query's result (`Pass`). Every command here is an
 //! undoable edit (undoing a refresh is something Power BI can't do): undo puts back the previous
@@ -39,7 +39,7 @@
 //! and its Source files' fingerprints, taken just before reading, and the time), which the
 //! Data cache saves beside the data (`file.rs`).
 //!
-//! **Memory cap** (spec N-4, [`App::memory_cap`]): a load may use the cap less every distinct
+//! **Memory cap** ([`App::memory_cap`]): a load may use the cap less every distinct
 //! column buffer held by the document, undo and redo ([`App::memory`]; snapshots share
 //! buffers, so each counts once), the tables being replaced included. When the new data won't
 //! fit, the oldest undo steps are dropped while they hold data the document and redo don't
@@ -170,7 +170,7 @@ pub(crate) fn get_data(app: &mut App, params: &Value) -> Result {
     })
 }
 
-/// Query `name`'s M, as Power Query's Advanced Editor shows it (spec Q-3); `None` if there is no
+/// Query `name`'s M, as Power Query's Advanced Editor shows it; `None` if there is no
 /// such Query. The culture shows only when it isn't the Project's default.
 pub fn query_m(doc: &Document, name: &str) -> Option<String> {
     let q = doc.queries.iter().find(|q| q.name == name)?;
@@ -411,7 +411,7 @@ fn merged_first(queries: &[Query]) -> Vec<&Query> {
     order
 }
 
-/// `table` as the Model holds it: text differing only by case made one (M3.10, ADR 0006), and
+/// `table` as the Model holds it: text differing only by case made one (M3.10), and
 /// the bytes its new (folded) columns use, counted beside the unfolded result a merge may still
 /// share. Folding before the model load lets sort by and Relationships see the folded values.
 fn fold(table: Table, limit: usize) -> Result<(Table, usize)> {

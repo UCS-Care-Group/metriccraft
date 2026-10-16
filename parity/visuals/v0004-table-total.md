@@ -1,6 +1,6 @@
 # Visual parity case v0004 — table with a total row
 
-Spec R-2, CONTEXT.md **Total** (M4.6): a table groups by its text Column and shows a total row
+M4.6, glossary **Total**: a table groups by its text Column and shows a total row
 whose DISTINCTCOUNT is over all rows (4), not the sum of the rows (5). Workflow:
 `docs/parity.md` (visual cases).
 

@@ -1,4 +1,4 @@
-//! Command-sequence fuzzer (spec N-1, F-2, D-4, R-1; plan M2.5, M4.2): random, valid-ish command sequences
+//! Command-sequence fuzzer (plan M2.5, M4.2): random, valid-ish command sequences
 //! over a small Document of in-memory CSV Queries, checking after every command that
 //!
 //! - (a) nothing panics;

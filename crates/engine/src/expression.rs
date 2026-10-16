@@ -1,4 +1,4 @@
-//! Measures and Calculated columns (spec D-3; `metriccraft_model`'s `expression.rs` and
+//! Measures and Calculated columns (`metriccraft_model`'s `expression.rs` and
 //! `calculated.rs` hold the rules): New measure, New column, editing a formula, deleting one,
 //! renaming a Measure. All undoable; a change that fails changes nothing.
 //!

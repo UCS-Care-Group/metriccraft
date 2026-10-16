@@ -1,4 +1,4 @@
-//! Relationships (CONTEXT.md, spec D-2): many-to-one, single direction (filters flow from the
+//! Relationships (glossary): many-to-one, single direction (filters flow from the
 //! one side to the many side), at most one **active** per pair of Tables.
 //!
 //! Rules, from Power BI's documentation where it has them:

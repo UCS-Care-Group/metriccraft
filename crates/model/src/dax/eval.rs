@@ -1,4 +1,4 @@
-//! The formula engine (ADR 0006): interprets the `metriccraft_dax` AST under a filter context and
+//! The formula engine: interprets the `metriccraft_dax` AST under a filter context and
 //! a row context stack. Aggregations go to storage scans ([`super::storage`]); functions are in
 //! [`super::functions`].
 //!

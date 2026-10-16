@@ -1,6 +1,6 @@
-//! Project and Package read/write (ADR 0003).
+//! Project and Package read/write.
 //!
-//! Layer L2 — see `docs/plan/0001-mvp.md` §1. Depends on `metriccraft-data` (Queries, M) and
+//! Layer L2 — see the `LAYERS` table in `xtask/src/main.rs`. Depends on `metriccraft-data` (Queries, M) and
 //! `metriccraft-model` (Tables, Relationships), never the other way.
 //!
 //! The core is pure functions over an in-memory [`FileSet`] (path → bytes), so the web build,

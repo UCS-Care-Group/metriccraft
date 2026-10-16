@@ -1,6 +1,6 @@
 # Visual parity case v0002 — clustered bar with a BLANK category
 
-Spec R-2 (M4.6): a BLANK axis value is its own category; the implicit measure sums Amount per
+M4.6: a BLANK axis value is its own category; the implicit measure sums Amount per
 Product. Workflow: `docs/parity.md` (visual cases).
 
 Covers: clustered bar, BLANK, implicit measure

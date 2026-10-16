@@ -1,4 +1,4 @@
-//! Model Tables and Columns (CONTEXT.md, spec D-1): the properties Power BI's Column tools and
+//! Model Tables and Columns (glossary): the properties Power BI's Column tools and
 //! Properties pane set, kept beside the loaded data (`metriccraft_data::Table`, matched by name).
 //!
 //! **After every load** ([`ModelTable::load`]) a Table's columns are matched to the previous

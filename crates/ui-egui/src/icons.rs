@@ -1,4 +1,4 @@
-//! The icon set (ADR 0008): monochrome line icons drawn in code on a 16×16 grid, tinted by the
+//! The icon set: monochrome line icons drawn in code on a 16×16 grid, tinted by the
 //! App theme. Original work; no vendor artwork (AGENTS.md).
 
 use egui::{

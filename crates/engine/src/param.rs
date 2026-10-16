@@ -1,4 +1,4 @@
-//! Command parameter schemas (spec C-3, ADR 0008): what each command takes, checked by
+//! Command parameter schemas: what each command takes, checked by
 //! [`crate::App::run`] before the command runs, and read by the UI's forms, the command palette,
 //! MCP and CLI help.
 

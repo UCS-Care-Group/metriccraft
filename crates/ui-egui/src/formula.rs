@@ -1,4 +1,4 @@
-//! The formula bar (spec U-5): a Measure's or Calculated column's DAX as `Name = expression`,
+//! The formula bar: a Measure's or Calculated column's DAX as `Name = expression`,
 //! coloured as you type, with a parse error underlined at its span and named below. Enter
 //! commits, Shift+Enter breaks the line, Esc cancels.
 

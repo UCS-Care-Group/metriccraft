@@ -1,7 +1,7 @@
 # Parity case 0002 — `/` by zero: BLANK or Infinity?
 
-Follow-up to case 0001, where `1 / 0` showed an empty cell in the DAX query view grid. Spec X-2
-(arithmetic semantics). Workflow: `docs/parity.md`. No dataset needed.
+Follow-up to case 0001, where `1 / 0` showed an empty cell in the DAX query view grid.
+Arithmetic semantics. Workflow: `docs/parity.md`. No dataset needed.
 
 Covers: /, ISBLANK, ISERROR, FORMAT, &
 

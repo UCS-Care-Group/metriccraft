@@ -648,7 +648,7 @@ fn random_clicks_and_selections_never_panic() {
     }
 }
 
-/// The whole test Page composed (M4.7 / spec C-2's page render), after a bar click: the slicer,
+/// The whole test Page composed (M4.7; the CLI's page render), after a bar click: the slicer,
 /// card and table filtered to Ink, the bar dimmed except Ink.
 #[test]
 fn page_snapshot_after_a_bar_click() {

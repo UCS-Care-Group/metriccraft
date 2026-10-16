@@ -1,5 +1,5 @@
-//! Case-insensitive text at load (ADR 0006, M3.10): in the Model, text values that differ only
-//! by case are one value, spelled as the first row that has it (CONTEXT.md, Column). Power Query
+//! Case-insensitive text at load (M3.10): in the Model, text values that differ only
+//! by case are one value, spelled as the first row that has it (glossary, Column). Power Query
 //! (Preview, merges within a load) stays case-sensitive: only the load folds.
 //!
 //! **The fold** is DAX's ([`metriccraft_core::fold`]): locale-invariant lower, upper, lower, no

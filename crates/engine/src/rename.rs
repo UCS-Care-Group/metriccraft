@@ -1,4 +1,4 @@
-//! Rename, delete and duplicate (spec D-4, C-1): Tables and Queries are 1:1 and share a name,
+//! Rename, delete and duplicate: Tables and Queries are 1:1 and share a name,
 //! so renaming or deleting either does both, as in Power BI.
 //!
 //! **Rename a Table / Query** (`modeling.renameTable`, `query.rename`): one undoable edit that

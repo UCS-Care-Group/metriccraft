@@ -1,4 +1,4 @@
-//! The one-pass group-by (M4.7; spec N-3; ADR 0006's storage-scan tier): [`super::summarize_rows`]
+//! The one-pass group-by (M4.7; the storage-scan tier): [`super::summarize_rows`]
 //! when every expression is a plain aggregation of one Table's rows. Instead of evaluating each
 //! expression once per group under an equality filter (a scan per group), it scans the Table's
 //! visible rows once, works out each row's group from dictionary codes and whole numbers (no

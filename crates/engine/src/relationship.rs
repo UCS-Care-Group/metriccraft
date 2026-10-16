@@ -1,4 +1,4 @@
-//! Relationship commands (spec D-2): Power BI's Modeling > Manage relationships. The rules
+//! Relationship commands: Power BI's Modeling > Manage relationships. The rules
 //! (keys, one active per pair, auto-detect) are `metriccraft_model`'s (`relationship.rs`).
 //!
 //! An existing Relationship is named by `relationship`: its position in Manage relationships

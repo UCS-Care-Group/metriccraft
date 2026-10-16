@@ -1,4 +1,4 @@
-//! Applied Step commands (spec Q-1). Each appends a step to a Query (or deletes one), checks it
+//! Applied Step commands. Each appends a step to a Query (or deletes one), checks it
 //! on the Preview rows and marks the Query's table Stale; the table loads on Close & Apply or
 //! Refresh (see `load.rs`). All are [`Run::Edit`](crate::Run::Edit), so undo restores the steps
 //! and the Stale flags together, and a step that can't run changes nothing.

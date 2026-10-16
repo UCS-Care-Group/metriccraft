@@ -7,7 +7,7 @@ use crate::{
     SIGN_PRECEDENCE, Span, UnaryOp, is_keyword,
 };
 
-/// Deepest expression nesting accepted (brackets, calls, operators, `VAR`…; spec N-1).
+/// Deepest expression nesting accepted (brackets, calls, operators, `VAR`…).
 pub const MAX_DEPTH: usize = 200;
 /// Largest DAX text accepted, in bytes (a Measure or query is a few KB).
 pub const MAX_SOURCE: usize = 1 << 20;

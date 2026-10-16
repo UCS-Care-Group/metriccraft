@@ -1,4 +1,4 @@
-//! Visual parity cases (M4.6; ADR 0004, amended): `parity/visuals/*.md`, each a dataset, optional
+//! Visual parity cases (M4.6; amended): `parity/visuals/*.md`, each a dataset, optional
 //! `## Measures`, a `## Visual` (the report file's visual JSON) and optional `Filter:` lines (slicer
 //! selections). Observed is the result of the visual's own query in Power BI Desktop
 //! (Performance Analyzer → Copy query → run → copy), pasted verbatim; `Map:` lines name which of
@@ -173,7 +173,7 @@ fn long_form(r: &QueryResult) -> (Vec<String>, Vec<Vec<String>>) {
     (columns, rows)
 }
 
-/// The visual JSON of a report file (ADR 0003), the members a query needs: `type`, `wells`,
+/// The visual JSON of a report file, the members a query needs: `type`, `wells`,
 /// `format.rowSubtotals` / `columnSubtotals`.
 fn parse_visual(json: &str) -> Result<Visual> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;

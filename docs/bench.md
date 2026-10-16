@@ -4,12 +4,12 @@
 than 1.25× slower, or using more than 1.10× the memory, fails. Machines without a baseline only
 report. `--save` re-records the baseline (on tardis2, when it's quiet: load average < 2).
 
-## Import benches (M1.9; spec N-2, N-8; ADR 0005)
+## Import benches (M1.9)
 
 `crates/engine/benches/import.rs` runs Get Data (`home.getData`: connect, run, load) on a new App,
 each measurement in a fresh process, median of 3. Per case it prints the time, and on Linux the
 peak RSS (`/peak`), the RSS afterwards with the table held (`/steady`) and the table's column
-buffers (`/table`). `engine/idle/steady` is a new App's RSS (the floor under N-8's 100 MB idle).
+buffers (`/table`). `engine/idle/steady` is a new App's RSS (the floor under the 100 MB idle budget).
 
 | Case                 | File                                         | Run by                          |
 |----------------------|----------------------------------------------|---------------------------------|
@@ -21,7 +21,7 @@ buffers (`/table`). `engine/idle/steady` is a new App's RSS (the floor under N-8
 Generated files are cached by size; delete `target/bench-data/` after changing the generator
 (or bump `dataset::VERSION`).
 
-## DAX benches (M3.10; spec N-3)
+## DAX benches (M3.10)
 
 `crates/engine/benches/dax.rs` loads each `import/parquet_<n>` file once (Get Data, as above),
 then times DAX query evaluation only (parse + evaluate, not the load or building the
@@ -33,7 +33,7 @@ evaluator's `Database`), median of 5, on the reference dataset's columns:
 | `dax/calculate_filter_<n>` | `ROW("v", CALCULATE(SUM(T[SalesAmount]), T[Channel] = "Store"))`: a text-column filter (4 values, ~30% match) then the sum |
 | `dax/distinctcount_<n>`    | `ROW("v", DISTINCTCOUNT(T[CustomerID]))`: 100,000 distinct whole numbers                                                   |
 
-`<n>` is `1m` (`cargo xtask bench`) and `10m` (`cargo xtask bench --reference`). Budget (N-3):
+`<n>` is `1m` (`cargo xtask bench`) and `10m` (`cargo xtask bench --reference`). Budget:
 a slicer change refreshes every visual on the page in < 100 ms on 10M rows, so one visual's
 measure must be well under that.
 
@@ -45,7 +45,7 @@ First run (2026-10-14, busy host, load average 8–14; ranges over three 1M and 
 | `dax/calculate_filter`     | 106–435 ms  | 0.87–2.1 s  |
 | `dax/distinctcount`        | 42–416 ms   | 1.0–1.3 s   |
 
-`CALCULATE` and `DISTINCTCOUNT` were far over N-3 (risk row in `docs/plan/0001-mvp.md` §4).
+`CALCULATE` and `DISTINCTCOUNT` were far over the 100 ms interaction budget.
 
 After M3.11's fast paths (2026-10-14, load average 2–7; same file, two runs of each, ranges):
 
@@ -65,7 +65,7 @@ from the integer codes, `DISTINCTCOUNT` of whole numbers or dates is a range bit
 hash set when the range is sparse), whole-number value filters compare integers, and a float
 `SUM` is a plain loop (the same additions in the same order).
 
-## Page refresh (M4.7; spec N-3)
+## Page refresh (M4.7)
 
 `crates/engine/benches/page.rs` loads each `import/parquet_<n>` file once and builds the
 reference page: a card (Sum of SalesAmount), a clustered bar (Country, 20 values), a line
@@ -94,7 +94,7 @@ row), and listing the groups built a `Value` and a folded text key per row (7–
 | `page/refresh` | 12.7–13.7 ms | 65.9–69.7 ms |
 | `page/layout`  | 1.9–2.0 ms   | 1.9–2.0 ms   |
 
-N-3 (< 100 ms on 10M rows) is met on tardis2 under that load. What changed:
+The interaction budget (< 100 ms on 10M rows) is met on tardis2 under that load. What changed:
 
 - **One-pass group-by** (`crates/model/src/dax/summarize_fast.rs`): when every expression is a
   plain aggregation of one Table (directly or through Measures) and the group-by columns are on
@@ -115,10 +115,10 @@ Not yet: the second phase (~1.5–3 ns per visible row and query) is the floor o
 could skip the group-slot lookup when keys are dense. A group-by column of a big dictionary
 folds the whole dictionary per query. Baselines not re-recorded (host load > 2).
 
-## Desktop app (M5.5; spec N-8; ADR 0008)
+## Desktop app (M5.5)
 
 `cargo xtask ui-bench` builds the release app, starts it on a fresh profile with
-`MCRAFT_UI_BENCH=1` and checks the N-8 budgets for a blank window:
+`MCRAFT_UI_BENCH=1` and checks the budgets for a blank window:
 
 - **cold start**: spawn to the first frame on screen, under 1 s. Gated only on a machine with a
   `bench/<machine>.json` baseline (the reference machine), like the other timings; elsewhere
@@ -162,7 +162,7 @@ M3.10 (case fold at load, 2026-10-14, A/B on a busy host, load average ~18): `im
 about +5–10% time and +5 MB peak (8 bytes per distinct text value, hashed once; 1M distinct
 `OrderNumber`s), `import/csv_200k` about +10–15% time, peak unchanged. Baseline not re-recorded (needs a quiet tardis2).
 
-## Power BI Desktop comparison (spec N-8)
+## Power BI Desktop comparison
 
 In the Windows VM, on the same data:
 
@@ -182,4 +182,4 @@ In the Windows VM, on the same data:
 | Date | Power BI version | Idle | Peak (load) | Steady (loaded) |
 |------|------------------|------|-------------|-----------------|
 
-N-8 is met when our `import/parquet_10m` peak and steady are at most half of Power BI's.
+The memory goal is met when our `import/parquet_10m` peak and steady are at most half of Power BI's.

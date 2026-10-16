@@ -1,6 +1,6 @@
 # Visual parity case v0003 — slicer selection filters a card
 
-Spec R-3 (M4.6): a slicer on Sales[Region] with North and West selected filters the card's
+M4.6: a slicer on Sales[Region] with North and West selected filters the card's
 measure. Workflow: `docs/parity.md` (visual cases).
 
 Covers: card, slicer, Selection

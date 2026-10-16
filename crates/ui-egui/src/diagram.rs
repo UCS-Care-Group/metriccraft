@@ -1,4 +1,4 @@
-//! The Model view (spec U-6): Tables as boxes at their saved positions, Relationships as lines
+//! The Model view: Tables as boxes at their saved positions, Relationships as lines
 //! (`*` on the many side, `1` on the one side, dashed when inactive). Drag a box by its header to
 //! move it (`model.moveTable` on release); drag a column onto another Table's column to relate
 //! them (`modeling.newRelationship`, either way round).

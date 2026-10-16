@@ -1,6 +1,6 @@
 # Parity case 0031 — CALCULATE filter arguments, FILTER, ALL, ALLEXCEPT
 
-Spec X-1/X-2 (M3.4): an inner CALCULATE filter on a column replaces the outer one; several arguments AND together; FILTER over the table; ALL and ALLEXCEPT remove filters. Workflow: `docs/parity.md`.
+M3.4: an inner CALCULATE filter on a column replaces the outer one; several arguments AND together; FILTER over the table; ALL and ALLEXCEPT remove filters. Workflow: `docs/parity.md`.
 
 Covers: CALCULATE, FILTER, ALL, ALLEXCEPT, SUM, COUNTROWS, &&, ||
 

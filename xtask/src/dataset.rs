@@ -1,4 +1,4 @@
-//! The reference dataset (spec N-2, N-8; `docs/bench.md`): a deterministic sales fact table of
+//! The reference dataset (`docs/bench.md`): a deterministic sales fact table of
 //! 20 columns, written as Parquet (and CSV or XLSX) by `cargo xtask dataset` and by the import
 //! benches. Same rows on every machine: a fixed seed and a splitmix64 stream, no RNG crate.
 //!
@@ -39,7 +39,7 @@ use parquet::file::properties::WriterProperties;
 
 use crate::Result;
 
-/// Rows in the reference dataset (spec N-2).
+/// Rows in the reference dataset.
 pub const REFERENCE_ROWS: usize = 10_000_000;
 /// Bump when the generated rows change, so cached bench files are regenerated.
 pub const VERSION: u32 = 1;

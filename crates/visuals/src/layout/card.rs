@@ -1,4 +1,4 @@
-//! The card Visual (M4.3): its one value large and centred in Auto display units (spec R-4),
+//! The card Visual (M4.3): its one value large and centred in Auto display units,
 //! the value's label below in muted text. BLANK shows "(Blank)"; text values as they are.
 //!
 //! **Tag** (hit-testing, M4.5): an invisible Rect over the value with `Tag { series: 0,

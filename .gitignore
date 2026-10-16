@@ -9,6 +9,14 @@
 # Clean-room observations of Power BI (screenshots) — never committed
 /observations/
 
+# Glossary, specifications, plans and ADRs: maintainers' local working notes, never committed
+/plan/
+# Guards: where planning files used to live (and where some tools write them by default)
+/CONTEXT.md
+/docs/spec/
+/docs/plan/
+/docs/adr/
+
 # Rust
 *~
 /target

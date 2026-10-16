@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 default = ["png"]
-# The PNG renderer (ADR 0007): CLI page renders, snapshots, the N-3 bench.
+# The PNG renderer: CLI page renders, snapshots, the page bench.
 png = ["dep:tiny-skia"]
 
 [dependencies]

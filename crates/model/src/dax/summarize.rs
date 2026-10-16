@@ -1,4 +1,4 @@
-//! `SUMMARIZECOLUMNS` (M3.9, ADR 0006) and [`summarize`], the group-by query that M4.1's visual
+//! `SUMMARIZECOLUMNS` (M3.9) and [`summarize`], the group-by query that M4.1's visual
 //! queries reuse.
 //!
 //! **`SUMMARIZECOLUMNS(T[c]…, "Name", expr…)`** (no filter-table arguments yet: one is an error):
@@ -22,7 +22,7 @@
 //! - A one-side Table has no virtual blank row here, so many-side rows whose key has no match
 //!   get no group; Power BI's blank row would show them.
 //!
-//! Performance (M4.7, spec N-3): when every expression is a plain aggregation of one Table
+//! Performance (M4.7): when every expression is a plain aggregation of one Table
 //! (`SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `DISTINCTCOUNT`, `COUNTROWS`, directly or
 //! through Measures) and the group-by columns are on that Table or one Relationship away, the
 //! one-pass group-by (`summarize_fast.rs`) scans its visible rows once, on several threads

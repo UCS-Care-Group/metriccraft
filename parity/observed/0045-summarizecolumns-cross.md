@@ -1,6 +1,6 @@
 # Parity case 0045 — SUMMARIZECOLUMNS across Tables with a constant
 
-Spec X-4 (M3.9): group-by columns from two related Tables. Does SUMMARIZECOLUMNS keep only the
+M3.9: group-by columns from two related Tables. Does SUMMARIZECOLUMNS keep only the
 combinations that exist in Sales, or cross-join Region × Product and keep every pair whose
 expressions aren't all BLANK? A constant expression (`"One", 1`) is never BLANK, so the row count
 tells. Same dataset as case 0043. Workflow: `docs/parity.md`.

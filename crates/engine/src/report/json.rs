@@ -1,4 +1,4 @@
-//! The report's files (ADR 0003): JSON, read and written here because `metriccraft-file` (layer
+//! The report's files: JSON, read and written here because `metriccraft-file` (layer
 //! 2) can't see the Visual definitions (layer 3); it carries them as opaque parts
 //! (`Project::report`).
 //!

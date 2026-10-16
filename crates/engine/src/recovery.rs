@@ -1,4 +1,4 @@
-//! Autosave recovery (ADR 0003, M2 amendment "Recovery"; Power BI's AutoRecovery): while the
+//! Autosave recovery (M2; Power BI's AutoRecovery): while the
 //! Document has unsaved changes, a recovery copy is written to the user cache directory, never
 //! into the Project; the next launch offers to restore it.
 //!

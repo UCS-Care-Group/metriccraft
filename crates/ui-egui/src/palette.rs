@@ -1,5 +1,5 @@
-//! The command palette (Ctrl+K, spec U-2) and the forms generated from a command's param schema
-//! (spec C-3): how a command that needs params gets them from the user.
+//! The command palette (Ctrl+K) and the forms generated from a command's param schema
+//!: how a command that needs params gets them from the user.
 
 use egui::{Key, RichText, Ui};
 use metriccraft_engine::param::{Kind, Param};

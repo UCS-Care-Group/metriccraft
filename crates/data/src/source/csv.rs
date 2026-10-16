@@ -1,4 +1,4 @@
-//! CSV Source (spec S-1): reads like Power Query's `Csv.Document`: columns `Column1..N`, all
+//! CSV Source: reads like Power Query's `Csv.Document`: columns `Column1..N`, all
 //! text, streaming in batches so the whole file is never held. The automatic *Promoted Headers*
 //! and *Changed Type* steps are the Query's ([`super::Source::detect`]).
 //!
@@ -9,7 +9,7 @@
 //! - Blank lines are skipped. Quoted fields may contain line breaks (`QuoteStyle.Csv`).
 //! - Without a BOM, valid UTF-8 in the first 64 KB means UTF-8, otherwise Windows-1252.
 //!
-//! Hostile input (spec N-1, N-4): a record (line, or quoted multi-line field) over
+//! Hostile input: a record (line, or quoted multi-line field) over
 //! [`MAX_RECORD`] bytes is an error naming its line, and a batch ends early once it holds
 //! [`BATCH_BYTES`] of text.
 

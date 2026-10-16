@@ -1,6 +1,6 @@
 # Parity case 0038 — text comparison and case
 
-Spec X-2: DAX compares text ignoring case; probes accents, ß, ordering and the empty text against BLANK. Workflow: `docs/parity.md`.
+DAX compares text ignoring case; probes accents, ß, ordering and the empty text against BLANK. Workflow: `docs/parity.md`.
 
 Covers: =, ==, <, <>, BLANK
 

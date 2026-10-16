@@ -1,4 +1,4 @@
-//! The grid of the Table view (spec U-5) and the Power Query editor's Preview: rows, virtual. Only the visible rows are read
+//! The grid of the Table view and the Power Query editor's Preview: rows, virtual. Only the visible rows are read
 //! and laid out, and the position is a row index rather than a pixel offset, so 10M rows scroll
 //! as smoothly as 10 (egui's f32 scroll offsets lose whole rows past a few million).
 

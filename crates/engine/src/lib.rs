@@ -1,6 +1,6 @@
 //! Document, commands, undo/redo and cross-filter state.
 //!
-//! Layer L5 — see `docs/plan/0001-mvp.md` §1. Everything a user can do is a [`Command`], run
+//! Layer L5 — see the `LAYERS` table in `xtask/src/main.rs`. Everything a user can do is a [`Command`], run
 //! through [`App::run`]; the UI, control channel, CLI and MCP all go through it.
 
 mod app;

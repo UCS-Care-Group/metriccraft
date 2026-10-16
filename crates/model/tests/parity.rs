@@ -1,4 +1,4 @@
-//! The parity gate (ADR 0004): every case in `parity/observed/` runs on `cargo test`.
+//! The parity gate: every case in `parity/observed/` runs on `cargo test`.
 
 use std::path::Path;
 

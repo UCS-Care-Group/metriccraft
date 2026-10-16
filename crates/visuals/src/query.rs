@@ -1,4 +1,4 @@
-//! The query a Visual runs (M4.1; ADR 0006, 0007; grill Q5–Q7, Q25): its Fields resolved
+//! The query a Visual runs (M4.1; 0007; grill Q5–Q7, Q25): its Fields resolved
 //! against the Model, grouped with `metriccraft_model`'s `summarize`, sorted, capped and pivoted
 //! into a [`QueryResult`] that layout (M4.3–M4.5) reads.
 //!
@@ -15,7 +15,7 @@
 //! A Column in Values is an **Implicit measure**: `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNTA` or
 //! `DISTINCTCOUNT` over it, by its summarize-by; "none" counts (`COUNTA`) outside a table.
 //!
-//! **Totals** (CONTEXT.md) are the Values evaluated over the whole group: `summarize` again with
+//! **Totals** (glossary) are the Values evaluated over the whole group: `summarize` again with
 //! the inner group-by Columns left out, never a sum of the rows. A table has a total row; a
 //! matrix a subtotal at every level of Rows and of Columns plus grand totals, as its
 //! `row_subtotals` / `column_subtotals` say (the table's total row follows `row_subtotals`).

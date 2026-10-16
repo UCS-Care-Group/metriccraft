@@ -1,4 +1,4 @@
-//! App theme tokens (CONTEXT.md **App theme**): the app's own colours, light or dark. Every
+//! App theme tokens (glossary **App theme**): the app's own colours, light or dark. Every
 //! colour the UI paints comes from here; the report canvas uses the Report theme instead.
 
 use egui::{Color32, Stroke, Visuals};

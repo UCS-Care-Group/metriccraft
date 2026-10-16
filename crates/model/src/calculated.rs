@@ -1,4 +1,4 @@
-//! Calculated columns' values (ADR 0006): evaluated row by row through the formula engine
+//! Calculated columns' values: evaluated row by row through the formula engine
 //! ([`crate::dax::model_eval::evaluate_rows`]) after each load, when their DAX changes and on
 //! open, in dependency order across the whole Model, then stored as Arrow columns (encoded
 //! narrow, like loaded data) at the end of their Table, under the memory cap. They are never in

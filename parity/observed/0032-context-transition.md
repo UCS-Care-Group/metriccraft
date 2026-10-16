@@ -1,6 +1,6 @@
 # Parity case 0032 — context transition through CALCULATE and Measure references
 
-Spec X-2 (M3.4, M3.6): inside FILTER's row context a bare SUM sees every row, CALCULATE (or a Measure reference) sees only the current row. Workflow: `docs/parity.md`.
+M3.4, M3.6: inside FILTER's row context a bare SUM sees every row, CALCULATE (or a Measure reference) sees only the current row. Workflow: `docs/parity.md`.
 
 Covers: CALCULATE, FILTER, COUNTROWS, SUM, DEFINE MEASURE
 

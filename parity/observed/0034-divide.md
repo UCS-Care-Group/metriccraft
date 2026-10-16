@@ -1,6 +1,6 @@
 # Parity case 0034 — DIVIDE with BLANK, zero and alternate results
 
-Spec X-1 (M3.5): DIVIDE returns BLANK (or the alternate) for a zero or BLANK denominator. Workflow: `docs/parity.md`.
+M3.5: DIVIDE returns BLANK (or the alternate) for a zero or BLANK denominator. Workflow: `docs/parity.md`.
 
 Covers: DIVIDE, BLANK, ISBLANK
 
