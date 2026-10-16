@@ -96,6 +96,21 @@ pub fn run(args: &[String]) -> Result {
     for doc in DOCS {
         copy(Path::new(doc), &stage.join(doc))?;
     }
+    // Licence texts of the bundled fonts (ATTRIBUTION.md): Inter, and those egui embeds.
+    mkdir(&stage.join("licenses"))?;
+    copy(
+        &Path::new("crates")
+            .join("visuals")
+            .join("fonts")
+            .join("OFL.txt"),
+        &stage.join("licenses").join("Inter-OFL.txt"),
+    )?;
+    let fonts = Path::new("licenses").join("egui-default-fonts");
+    mkdir(&stage.join(&fonts))?;
+    for f in std::fs::read_dir(&fonts).map_err(|e| format!("{}: {e}", fonts.display()))? {
+        let f = f.map_err(|e| format!("{}: {e}", fonts.display()))?;
+        copy(&f.path(), &stage.join(&fonts).join(f.file_name()))?;
+    }
     status(
         Command::new(std::env::var("CARGO").unwrap_or("cargo".into())).args([
             "about",

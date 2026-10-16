@@ -17,7 +17,7 @@ Work is planned **Glossary → Specification → Implementation Plan** before co
 - Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md) (author, source, licence). Adding an asset without a row is a bug.
 - Prefer art generated in code: the UI icon set, report themes, visual palettes and sample datasets are drawn/defined in code and original.
 - Never copy Power BI's icons, ribbon artwork, theme JSON, visual definitions, templates, sample `.pbix` files (Contoso, AdventureWorks reports…) or wording beyond feature names. Power BI feature *names* (menu labels, DAX/M function names) are fine.
-- Fonts: system fonts, plus at most one bundled OFL-licensed font with an `ATTRIBUTION.md` row.
+- Fonts: system fonts, plus at most one bundled OFL-licensed font with an `ATTRIBUTION.md` row. Exception: egui's default fonts (Ubuntu Light, Hack, Noto Emoji, emoji-icon-font), embedded by the `default_fonts` feature, listed in `ATTRIBUTION.md` with their licences in `licenses/egui-default-fonts/`. No others.
 
 ## Never crash
 People trust MetricCraft with their numbers; a crash loses their work. **This outranks feature work.**

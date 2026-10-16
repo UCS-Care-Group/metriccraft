@@ -3,4 +3,6 @@ Copyright (c) 2026 the MetricCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option
 (LICENSE-MIT, LICENSE-APACHE).
 
-Third-party material: none. The per-file list (author, source, license) is in ATTRIBUTION.md.
+Third-party material: the fonts listed in ATTRIBUTION.md (licences alongside, and in
+licenses/egui-default-fonts/). Third-party crates' licences: THIRD-PARTY-LICENSES.html in each
+release archive.
