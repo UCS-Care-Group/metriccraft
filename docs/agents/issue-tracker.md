@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues for this repo live as GitHub issues on `ucs-care-group/opendash-bi`. Use the `gh` CLI for
+Issues for this repo live as GitHub issues on `ucs-care-group/metriccraft`. Use the `gh` CLI for
 all operations — the GitHub MCP server is not reliably connected.
 
 ## Conventions
@@ -27,20 +27,20 @@ number below if it lands elsewhere.
 
 Add a sub-issue (needs the database id, and `-F` for an integer field):
 
-    gh api --method POST repos/ucs-care-group/opendash-bi/issues/1/sub_issues \
-      -F sub_issue_id=$(gh api repos/ucs-care-group/opendash-bi/issues/<n> --jq .id)
+    gh api --method POST repos/ucs-care-group/metriccraft/issues/1/sub_issues \
+      -F sub_issue_id=$(gh api repos/ucs-care-group/metriccraft/issues/<n> --jq .id)
 
 Add a blocking edge (`<n>` is blocked by `<b>`):
 
-    gh api --method POST repos/ucs-care-group/opendash-bi/issues/<n>/dependencies/blocked_by \
-      -F issue_id=$(gh api repos/ucs-care-group/opendash-bi/issues/<b> --jq .id)
+    gh api --method POST repos/ucs-care-group/metriccraft/issues/<n>/dependencies/blocked_by \
+      -F issue_id=$(gh api repos/ucs-care-group/metriccraft/issues/<b> --jq .id)
 
 Find the frontier — open, unassigned, no open blockers:
 
     for n in $(gh issue list --state open --json number,labels                --jq '.[]|select([.labels[].name]|index("wayfinder:map")|not)|.number'); do
-      blk=$(gh api repos/ucs-care-group/opendash-bi/issues/$n/dependencies/blocked_by \
+      blk=$(gh api repos/ucs-care-group/metriccraft/issues/$n/dependencies/blocked_by \
             --jq '[.[]|select(.state=="open")]|length')
-      as=$(gh api repos/ucs-care-group/opendash-bi/issues/$n --jq '.assignees|length')
+      as=$(gh api repos/ucs-care-group/metriccraft/issues/$n --jq '.assignees|length')
       [ "$blk" = "0" ] && [ "$as" = "0" ] && echo "#$n"
     done
 
