@@ -1,5 +1,7 @@
 # Roadmap
 
+Last reviewed: 2026-10-16 · Last updated: 2026-10-16 · Change list: [Revision history](#revision-history)
+
 **Stage:** pre-alpha, working towards the first preview build (`v0.1.0-preview.1`) and then v0.1.
 
 v0.1 is an authoring app: connect to files, shape them in a Power Query editor, model
@@ -48,3 +50,9 @@ Control channel → MCP server → web build → fuzz soak, acceptance run and v
   Batch (one undo step) and Origin on undo labels. M6.1: release workflow; archives 10.5–22.0 MB.
 - **2026-10-15** — M5 done: keyboard navigation, accessibility audit, UI snapshots and budgets.
   CI green on Linux, Windows and macOS hosted runners. Renamed to MetricCraft.
+
+## Revision history
+
+| Date       | Change                                                                  |
+|------------|-------------------------------------------------------------------------|
+| 2026-10-16 | First version: status, headline numbers, milestones, after v0.1, log.   |
