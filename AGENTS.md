@@ -1,13 +1,13 @@
 # MetricCraft — instructions for agents
 
-MetricCraft is a clean-room, open-source, Rust-native business-intelligence authoring app: a Power BI Desktop alternative that connects to data, shapes it, models it, and builds interactive report pages. DAX results match Power BI exactly; the UI follows Power BI's workflow but may improve on it. Desktop (Linux, Windows, macOS) is the product; the web build (WASM) is a reduced, file-only variant. Publishing, sharing and scheduled refresh (the Power BI Service half) is a separate, later product.
+MetricCraft is a clean-room, open-source, Rust-native business-intelligence authoring app: a Power BI Desktop alternative that connects to data, shapes it, models it, and builds interactive report pages. DAX results match Power BI exactly; the UI follows Power BI's workflow but may improve on it. Desktop (Linux, Windows, macOS) is the product; the web build (WASM) is a reduced, file-only variant. Publishing, sharing and scheduled refresh (the Power BI Service half) is a separate, later product: don't design for it until that is decided.
 
 Independent project. Its engineering rules were adapted from the storytold crafting apps (`storytold/gridcraft`; verbatim copies in `docs/agents/upstream/` for reference only) and are now our own.
 
 ## Start every session here
 1. `plan/` if it exists: maintainers' local working notes, gitignored, never committed. `plan/CONTEXT.md` is the glossary (use its terms; challenge drift), `plan/spec-*.md` what we're building, `plan/plan-*.md` how and in what order, `plan/adr/` decisions expensive to reverse. Without it, start from `ROADMAP.md` and the issues.
 2. Never commit anything from `plan/`, nor copy specs, plans or ADRs into tracked files.
-3. Tasks are GitHub issues (`docs/agents/issue-tracker.md`).
+3. Tasks are GitHub issues (`docs/agents/issue-tracker.md`), driven with `gh` (not the GitHub MCP).
 
 Work is planned **Glossary → Specification → Implementation Plan** before code; an ADR for anything expensive to reverse.
 

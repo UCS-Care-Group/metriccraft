@@ -1,7 +1,7 @@
 # Local agent layer (memory, logs, hooks, maintainer notes): private, never committed
 /context/
 /.claude/
-/CLAUDE.md
+/CLAUDE.local.md
 /.memsearch.toml
 /scripts/reindex-memory.ps1
 .memsearch/
