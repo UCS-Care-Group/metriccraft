@@ -1,7 +1,10 @@
 name: release
 
-# A `v*` tag (matching the workspace version) builds the archives and publishes a GitHub Release;
-# `-preview`/`-rc` tags are prereleases. Run by hand to build and size-check without publishing.
+# A `v*` tag (matching the workspace version) builds the archives and attaches them to a draft
+# GitHub Release for a person to review and publish (docs/releasing.md); `-preview`/`-rc` tags are
+# prereleases. Tag runs use the protected `release` environment (required reviewer; the only place
+# release secrets may live). A hand-started run is a dry run: it builds and size-checks the archives,
+# with no environment and no secrets, and publishes nothing.
 on:
   push:
     tags: ["v*"]
@@ -12,17 +15,19 @@ permissions:
 
 env:
   GH_REPO: ${{ github.repository }}
-  GH_TOKEN: ${{ github.token }}
   TAG: ${{ github.ref_name }}
 
 jobs:
   draft:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
-      - run: |
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
           pre=""; case "$TAG" in *-*) pre="--prerelease" ;; esac
           gh release create "$TAG" --draft --verify-tag --title "MetricCraft ${TAG#v}" --generate-notes $pre
 
@@ -43,26 +48,44 @@ jobs:
             runner: macos-latest
             targets: --target aarch64-apple-darwin --target x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: rustup toolchain install
       - if: matrix.os == 'macos'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - run: cargo install cargo-about --locked --version 0.9.2 --features cli
-      - run: cargo xtask dist ${{ matrix.targets }}
-      - if: github.ref_type == 'tag'
+      # A pinned release whose checksum the action verifies (third-party licence texts, dist).
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-about@0.9.2
+      - env:
+          TARGETS: ${{ matrix.targets }}
         shell: bash
-        run: |
-          shopt -s nullglob
-          gh release upload "$TAG" target/dist/*.tar.gz target/dist/*.zip --clobber
+        run: cargo xtask dist $TARGETS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-${{ matrix.os }}
+          path: |
+            target/dist/*.tar.gz
+            target/dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
 
-  publish:
+  # Attaches the archives to the draft. The draft stays a draft: a person publishes it.
+  upload:
     if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
-      - run: gh release edit "$TAG" --draft=false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber
