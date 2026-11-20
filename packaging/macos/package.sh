@@ -49,6 +49,16 @@ if [ "$SKIP_BUILD" = 1 ] && [ "$BUILD_ONLY" = 1 ]; then
   exit 2
 fi
 
+# Validate version and build SHA before Info.plist sed substitution and XML generation.
+for value in "$VERSION" "${METRICCRAFT_BUILD_SHA:-unknown}"; do
+  case "$value" in
+    *[!0-9A-Za-z._+-]*)
+      echo "error: version and build SHA may contain only letters, digits, '.', '_', '+' and '-': $value" >&2
+      exit 2
+      ;;
+  esac
+done
+
 # Keep in sync with LSMinimumSystemVersion in Info.plist.in.
 export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
@@ -94,6 +104,12 @@ for bin in metriccraft metriccraft-cli; do
   for arch in "${WANT[@]}"; do lipo "$WORK/bin/$bin" -verify_arch "$arch"; done
 done
 
+# Generate third-party dependency licence texts once for both packages.
+if ! (cd "$ROOT" && cargo about generate --locked about.hbs -o "$WORK/THIRD-PARTY-LICENSES.html"); then
+  echo "error: cargo-about failed; install it with 'cargo install cargo-about --locked --version 0.9.2'" >&2
+  exit 1
+fi
+
 # ---- signing helpers ---------------------------------------------------------------------------
 sign() {
   local ts=(--timestamp)
@@ -137,6 +153,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Licenses"
 cp "$WORK/bin/metriccraft" "$APP/Contents/MacOS/MetricCraft"
 cp "$WORK/bin/metriccraft-cli" "$APP/Contents/MacOS/metriccraft-cli"
 copy_docs "$APP/Contents/Resources/Licenses"
+cp "$WORK/THIRD-PARTY-LICENSES.html" "$APP/Contents/Resources/Licenses/"
 
 sed -e "s/@APP_ID@/$APP_ID/g" -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
   -e "s/@BUILD_SHA@/${METRICCRAFT_BUILD_SHA:-unknown}/g" -e "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" \
@@ -196,6 +213,7 @@ CLI_DIR="$WORK/metriccraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/metriccraft-cli" "$CLI_DIR/"
 copy_docs "$CLI_DIR"
+cp "$WORK/THIRD-PARTY-LICENSES.html" "$CLI_DIR/"
 sign --options runtime --identifier "$APP_ID.cli" "$CLI_DIR/metriccraft-cli"
 codesign --verify --strict --verbose=2 "$CLI_DIR/metriccraft-cli"
 rm -f "$CLI_ZIP"

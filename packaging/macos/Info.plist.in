@@ -41,46 +41,7 @@
   <false/>
   <key>NSHumanReadableCopyright</key>
   <string>Copyright © MetricCraft contributors. MIT OR Apache-2.0.</string>
-  <key>CFBundleDocumentTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeName</key>
-      <string>MetricCraft Package</string>
-      <key>CFBundleTypeRole</key>
-      <string>Editor</string>
-      <key>LSHandlerRank</key>
-      <string>Owner</string>
-      <key>CFBundleTypeExtensions</key>
-      <array>
-        <string>mcraft</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
-      <string>Power BI Report</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>CFBundleTypeExtensions</key>
-      <array>
-        <string>pbix</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
-      <string>Tabular Data</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>CFBundleTypeExtensions</key>
-      <array>
-        <string>csv</string>
-        <string>parquet</string>
-        <string>xlsx</string>
-      </array>
-    </dict>
-  </array>
+  <!-- Finder open-document AppleEvents are not wired up yet (and .pbix is unsupported);
+       omit CFBundleDocumentTypes until platform-side open-document handlers are implemented. -->
 </dict>
 </plist>

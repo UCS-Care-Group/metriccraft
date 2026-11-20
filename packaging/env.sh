@@ -8,7 +8,7 @@
 #   DIST                    output directory for release artifacts (default: $ROOT/dist/release)
 #   METRICCRAFT_BUILD_SHA      git commit recorded in the macOS Info.plist
 #   METRICCRAFT_BUILD_DATE     UTC build date, YYYY-MM-DD
-#   CARGO_TARGET_DIR        cargo's target dir (default: $ROOT/target)
+#   CARGO_TARGET_DIR        absolute cargo target dir (default: $ROOT/target)
 #   APP_ID                  reverse-DNS macOS bundle identifier
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,7 +38,16 @@ METRICCRAFT_BUILD_SHA="${METRICCRAFT_BUILD_SHA:-$(git -C "$ROOT" rev-parse HEAD 
 export METRICCRAFT_BUILD_SHA
 METRICCRAFT_BUILD_DATE="${METRICCRAFT_BUILD_DATE:-$(date -u +%Y-%m-%d)}"
 export METRICCRAFT_BUILD_DATE
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+
+# Resolve any relative CARGO_TARGET_DIR override against the caller's working directory
+# before subshells cd into $ROOT for cargo build.
+case "${CARGO_TARGET_DIR:-}" in
+  "") CARGO_TARGET_DIR="$ROOT/target" ;;
+  /*) ;;
+  *) CARGO_TARGET_DIR="$PWD/$CARGO_TARGET_DIR" ;;
+esac
+export CARGO_TARGET_DIR
+
 APP_ID="org.metriccraft.MetricCraft"
 export APP_ID
 
@@ -50,7 +59,7 @@ warn() {
 # Copy repository licence and readme files into a package directory.
 copy_docs() {
   local dest="$1" f
-  for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md COPYRIGHT THIRD-PARTY-LICENSES.txt; do
+  for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md COPYRIGHT; do
     if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$dest/"; fi
   done
   copy_font_licences "$dest"
@@ -59,15 +68,19 @@ copy_docs() {
 # Copy bundled font licences (including optional CRAFT_FONTS_DIR embeds) into dest.
 copy_font_licences() {
   local dest="$1" f
-  if [ -f "$ROOT/crates/visuals/fonts/OFL.txt" ]; then
-    cp "$ROOT/crates/visuals/fonts/OFL.txt" "$dest/OFL-Inter.txt"
+  if [ ! -f "$ROOT/crates/visuals/fonts/OFL.txt" ]; then
+    echo "error: missing required font licence $ROOT/crates/visuals/fonts/OFL.txt" >&2
+    exit 1
   fi
-  if [ -d "$ROOT/licenses/egui-default-fonts" ]; then
-    mkdir -p "$dest/egui-default-fonts"
-    for f in "$ROOT"/licenses/egui-default-fonts/*; do
-      if [ -f "$f" ]; then cp "$f" "$dest/egui-default-fonts/"; fi
-    done
-  fi
+  cp "$ROOT/crates/visuals/fonts/OFL.txt" "$dest/OFL-Inter.txt"
+  mkdir -p "$dest/egui-default-fonts"
+  for f in Hack-Regular.txt OFL.txt UFL.txt emoji-icon-font-mit-license.txt; do
+    if [ ! -f "$ROOT/licenses/egui-default-fonts/$f" ]; then
+      echo "error: missing required egui default font licence $ROOT/licenses/egui-default-fonts/$f" >&2
+      exit 1
+    fi
+    cp "$ROOT/licenses/egui-default-fonts/$f" "$dest/egui-default-fonts/"
+  done
   [ -n "${CRAFT_FONTS_DIR:-}" ] || return 0
   for f in "$CRAFT_FONTS_DIR"/fonts/*/OFL.txt; do
     if [ -f "$f" ]; then cp "$f" "$dest/OFL-$(basename "$(dirname "$f")").txt"; fi
