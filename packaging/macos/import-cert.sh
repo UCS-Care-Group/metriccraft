@@ -21,10 +21,15 @@ KEYCHAIN="$TMP/metriccraft-signing-$$.keychain-db"
 CERT="$TMP/metriccraft-signing-$$.p12"
 KC_PASS="${KEYCHAIN_PASSWORD:-$(openssl rand -hex 24)}"
 KEEP_KEYCHAIN=0
+KEYCHAIN_LIST_MODIFIED=0
+existing_keychains=()
 
 cleanup() {
   rm -f "$CERT"
   if [ "$KEEP_KEYCHAIN" != 1 ]; then
+    if [ "$KEYCHAIN_LIST_MODIFIED" = 1 ]; then
+      security list-keychains -d user -s ${existing_keychains[@]+"${existing_keychains[@]}"} 2>/dev/null || true
+    fi
     security delete-keychain "$KEYCHAIN" 2>/dev/null || rm -f "$KEYCHAIN"
   fi
 }
@@ -48,6 +53,7 @@ existing_keychains=()
 while IFS= read -r line; do
   [ -n "$line" ] && existing_keychains+=("$line")
 done < <(printf '%s\n' "$keychain_list" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+KEYCHAIN_LIST_MODIFIED=1
 security list-keychains -d user -s "$KEYCHAIN" ${existing_keychains[@]+"${existing_keychains[@]}"}
 
 IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ { print $2; exit }')"
