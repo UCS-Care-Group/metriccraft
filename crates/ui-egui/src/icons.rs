@@ -286,17 +286,6 @@ pub fn big_button_labeled(
     response
 }
 
-/// A Ribbon button: the icon above the label. Its AccessKit label is `label`.
-pub fn big_button(
-    ui: &mut Ui,
-    icon: Icon,
-    label: &str,
-    enabled: bool,
-    t: &crate::theme::Tokens,
-) -> Response {
-    big_button_labeled(ui, icon, label, label, enabled, t)
-}
-
 /// Sets `r`'s AccessKit label to `label` without adding a hover tooltip.
 pub fn a11y_label(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui::Response {
     r.widget_info(|| egui::WidgetInfo::labeled(typ, r.enabled(), label));

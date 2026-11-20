@@ -169,6 +169,8 @@ pub fn is_rtl() -> bool {
 }
 
 /// Logical command label in `lang` (for palette matching and non-egui native surfaces).
+/// Every registered command in `COMMANDS` is verified to have a Hebrew entry in tests;
+/// `c.label` serves only as a panic-free fallback for unregistered commands.
 pub fn command_label_for(lang: Lang, c: &Command) -> &'static str {
     if lang == Lang::English {
         return c.label;

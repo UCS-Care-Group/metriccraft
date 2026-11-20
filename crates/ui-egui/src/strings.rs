@@ -120,6 +120,8 @@ pub enum Str {
 }
 
 impl Str {
+    /// Complete list of `Str` variants for test-time translation coverage checks.
+    /// Keep in sync with `Str` (exhaustiveness is enforced by `Str::text_for` and `tests::str_all_has_no_duplicates`).
     #[cfg(test)]
     pub const ALL: [Str; 101] = [
         Str::AppName,
@@ -509,5 +511,14 @@ mod tests {
             "Page 2 of "
         );
         assert_eq!(Str::Ready.fill_for(Lang::English, &["x"]), "Ready");
+    }
+
+    #[test]
+    fn str_all_has_no_duplicates() {
+        let mut seen = Vec::with_capacity(Str::ALL.len());
+        for s in Str::ALL {
+            assert!(!seen.contains(&s), "duplicate Str::ALL entry: {s:?}");
+            seen.push(s);
+        }
     }
 }
