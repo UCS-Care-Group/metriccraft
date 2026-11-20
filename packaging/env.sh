@@ -14,11 +14,21 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export ROOT
 
-# Read [workspace.package] version from the root Cargo.toml.
+# Read [workspace.package] version from the root Cargo.toml, tolerating comments and whitespace.
 workspace_version() {
   awk '
-    /^\[/ { in_pkg = ($0 == "[workspace.package]") ; next }
-    in_pkg && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }
+    {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+    }
+    line ~ /^\[/ { in_pkg = (line == "[workspace.package]"); next }
+    in_pkg && line ~ /^version[[:space:]]*=/ {
+      sub(/^version[[:space:]]*=[[:space:]]*/, "", line)
+      gsub(/^["'\'']|["'\'']$/, "", line)
+      print line
+      exit
+    }
   ' "$ROOT/Cargo.toml"
 }
 

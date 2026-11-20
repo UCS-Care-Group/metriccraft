@@ -49,15 +49,19 @@ if [ "$SKIP_BUILD" = 1 ] && [ "$BUILD_ONLY" = 1 ]; then
   exit 2
 fi
 
-# Validate version and build SHA before Info.plist sed substitution and XML generation.
-for value in "$VERSION" "${METRICCRAFT_BUILD_SHA:-unknown}"; do
+# Validate version, bundle identifier, deployment target, and build SHA before Info.plist substitution.
+for value in "$APP_ID" "$VERSION" "$SHORT_VERSION" "$MACOSX_DEPLOYMENT_TARGET" "${METRICCRAFT_BUILD_SHA:-unknown}"; do
   case "$value" in
     *[!0-9A-Za-z._+-]*)
-      echo "error: version and build SHA may contain only letters, digits, '.', '_', '+' and '-': $value" >&2
+      echo "error: Info.plist substitution values may contain only letters, digits, '.', '_', '+' and '-': $value" >&2
       exit 2
       ;;
   esac
 done
+
+escape_sed_repl() {
+  printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'
+}
 
 # Keep in sync with LSMinimumSystemVersion in Info.plist.in.
 export MACOSX_DEPLOYMENT_TARGET=11.0
@@ -86,7 +90,10 @@ echo "==> MetricCraft $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize:
 if [ "$SKIP_BUILD" = 0 ]; then
   args=()
   for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
-  (cd "$ROOT" && cargo build --release --locked -p metriccraft -p metriccraft-cli "${args[@]}")
+  if ! (cd "$ROOT" && cargo build --release --locked -p metriccraft -p metriccraft-cli "${args[@]}"); then
+    echo "error: cargo build failed; aborting packaging" >&2
+    exit 1
+  fi
 fi
 
 if [ "$BUILD_ONLY" = 1 ]; then
@@ -155,8 +162,15 @@ cp "$WORK/bin/metriccraft-cli" "$APP/Contents/MacOS/metriccraft-cli"
 copy_docs "$APP/Contents/Resources/Licenses"
 cp "$WORK/THIRD-PARTY-LICENSES.html" "$APP/Contents/Resources/Licenses/"
 
-sed -e "s/@APP_ID@/$APP_ID/g" -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
-  -e "s/@BUILD_SHA@/${METRICCRAFT_BUILD_SHA:-unknown}/g" -e "s/@MIN_MACOS@/$MACOSX_DEPLOYMENT_TARGET/g" \
+escaped_app_id="$(escape_sed_repl "$APP_ID")"
+escaped_version="$(escape_sed_repl "$VERSION")"
+escaped_short_version="$(escape_sed_repl "$SHORT_VERSION")"
+escaped_build_sha="$(escape_sed_repl "${METRICCRAFT_BUILD_SHA:-unknown}")"
+escaped_min_macos="$(escape_sed_repl "$MACOSX_DEPLOYMENT_TARGET")"
+
+sed -e "s/@APP_ID@/$escaped_app_id/g" -e "s/@VERSION@/$escaped_version/g" \
+  -e "s/@SHORT_VERSION@/$escaped_short_version/g" -e "s/@BUILD_SHA@/$escaped_build_sha/g" \
+  -e "s/@MIN_MACOS@/$escaped_min_macos/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"
 
 ICON_SRC=""
