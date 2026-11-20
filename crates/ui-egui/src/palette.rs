@@ -106,7 +106,11 @@ impl Palette {
                         if let Some(key) = c.shortcut {
                             text = format!("{text}    {key}");
                         }
-                        let r = ui.selectable_label(i == self.selected, text);
+                        let r = crate::icons::a11y_label(
+                            ui.selectable_label(i == self.selected, text),
+                            egui::WidgetType::SelectableLabel,
+                            crate::i18n::command_label(c),
+                        );
                         let r = if c.ribbon.is_empty() {
                             r
                         } else {
@@ -291,7 +295,13 @@ impl Form {
                 {
                     action = Some(Action::Run(command, v));
                 }
-                if ui.button(Str::Cancel.show()).clicked() {
+                if crate::icons::a11y_label(
+                    ui.button(Str::Cancel.show()),
+                    egui::WidgetType::Button,
+                    Str::Cancel.text(),
+                )
+                .clicked()
+                {
                     action = Some(Action::Close);
                 }
             });

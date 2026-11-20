@@ -73,6 +73,7 @@ impl Prefs {
             .get("language")
             .and_then(Value::as_str)
             .and_then(Lang::from_tag)
+            .filter(|l| *l != Lang::Hebrew || Lang::hebrew_font_available())
             .unwrap_or_default();
         Prefs {
             theme,
@@ -326,8 +327,13 @@ impl Shell {
 
     /// Switches UI language (`en` / `he`) and updates the active translation state.
     pub fn set_language(&mut self, lang: Lang) {
-        self.prefs.language = lang;
-        i18n::set_language(lang);
+        let resolved = if lang == Lang::Hebrew && !Lang::hebrew_font_available() {
+            Lang::English
+        } else {
+            lang
+        };
+        self.prefs.language = resolved;
+        i18n::set_language(resolved);
     }
 
     /// Picks a View by key (`report`, `table`, `model`); unknown keys are ignored.
@@ -632,7 +638,11 @@ impl Shell {
                     }
                     ui.separator();
                     for tab in self.tabs() {
-                        let r = ui.selectable_value(&mut self.tab, tab, tab.label().show());
+                        let r = icons::a11y_label(
+                            ui.selectable_value(&mut self.tab, tab, tab.label().show()),
+                            egui::WidgetType::SelectableLabel,
+                            tab.label().text(),
+                        );
                         if self.keytips.level == Some(keys::Level::Tabs) {
                             keys::badge(ui, r.rect, keys::tab_letter(tab), &t);
                         }
@@ -643,16 +653,32 @@ impl Shell {
                     ui.horizontal(|ui| {
                         ui.label(Str::AppTheme.show());
                         let mut mode = self.prefs.theme;
-                        ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.show());
-                        ui.selectable_value(&mut mode, Mode::Dark, Str::ThemeDark.show());
+                        icons::a11y_label(
+                            ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.show()),
+                            egui::WidgetType::SelectableLabel,
+                            Str::ThemeLight.text(),
+                        );
+                        icons::a11y_label(
+                            ui.selectable_value(&mut mode, Mode::Dark, Str::ThemeDark.show()),
+                            egui::WidgetType::SelectableLabel,
+                            Str::ThemeDark.text(),
+                        );
                         if mode != self.prefs.theme {
                             self.set_theme(ui.ctx(), mode);
                         }
                         ui.separator();
                         ui.label(Str::Language.show());
                         let mut lang = self.prefs.language;
-                        for choice in Lang::ALL {
-                            ui.selectable_value(&mut lang, choice, choice.display_name().show());
+                        for &choice in Lang::available() {
+                            icons::a11y_label(
+                                ui.selectable_value(
+                                    &mut lang,
+                                    choice,
+                                    choice.display_name().show(),
+                                ),
+                                egui::WidgetType::SelectableLabel,
+                                choice.display_name().text(),
+                            );
                         }
                         if lang != self.prefs.language {
                             self.set_language(lang);
@@ -666,7 +692,14 @@ impl Shell {
                             let icon = icons::Icon::Table;
                             let label = Str::TransformData.show();
                             ui.vertical(|ui| {
-                                let r = icons::big_button(ui, icon, &label, true, &t);
+                                let r = icons::big_button_labeled(
+                                    ui,
+                                    icon,
+                                    &label,
+                                    Str::TransformData.text(),
+                                    true,
+                                    &t,
+                                );
                                 if r.clicked() {
                                     self.pq.open = true;
                                 }
@@ -745,7 +778,13 @@ impl Shell {
                                 RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
                             );
                         }
-                        if ui.button(Str::Cancel.show()).clicked() {
+                        if icons::a11y_label(
+                            ui.button(Str::Cancel.show()),
+                            egui::WidgetType::Button,
+                            Str::Cancel.text(),
+                        )
+                        .clicked()
+                        {
                             self.engine.cancel_load();
                         }
                         ui.ctx()
@@ -782,7 +821,14 @@ impl Shell {
                         View::Table => icons::Icon::Table,
                         View::Model => icons::Icon::Model,
                     };
-                    let r = icons::big_button(ui, icon, &view.label().show(), true, &t);
+                    let r = icons::big_button_labeled(
+                        ui,
+                        icon,
+                        &view.label().show(),
+                        view.label().text(),
+                        true,
+                        &t,
+                    );
                     if on {
                         let bar = egui::Rect::from_min_size(
                             r.rect.left_top() - egui::vec2(5.0, 0.0),
@@ -913,7 +959,12 @@ impl Shell {
                 egui::Panel::top("pq-close").show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            close |= ui.button(Str::Close.show()).clicked();
+                            close |= icons::a11y_label(
+                                ui.button(Str::Close.show()),
+                                egui::WidgetType::Button,
+                                Str::Close.text(),
+                            )
+                            .clicked();
                         });
                     });
                 });
@@ -1003,15 +1054,21 @@ impl Shell {
         }
         let pct = format!("{pct:.0}");
         ui.label(Str::Percent.fill(&[&pct]));
-        if ui
-            .selectable_label(*z == Zoom::FitWidth, Str::FitWidth.show())
-            .clicked()
+        if icons::a11y_label(
+            ui.selectable_label(*z == Zoom::FitWidth, Str::FitWidth.show()),
+            egui::WidgetType::SelectableLabel,
+            Str::FitWidth.text(),
+        )
+        .clicked()
         {
             *z = Zoom::FitWidth;
         }
-        if ui
-            .selectable_label(*z == Zoom::FitPage, Str::FitPage.show())
-            .clicked()
+        if icons::a11y_label(
+            ui.selectable_label(*z == Zoom::FitPage, Str::FitPage.show()),
+            egui::WidgetType::SelectableLabel,
+            Str::FitPage.text(),
+        )
+        .clicked()
         {
             *z = Zoom::FitPage;
         }
@@ -1038,13 +1095,32 @@ impl Shell {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(Str::RecoveryFound.fill(&[&what]));
-                    if usable && ui.button(Str::Recover.show()).clicked() {
+                    if usable
+                        && icons::a11y_label(
+                            ui.button(Str::Recover.show()),
+                            egui::WidgetType::Button,
+                            Str::Recover.text(),
+                        )
+                        .clicked()
+                    {
                         chosen = Some("file.recover");
                     }
-                    if ui.button(Str::Discard.show()).clicked() {
+                    if icons::a11y_label(
+                        ui.button(Str::Discard.show()),
+                        egui::WidgetType::Button,
+                        Str::Discard.text(),
+                    )
+                    .clicked()
+                    {
                         chosen = Some("file.discardRecovery");
                     }
-                    if ui.button(Str::Dismiss.show()).clicked() {
+                    if icons::a11y_label(
+                        ui.button(Str::Dismiss.show()),
+                        egui::WidgetType::Button,
+                        Str::Dismiss.text(),
+                    )
+                    .clicked()
+                    {
                         chosen = Some("");
                     }
                 });
@@ -1097,7 +1173,13 @@ impl Shell {
         let modal = egui::Modal::new(egui::Id::new("close")).show(ui.ctx(), |ui| {
             ui.label(Str::SaveFirst.fill(&[&name]));
             ui.horizontal(|ui| {
-                if ui.button(Str::Save.show()).clicked() {
+                if icons::a11y_label(
+                    ui.button(Str::Save.show()),
+                    egui::WidgetType::Button,
+                    Str::Save.text(),
+                )
+                .clicked()
+                {
                     if has_location {
                         self.closing = Closing::Saving;
                         self.engine.run("file.save", json!({}));
@@ -1108,10 +1190,22 @@ impl Shell {
                         }
                     }
                 }
-                if ui.button(Str::DontSave.show()).clicked() {
+                if icons::a11y_label(
+                    ui.button(Str::DontSave.show()),
+                    egui::WidgetType::Button,
+                    Str::DontSave.text(),
+                )
+                .clicked()
+                {
                     self.quit_requested = true;
                 }
-                if ui.button(Str::Cancel.show()).clicked() {
+                if icons::a11y_label(
+                    ui.button(Str::Cancel.show()),
+                    egui::WidgetType::Button,
+                    Str::Cancel.text(),
+                )
+                .clicked()
+                {
                     self.closing = Closing::No;
                 }
             });
@@ -1220,7 +1314,9 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
 }
 
 /// Registers bundled (`CRAFT_FONTS_DIR`) or desktop system Hebrew fallback fonts on every UI
-/// font family without committing binary font assets.
+/// font family without committing binary font assets. Web (`wasm32`) builds require
+/// `CRAFT_FONTS_DIR` pointing to `NotoSansHebrew-Regular.ttf` at build time; otherwise
+/// `Lang::available()` hides Hebrew so the web UI never renders missing-glyph boxes.
 fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) {
     #[cfg(has_hebrew_craft_font)]
     {

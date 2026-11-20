@@ -101,7 +101,10 @@ impl QueryEditor {
         egui::Panel::top("pq-ribbon").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for (i, (label, _)) in TABS.iter().enumerate() {
-                    if ui.selectable_label(self.tab == i, label.show()).clicked() {
+                    let r = ui.selectable_label(self.tab == i, label.show());
+                    if crate::icons::a11y_label(r, egui::WidgetType::SelectableLabel, label.text())
+                        .clicked()
+                    {
                         self.tab = i;
                     }
                 }
@@ -190,7 +193,7 @@ impl QueryEditor {
             match preview.filter(|p| p.query == q.name && p.step == at) {
                 Some(PreviewOut { result: Ok(p), .. }) => {
                     let key = format!("{}#{at:?}", q.name);
-                    let label = Str::PreviewOf.fill(&[&q.name]);
+                    let label = Str::PreviewOf.fill_logical(&[&q.name]);
                     let error = |row: usize, col: usize| p.error(row, col).map(str::to_string);
                     self.grid.show_batch(
                         ui,

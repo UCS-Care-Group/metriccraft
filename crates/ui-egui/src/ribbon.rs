@@ -97,7 +97,14 @@ pub fn big(
         return button(ui, snap, commands, c);
     };
     let enabled = snap.enabled(commands, c.id);
-    let mut r = crate::icons::big_button(ui, icon, &crate::i18n::command_display(c), enabled, t);
+    let mut r = crate::icons::big_button_labeled(
+        ui,
+        icon,
+        &crate::i18n::command_display(c),
+        crate::i18n::command_label(c),
+        enabled,
+        t,
+    );
     if let Some(key) = c.shortcut {
         r = r.on_hover_text(Str::Shortcut.fill(&[key]));
     }
@@ -116,7 +123,14 @@ pub fn small(
         return button(ui, snap, commands, c);
     };
     let enabled = snap.enabled(commands, c.id);
-    let r = crate::icons::icon_button(ui, icon, crate::i18n::command_label(c), enabled, t);
+    let r = crate::icons::icon_button_labeled(
+        ui,
+        icon,
+        &crate::i18n::command_display(c),
+        crate::i18n::command_label(c),
+        enabled,
+        t,
+    );
     let r = match c.shortcut {
         Some(key) => r.on_hover_text(Str::Shortcut.fill(&[key])),
         None => r,
@@ -132,9 +146,13 @@ pub fn button(
     c: &'static Command,
 ) -> Option<Action> {
     let enabled = snap.enabled(commands, c.id);
-    let mut r = ui.add_enabled(
-        enabled,
-        egui::Button::new(crate::i18n::command_display(c)).min_size(egui::vec2(0.0, 28.0)),
+    let mut r = crate::icons::a11y_label(
+        ui.add_enabled(
+            enabled,
+            egui::Button::new(crate::i18n::command_display(c)).min_size(egui::vec2(0.0, 28.0)),
+        ),
+        egui::WidgetType::Button,
+        crate::i18n::command_label(c),
     );
     if let Some(key) = c.shortcut {
         r = r.on_hover_text(Str::Shortcut.fill(&[key]));

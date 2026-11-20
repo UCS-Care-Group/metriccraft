@@ -234,16 +234,19 @@ impl Icon {
     }
 }
 
-/// A Ribbon button: the icon above the label. Its AccessKit label is `label`.
-pub fn big_button(
+/// A Ribbon button: the icon above `display_label`, with `accessible_label` for AccessKit.
+pub fn big_button_labeled(
     ui: &mut Ui,
     icon: Icon,
-    label: &str,
+    display_label: &str,
+    accessible_label: &str,
     enabled: bool,
     t: &crate::theme::Tokens,
 ) -> Response {
     let font = egui::TextStyle::Small.resolve(ui.style());
-    let galley = ui.painter().layout_no_wrap(label.into(), font, t.text);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(display_label.into(), font, t.text);
     let size = Vec2::new(galley.size().x.max(32.0) + 10.0, 48.0);
     let sense = if enabled {
         Sense::click()
@@ -251,7 +254,7 @@ pub fn big_button(
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible_label));
     if ui.is_rect_visible(rect) {
         let color = if enabled {
             t.text
@@ -283,18 +286,37 @@ pub fn big_button(
     response
 }
 
-/// Gives `r` (a control showing a symbol or nothing) the label `label` for screen readers,
-/// and as its tooltip.
-pub fn name(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui::Response {
-    r.widget_info(|| egui::WidgetInfo::labeled(typ, r.enabled(), label));
-    r.on_hover_text(label)
-}
-
-/// A small square button with just an icon; `label` is its AccessKit label and tooltip.
-pub fn icon_button(
+/// A Ribbon button: the icon above the label. Its AccessKit label is `label`.
+pub fn big_button(
     ui: &mut Ui,
     icon: Icon,
     label: &str,
+    enabled: bool,
+    t: &crate::theme::Tokens,
+) -> Response {
+    big_button_labeled(ui, icon, label, label, enabled, t)
+}
+
+/// Sets `r`'s AccessKit label to `label` without adding a hover tooltip.
+pub fn a11y_label(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui::Response {
+    r.widget_info(|| egui::WidgetInfo::labeled(typ, r.enabled(), label));
+    r
+}
+
+/// Gives `r` (a control showing a symbol or nothing) the label `label` for screen readers,
+/// and as its tooltip.
+pub fn name(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui::Response {
+    let r = a11y_label(r, typ, label);
+    r.on_hover_text(label)
+}
+
+/// A small square button with just an icon; `accessible_label` is its AccessKit label and
+/// `tooltip_label` is its hover tooltip.
+pub fn icon_button_labeled(
+    ui: &mut Ui,
+    icon: Icon,
+    tooltip_label: &str,
+    accessible_label: &str,
     enabled: bool,
     t: &crate::theme::Tokens,
 ) -> Response {
@@ -304,7 +326,7 @@ pub fn icon_button(
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(26.0), sense);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible_label));
     if ui.is_rect_visible(rect) {
         let color = if enabled {
             t.text
@@ -324,7 +346,18 @@ pub fn icon_button(
         }
         icon.paint(ui.painter(), rect.shrink(4.0), color);
     }
-    response.on_hover_text(label)
+    response.on_hover_text(tooltip_label)
+}
+
+/// A small square button with just an icon; `label` is its AccessKit label and tooltip.
+pub fn icon_button(
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    enabled: bool,
+    t: &crate::theme::Tokens,
+) -> Response {
+    icon_button_labeled(ui, icon, label, label, enabled, t)
 }
 
 #[cfg(test)]

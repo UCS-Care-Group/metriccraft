@@ -18,6 +18,21 @@ pub enum Lang {
 impl Lang {
     pub const ALL: [Lang; 2] = [Lang::English, Lang::Hebrew];
 
+    /// Whether Hebrew text can render in this build (always on desktop; on WASM only when
+    /// `CRAFT_FONTS_DIR` supplied `NotoSansHebrew-Regular.ttf` at compile time).
+    pub const fn hebrew_font_available() -> bool {
+        cfg!(any(not(target_arch = "wasm32"), has_hebrew_craft_font))
+    }
+
+    /// Languages selectable in the UI for this build target.
+    pub const fn available() -> &'static [Lang] {
+        if Self::hebrew_font_available() {
+            &Self::ALL
+        } else {
+            &[Lang::English]
+        }
+    }
+
     pub const fn code(self) -> &'static str {
         match self {
             Lang::English => "en",
@@ -416,6 +431,46 @@ fn mirror_bracket(c: char) -> char {
     }
 }
 
+fn find_path_paren_close(
+    chars: &[(usize, char)],
+    span_start: usize,
+    open_idx: usize,
+) -> Option<usize> {
+    if open_idx > span_start
+        && chars
+            .get(open_idx - 1)
+            .is_some_and(|(_, prev)| *prev == ' ')
+        && !chars[span_start..open_idx]
+            .iter()
+            .any(|(_, c)| matches!(c, '/' | '\\'))
+    {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut k = open_idx;
+    while let Some(&(_, ch)) = chars.get(k) {
+        if matches!(ch, '\n' | '\r') || is_rtl_script(ch) {
+            return None;
+        }
+        if ch == '(' {
+            depth += 1;
+        } else if ch == ')' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                let has_sep = chars[span_start..=k]
+                    .iter()
+                    .any(|(_, c)| matches!(c, '/' | '\\'));
+                let followed_by_path_part = chars.get(k + 1).is_some_and(|(_, next)| {
+                    matches!(next, '.' | '/' | '\\') || next.is_ascii_alphanumeric()
+                });
+                return (has_sep || followed_by_path_part).then_some(k);
+            }
+        }
+        k += 1;
+    }
+    None
+}
+
 /// Splits one logical line into runs so multi-word RTL reverses word order while keeping LTR tokens
 /// (Latin words, numbers, file paths, dot-names, and `\u{2066}`..`\u{2069}` isolate spans) intact.
 fn mask_atoms(line: &str) -> Vec<String> {
@@ -469,13 +524,25 @@ fn mask_atoms(line: &str) -> Vec<String> {
                     .get(i + 1)
                     .is_some_and(|(_, next)| next.is_ascii_alphanumeric() || *next == '/'))
         {
-            // Keep multi-word LTR phrases separated by single spaces or slash/dash as one run.
+            // Keep multi-word LTR phrases separated by single spaces or slash/dash as one run,
+            // plus digit-flanked grouping commas and balanced parentheses inside file paths.
             let mut j = i + 1;
             while j < chars.len() {
                 let Some(&(_, c)) = chars.get(j) else {
                     break;
                 };
-                if is_ltr_token_char(c)
+                if c == '('
+                    && let Some(close_j) = find_path_paren_close(&chars, i, j)
+                {
+                    j = close_j + 1;
+                } else if is_ltr_token_char(c)
+                    || (c == ','
+                        && chars
+                            .get(j - 1)
+                            .is_some_and(|(_, prev)| prev.is_ascii_digit())
+                        && chars
+                            .get(j + 1)
+                            .is_some_and(|(_, next)| next.is_ascii_digit()))
                     || (c == ' '
                         && chars
                             .get(j + 1)
@@ -588,7 +655,58 @@ pub fn visual_rtl(logical: &str) -> String {
     out
 }
 
-/// Breaks `logical` text at `max_width` first, then applies visual RTL reordering per row.
+fn wrap_paragraph_logical<'a>(
+    ctx: &egui::Context,
+    paragraph: &'a str,
+    font_id: &egui::FontId,
+    max_width: f32,
+) -> Vec<&'a str> {
+    if paragraph.is_empty() || !max_width.is_finite() {
+        return vec![paragraph];
+    }
+    let max_w = max_width.max(1.0);
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut in_word = false;
+    let mut word_start = 0usize;
+    for (idx, ch) in paragraph.char_indices() {
+        if ch.is_whitespace() {
+            if in_word {
+                spans.push((word_start, idx));
+                in_word = false;
+            }
+        } else if !in_word {
+            word_start = idx;
+            in_word = true;
+        }
+    }
+    if in_word {
+        spans.push((word_start, paragraph.len()));
+    }
+    let Some(&(mut line_start, mut line_end)) = spans.first() else {
+        return vec![paragraph];
+    };
+    let mut rows = Vec::new();
+    for &(span_start, span_end) in spans.iter().skip(1) {
+        let candidate = &paragraph[line_start..span_end];
+        let width = ctx.fonts_mut(|f| {
+            f.layout_no_wrap(candidate.to_owned(), font_id.clone(), Default::default())
+                .rect
+                .width()
+        });
+        if width <= max_w {
+            line_end = span_end;
+        } else {
+            rows.push(&paragraph[line_start..line_end]);
+            line_start = span_start;
+            line_end = span_end;
+        }
+    }
+    rows.push(&paragraph[line_start..line_end]);
+    rows
+}
+
+/// Breaks `logical` text at `max_width` first using original logical substrings, then applies
+/// visual RTL reordering per row containing RTL characters.
 pub fn wrapped_visual_lines(
     ctx: &egui::Context,
     rtl: bool,
@@ -599,25 +717,19 @@ pub fn wrapped_visual_lines(
     if !rtl || !logical.chars().any(is_rtl_script) {
         return logical.to_owned();
     }
-    let galley = ctx.fonts_mut(|f| {
-        f.layout(
-            logical.to_owned(),
-            font_id,
-            Default::default(),
-            max_width.max(1.0),
-        )
-    });
     let mut out = String::with_capacity(logical.len());
-    for (idx, placed) in galley.rows.iter().enumerate() {
-        if idx > 0 {
-            out.push('\n');
-        }
-        let row_text = placed.text();
-        let trimmed = row_text.trim_end_matches(' ');
-        if trimmed.chars().any(is_rtl_script) {
-            push_visual_rtl_line(trimmed, &mut out);
-        } else {
-            out.push_str(trimmed);
+    let mut first_row = true;
+    for paragraph in logical.split('\n') {
+        for row_logical in wrap_paragraph_logical(ctx, paragraph, &font_id, max_width) {
+            if !first_row {
+                out.push('\n');
+            }
+            first_row = false;
+            if row_logical.chars().any(is_rtl_script) {
+                push_visual_rtl_line(row_logical, &mut out);
+            } else {
+                out.push_str(row_logical);
+            }
         }
     }
     out
@@ -688,8 +800,16 @@ mod tests {
             "5 מתוך 2 עמוד"
         );
         assert_eq!(
+            Str::RowCount.fill_for(Lang::Hebrew, &["1,234"]),
+            "שורות 1,234"
+        );
+        assert_eq!(
             Str::RecoveryFound.fill_for(Lang::Hebrew, &["/tmp/demo.mcraft"]),
             "/tmp/demo.mcraft :קודמת מהפעלה נשמרה שלא עבודה לשחזר ניתן"
+        );
+        assert_eq!(
+            Str::RecoveryFound.fill_for(Lang::Hebrew, &["/tmp/report(2026).mcraft"]),
+            "/tmp/report(2026).mcraft :קודמת מהפעלה נשמרה שלא עבודה לשחזר ניתן"
         );
         assert_eq!(
             Str::RecoveryFound.fill_for(Lang::Hebrew, &["\u{2066}foo - אב - bar\u{2069}"]),
@@ -712,5 +832,6 @@ mod tests {
         );
         let first_row = wrapped.lines().next().unwrap_or_default();
         assert!(first_row.contains("בחר"), "got {wrapped:?}");
+        assert!(!first_row.contains("רחב"), "got {wrapped:?}");
     }
 }

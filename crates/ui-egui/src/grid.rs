@@ -57,7 +57,7 @@ impl Grid {
                 (c.format_string.clone(), c.hidden)
             })
         };
-        let label = Str::TableOf.fill(&[table.name()]);
+        let label = Str::TableOf.fill_logical(&[table.name()]);
         self.show_batch(
             ui,
             t,
