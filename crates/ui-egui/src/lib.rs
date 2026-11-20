@@ -6,6 +6,7 @@ pub mod canvas;
 pub mod diagram;
 pub mod formula;
 pub mod grid;
+pub mod i18n;
 pub mod icons;
 pub mod keys;
 pub mod painter;
@@ -25,6 +26,7 @@ use egui::{Key, KeyboardShortcut, Modifiers, RichText, Ui};
 use metriccraft_engine::{Command, RecoveryInfo};
 use serde_json::{Value, json};
 
+use crate::i18n::Lang;
 use crate::palette::{Action, Form, Palette};
 use crate::ribbon::Tab;
 use crate::strings::Str;
@@ -44,6 +46,7 @@ pub struct Toast {
 pub struct Prefs {
     pub theme: Mode,
     pub view: View,
+    pub language: Lang,
 }
 
 impl Prefs {
@@ -52,7 +55,7 @@ impl Prefs {
             Mode::Light => "light",
             Mode::Dark => "dark",
         };
-        json!({"theme": theme, "view": self.view.key()})
+        json!({"theme": theme, "view": self.view.key(), "language": self.language.code()})
     }
 
     /// Unknown or missing members keep their defaults.
@@ -66,7 +69,16 @@ impl Prefs {
             .and_then(Value::as_str)
             .and_then(View::from_key)
             .unwrap_or_default();
-        Prefs { theme, view }
+        let language = v
+            .get("language")
+            .and_then(Value::as_str)
+            .and_then(Lang::from_tag)
+            .unwrap_or_default();
+        Prefs {
+            theme,
+            view,
+            language,
+        }
     }
 }
 
@@ -153,6 +165,7 @@ impl Shell {
         prefs: Prefs,
         recovery: (Option<PathBuf>, Vec<RecoveryInfo>),
     ) -> Self {
+        i18n::set_language(prefs.language);
         let commands = engine.commands();
         let snap = engine.snapshot();
         let recovery = match recovery {
@@ -301,6 +314,7 @@ impl Shell {
                 .families
                 .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
         }
+        install_hebrew_fallback_fonts(&mut fonts);
         ctx.set_fonts(fonts);
         ctx.set_visuals(self.tokens.visuals());
     }
@@ -308,6 +322,12 @@ impl Shell {
     /// Switches to the dark App theme (scripts, tests).
     pub fn set_dark(&mut self, ctx: &egui::Context) {
         self.set_theme(ctx, Mode::Dark);
+    }
+
+    /// Switches UI language (`en` / `he`) and updates the active translation state.
+    pub fn set_language(&mut self, lang: Lang) {
+        self.prefs.language = lang;
+        i18n::set_language(lang);
     }
 
     /// Picks a View by key (`report`, `table`, `model`); unknown keys are ignored.
@@ -424,7 +444,7 @@ impl Shell {
         for event in self.engine.take_events() {
             match event {
                 Event::Done { id, notice } => {
-                    self.status = Some(self.label_of(&id).to_string());
+                    self.status = Some(self.display_of(&id));
                     if let Some(n) = notice {
                         self.toasts.push(Toast {
                             text: n,
@@ -548,7 +568,14 @@ impl Shell {
         self.commands
             .iter()
             .find(|c| c.id == id)
-            .map_or("", |c| c.label)
+            .map_or("", i18n::command_label)
+    }
+
+    fn display_of(&self, id: &str) -> String {
+        self.commands
+            .iter()
+            .find(|c| c.id == id)
+            .map_or_else(String::new, i18n::command_display)
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -588,7 +615,7 @@ impl Shell {
             .show(ui, |ui| {
                 keys::anchor(ui, 0, Str::RegionRibbon.text());
                 ui.horizontal(|ui| {
-                    ui.menu_button(Str::TabFile.text(), |ui| {
+                    ui.menu_button(Str::TabFile.show(), |ui| {
                         for c in ribbon::file_menu(self.commands) {
                             if let Some(a) = ribbon::button(ui, &snap, self.commands, c) {
                                 action = Some(a);
@@ -605,7 +632,7 @@ impl Shell {
                     }
                     ui.separator();
                     for tab in self.tabs() {
-                        let r = ui.selectable_value(&mut self.tab, tab, tab.label().text());
+                        let r = ui.selectable_value(&mut self.tab, tab, tab.label().show());
                         if self.keytips.level == Some(keys::Level::Tabs) {
                             keys::badge(ui, r.rect, keys::tab_letter(tab), &t);
                         }
@@ -614,12 +641,21 @@ impl Shell {
                 ui.add_space(4.0);
                 if self.tab == Tab::View {
                     ui.horizontal(|ui| {
-                        ui.label(Str::AppTheme.text());
+                        ui.label(Str::AppTheme.show());
                         let mut mode = self.prefs.theme;
-                        ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.text());
-                        ui.selectable_value(&mut mode, Mode::Dark, Str::ThemeDark.text());
+                        ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.show());
+                        ui.selectable_value(&mut mode, Mode::Dark, Str::ThemeDark.show());
                         if mode != self.prefs.theme {
                             self.set_theme(ui.ctx(), mode);
+                        }
+                        ui.separator();
+                        ui.label(Str::Language.show());
+                        let mut lang = self.prefs.language;
+                        for choice in Lang::ALL {
+                            ui.selectable_value(&mut lang, choice, choice.display_name().show());
+                        }
+                        if lang != self.prefs.language {
+                            self.set_language(lang);
                         }
                     });
                 } else {
@@ -628,16 +664,16 @@ impl Shell {
                         let mut first = 0;
                         if self.tab == Tab::Home {
                             let icon = icons::Icon::Table;
-                            let label = Str::TransformData.text();
+                            let label = Str::TransformData.show();
                             ui.vertical(|ui| {
-                                let r = icons::big_button(ui, icon, label, true, &t);
+                                let r = icons::big_button(ui, icon, &label, true, &t);
                                 if r.clicked() {
                                     self.pq.open = true;
                                 }
                                 if tips {
                                     keys::badge(ui, r.rect, 'A', &t);
                                 }
-                                let group = RichText::new(Str::PowerQueryGroup.text());
+                                let group = RichText::new(Str::PowerQueryGroup.show());
                                 ui.label(group.small().color(t.muted));
                             });
                             ui.separator();
@@ -691,7 +727,7 @@ impl Shell {
                     let text = match (snap.busy, &self.status) {
                         (Some(id), _) => Str::Working.fill(&[self.label_of(id)]),
                         (None, Some(s)) => s.clone(),
-                        (None, None) => Str::Ready.text().to_string(),
+                        (None, None) => Str::Ready.show(),
                     };
                     ui.label(RichText::new(text).color(t.muted));
                     if snap.busy.is_some_and(|id| LOADS.contains(&id)) {
@@ -709,7 +745,7 @@ impl Shell {
                                 RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
                             );
                         }
-                        if ui.button(Str::Cancel.text()).clicked() {
+                        if ui.button(Str::Cancel.show()).clicked() {
                             self.engine.cancel_load();
                         }
                         ui.ctx()
@@ -717,7 +753,7 @@ impl Shell {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if snap.dirty {
-                            ui.label(RichText::new(Str::Unsaved.text()).color(t.muted));
+                            ui.label(RichText::new(Str::Unsaved.show()).color(t.muted));
                         }
                         // What Undo would undo, with its Origin (`Undo: MCP — 30 changes`).
                         if let Some(undo) = &snap.undo {
@@ -746,7 +782,7 @@ impl Shell {
                         View::Table => icons::Icon::Table,
                         View::Model => icons::Icon::Model,
                     };
-                    let r = icons::big_button(ui, icon, view.label().text(), true, &t);
+                    let r = icons::big_button(ui, icon, &view.label().show(), true, &t);
                     if on {
                         let bar = egui::Rect::from_min_size(
                             r.rect.left_top() - egui::vec2(5.0, 0.0),
@@ -877,7 +913,7 @@ impl Shell {
                 egui::Panel::top("pq-close").show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            close |= ui.button(Str::Close.text()).clicked();
+                            close |= ui.button(Str::Close.show()).clicked();
                         });
                     });
                 });
@@ -939,7 +975,9 @@ impl Shell {
                     if let Some(c) = self.commands.iter().find(|c| c.id == "insert.newPage") {
                         let r = ui
                             .add_enabled(snap.enabled(self.commands, c.id), egui::Button::new("+"));
-                        if icons::name(r, egui::WidgetType::Button, c.label).clicked() {
+                        if icons::name(r, egui::WidgetType::Button, i18n::command_label(c))
+                            .clicked()
+                        {
                             action = Some(palette::invoke(c));
                         }
                     }
@@ -966,13 +1004,13 @@ impl Shell {
         let pct = format!("{pct:.0}");
         ui.label(Str::Percent.fill(&[&pct]));
         if ui
-            .selectable_label(*z == Zoom::FitWidth, Str::FitWidth.text())
+            .selectable_label(*z == Zoom::FitWidth, Str::FitWidth.show())
             .clicked()
         {
             *z = Zoom::FitWidth;
         }
         if ui
-            .selectable_label(*z == Zoom::FitPage, Str::FitPage.text())
+            .selectable_label(*z == Zoom::FitPage, Str::FitPage.show())
             .clicked()
         {
             *z = Zoom::FitPage;
@@ -1000,13 +1038,13 @@ impl Shell {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(Str::RecoveryFound.fill(&[&what]));
-                    if usable && ui.button(Str::Recover.text()).clicked() {
+                    if usable && ui.button(Str::Recover.show()).clicked() {
                         chosen = Some("file.recover");
                     }
-                    if ui.button(Str::Discard.text()).clicked() {
+                    if ui.button(Str::Discard.show()).clicked() {
                         chosen = Some("file.discardRecovery");
                     }
-                    if ui.button(Str::Dismiss.text()).clicked() {
+                    if ui.button(Str::Dismiss.show()).clicked() {
                         chosen = Some("");
                     }
                 });
@@ -1032,7 +1070,7 @@ impl Shell {
                         ui.set_max_width(360.0);
                         let color = if toast.error { t.danger } else { t.warning };
                         ui.label(RichText::new(toast.text.as_str()).color(color));
-                        if ui.small_button(Str::Dismiss.text()).clicked() {
+                        if ui.small_button(Str::Dismiss.show()).clicked() {
                             dismissed = Some(i);
                         }
                     });
@@ -1059,7 +1097,7 @@ impl Shell {
         let modal = egui::Modal::new(egui::Id::new("close")).show(ui.ctx(), |ui| {
             ui.label(Str::SaveFirst.fill(&[&name]));
             ui.horizontal(|ui| {
-                if ui.button(Str::Save.text()).clicked() {
+                if ui.button(Str::Save.show()).clicked() {
                     if has_location {
                         self.closing = Closing::Saving;
                         self.engine.run("file.save", json!({}));
@@ -1070,10 +1108,10 @@ impl Shell {
                         }
                     }
                 }
-                if ui.button(Str::DontSave.text()).clicked() {
+                if ui.button(Str::DontSave.show()).clicked() {
                     self.quit_requested = true;
                 }
-                if ui.button(Str::Cancel.text()).clicked() {
+                if ui.button(Str::Cancel.show()).clicked() {
                     self.closing = Closing::No;
                 }
             });
@@ -1104,7 +1142,7 @@ impl egui_dock::TabViewer for PaneViewer<'_> {
     }
 
     fn title(&mut self, tab: &mut Pane) -> egui::WidgetText {
-        tab.label().text().into()
+        tab.label().show().into()
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Pane) {
@@ -1181,6 +1219,73 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(mods, key?))
 }
 
+/// Registers bundled (`CRAFT_FONTS_DIR`) or desktop system Hebrew fallback fonts on every UI
+/// font family without committing binary font assets.
+fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) {
+    #[cfg(has_hebrew_craft_font)]
+    {
+        const HEBREW_NAME: &str = "Noto Sans Hebrew";
+        let bytes = include_bytes!(env!("HEBREW_CRAFT_FONT_PATH"));
+        fonts.font_data.insert(
+            HEBREW_NAME.into(),
+            Arc::new(egui::FontData::from_static(bytes)),
+        );
+        append_font_fallback(fonts, HEBREW_NAME);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        const CANDIDATES: [(&str, &str); 8] = [
+            (
+                "Arial Hebrew",
+                "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
+            ),
+            ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
+            ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
+            (
+                "Noto Sans Hebrew",
+                "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "Noto Sans Hebrew Arch",
+                "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "DejaVu Sans",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ),
+            ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
+            ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
+        ];
+        for (name, path) in CANDIDATES {
+            if fonts.font_data.contains_key(name) {
+                continue;
+            }
+            if let Ok(bytes) = std::fs::read(path) {
+                fonts
+                    .font_data
+                    .insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
+                append_font_fallback(fonts, name);
+            }
+        }
+    }
+}
+
+fn append_font_fallback(fonts: &mut egui::FontDefinitions, name: &str) {
+    for family in [
+        egui::FontFamily::Proportional,
+        egui::FontFamily::Monospace,
+        egui::FontFamily::Name(painter::REGULAR.into()),
+        egui::FontFamily::Name(painter::BOLD.into()),
+    ] {
+        if let Some(list) = fonts.families.get_mut(&family)
+            && !list.iter().any(|existing| existing == name)
+        {
+            list.push(name.to_owned());
+        }
+    }
+}
+
 /// Milliseconds since 1970 (0 on the web, where autosave is off).
 fn now_ms() -> u64 {
     #[cfg(not(target_arch = "wasm32"))]
@@ -1204,10 +1309,15 @@ mod tests {
         let p = Prefs {
             theme: Mode::Dark,
             view: View::Model,
+            language: Lang::Hebrew,
         };
         assert_eq!(Prefs::from_json(&p.to_json()), p);
         assert_eq!(
-            Prefs::from_json(&json!({"theme": 3, "view": "nope"})),
+            Prefs::from_json(&json!({"language": "iw"})).language,
+            Lang::Hebrew
+        );
+        assert_eq!(
+            Prefs::from_json(&json!({"theme": 3, "view": "nope", "language": "x-he"})),
             Prefs::default()
         );
         assert_eq!(Prefs::from_json(&Value::Null), Prefs::default());

@@ -101,7 +101,7 @@ impl QueryEditor {
         egui::Panel::top("pq-ribbon").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for (i, (label, _)) in TABS.iter().enumerate() {
-                    if ui.selectable_label(self.tab == i, label.text()).clicked() {
+                    if ui.selectable_label(self.tab == i, label.show()).clicked() {
                         self.tab = i;
                     }
                 }
@@ -120,7 +120,7 @@ impl QueryEditor {
         egui::Panel::left("pq-queries")
             .default_size(180.0)
             .show(ui, |ui| {
-                ui.label(RichText::new(Str::Queries.text()).strong());
+                ui.label(RichText::new(Str::Queries.show()).strong());
                 for q in &doc.queries {
                     let on = self.query.as_deref() == Some(q.name.as_str());
                     if ui.selectable_label(on, q.name.as_str()).clicked() && !on {
@@ -133,12 +133,11 @@ impl QueryEditor {
         egui::Panel::right("pq-steps")
             .default_size(220.0)
             .show(ui, |ui| {
-                ui.label(RichText::new(Str::AppliedSteps.text()).strong());
+                ui.label(RichText::new(Str::AppliedSteps.show()).strong());
                 let Some(q) = query else {
                     return;
                 };
-                let names =
-                    std::iter::once(Str::SourceStep.text().to_string()).chain(step_names(steps));
+                let names = std::iter::once(Str::SourceStep.show()).chain(step_names(steps));
                 for (i, name) in names.enumerate() {
                     ui.horizontal(|ui| {
                         if ui.selectable_label(i == selected, name.as_str()).clicked() {
@@ -166,7 +165,7 @@ impl QueryEditor {
             .resizable(true)
             .default_size(150.0)
             .show(ui, |ui| {
-                ui.label(RichText::new(Str::QueryM.text()).strong());
+                ui.label(RichText::new(Str::QueryM.show()).strong());
                 let m = self
                     .query
                     .as_deref()
@@ -180,7 +179,7 @@ impl QueryEditor {
 
         egui::CentralPanel::default().show(ui, |ui| {
             let Some(q) = query else {
-                ui.label(RichText::new(Str::NoQueries.text()).color(t.muted));
+                ui.label(RichText::new(Str::NoQueries.show()).color(t.muted));
                 return;
             };
             let want = (q.name.clone(), at, snap.seq);
@@ -207,7 +206,7 @@ impl QueryEditor {
                     ui.label(RichText::new(e.as_str()).color(t.danger));
                 }
                 None => {
-                    ui.label(RichText::new(Str::LoadingPreview.text()).color(t.muted));
+                    ui.label(RichText::new(Str::LoadingPreview.show()).color(t.muted));
                 }
             }
         });

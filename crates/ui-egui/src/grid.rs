@@ -46,7 +46,7 @@ impl Grid {
             .or_else(|| doc.tables.first());
         let Some(table) = table else {
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new(Str::NoTables.text()).color(t.muted));
+                ui.label(RichText::new(Str::NoTables.show()).color(t.muted));
             });
             return;
         };
@@ -183,7 +183,7 @@ impl Grid {
                 let v = col.value(row);
                 let failed = error(row, c);
                 let s = match &failed {
-                    Some(_) => Str::CellError.text().to_string(),
+                    Some(_) => Str::CellError.show(),
                     None => text(&v, &format),
                 };
                 let y = body.top() + ROW * (i as f32 + 1.0);

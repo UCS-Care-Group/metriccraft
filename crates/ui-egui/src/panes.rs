@@ -65,7 +65,7 @@ pub fn visualizations(
     ui.horizontal_wrapped(|ui| {
         for kind in VisualType::ALL {
             let on = selected.is_some_and(|v| v.kind == kind);
-            if ui.selectable_label(on, visual_name(kind).text()).clicked() && !on {
+            if ui.selectable_label(on, visual_name(kind).show()).clicked() && !on {
                 out.push(match (page, selected) {
                     (Some(p), Some(v)) => (
                         "visual.changeType",
@@ -81,15 +81,15 @@ pub fn visualizations(
     });
     let (Some(p), Some(v)) = (page, selected) else {
         ui.add_space(8.0);
-        ui.label(RichText::new(Str::SelectVisual.text()).color(t.muted));
+        ui.label(RichText::new(Str::SelectVisual.show()).color(t.muted));
         return out;
     };
     ui.separator();
     for &well in v.kind.wells() {
-        ui.label(RichText::new(well_name(well).text()).strong());
+        ui.label(RichText::new(well_name(well).show()).strong());
         let fields = v.wells.get(&well).map(Vec::as_slice).unwrap_or_default();
         if fields.is_empty() {
-            ui.label(RichText::new(Str::WellEmpty.text()).color(t.muted));
+            ui.label(RichText::new(Str::WellEmpty.show()).color(t.muted));
         }
         for (i, f) in fields.iter().enumerate() {
             ui.horizontal(|ui| {
@@ -147,7 +147,7 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
         ui.add_space(6.0);
     }
     if !any {
-        ui.label(RichText::new(Str::NoFilters.text()).color(t.muted));
+        ui.label(RichText::new(Str::NoFilters.show()).color(t.muted));
     }
     out
 }

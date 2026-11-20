@@ -97,7 +97,7 @@ pub fn big(
         return button(ui, snap, commands, c);
     };
     let enabled = snap.enabled(commands, c.id);
-    let mut r = crate::icons::big_button(ui, icon, c.label, enabled, t);
+    let mut r = crate::icons::big_button(ui, icon, &crate::i18n::command_display(c), enabled, t);
     if let Some(key) = c.shortcut {
         r = r.on_hover_text(Str::Shortcut.fill(&[key]));
     }
@@ -116,7 +116,7 @@ pub fn small(
         return button(ui, snap, commands, c);
     };
     let enabled = snap.enabled(commands, c.id);
-    let r = crate::icons::icon_button(ui, icon, c.label, enabled, t);
+    let r = crate::icons::icon_button(ui, icon, crate::i18n::command_label(c), enabled, t);
     let r = match c.shortcut {
         Some(key) => r.on_hover_text(Str::Shortcut.fill(&[key])),
         None => r,
@@ -134,7 +134,7 @@ pub fn button(
     let enabled = snap.enabled(commands, c.id);
     let mut r = ui.add_enabled(
         enabled,
-        egui::Button::new(c.label).min_size(egui::vec2(0.0, 28.0)),
+        egui::Button::new(crate::i18n::command_display(c)).min_size(egui::vec2(0.0, 28.0)),
     );
     if let Some(key) = c.shortcut {
         r = r.on_hover_text(Str::Shortcut.fill(&[key]));
@@ -183,7 +183,11 @@ pub fn show_groups(
                         n += 1;
                     }
                 });
-                ui.label(RichText::new(group).small().color(t.muted));
+                ui.label(
+                    RichText::new(crate::i18n::ribbon_group_display(group))
+                        .small()
+                        .color(t.muted),
+                );
             });
             ui.separator();
         }
