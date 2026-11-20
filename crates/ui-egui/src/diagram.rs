@@ -43,7 +43,7 @@ impl Diagram {
         let mut out = Vec::new();
         if doc.model.tables.is_empty() {
             ui.centered_and_justified(|ui| {
-                ui.label(egui::RichText::new(Str::NoTables.text()).color(t.muted));
+                ui.label(egui::RichText::new(Str::NoTables.show()).color(t.muted));
             });
             return out;
         }

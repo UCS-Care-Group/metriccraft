@@ -25,8 +25,14 @@ pub struct Palette {
     selected: usize,
 }
 
-/// Commands matching `query` (every word in the label, id or ribbon path, ignoring case).
-pub fn matches<'a>(commands: &'a [Command], enabled: &[bool], query: &str) -> Vec<&'a Command> {
+/// Commands matching `query` (every word in the localized label, English label, id, or ribbon
+/// path, ignoring case).
+pub fn matches_for<'a>(
+    lang: crate::i18n::Lang,
+    commands: &'a [Command],
+    enabled: &[bool],
+    query: &str,
+) -> Vec<&'a Command> {
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
     commands
         .iter()
@@ -37,10 +43,21 @@ pub fn matches<'a>(commands: &'a [Command], enabled: &[bool], query: &str) -> Ve
         // data or take a list of commands, which the palette has no way to show or ask for.
         .filter(|c| !c.read_only() && c.id != "batch")
         .filter(|c| {
-            let hay = format!("{} {} {}", c.label, c.id, c.ribbon).to_lowercase();
+            let local_label = crate::i18n::command_label_for(lang, c);
+            let local_ribbon = crate::i18n::ribbon_path_logical(lang, c.ribbon);
+            let hay = format!(
+                "{} {} {} {} {}",
+                local_label, c.label, c.id, local_ribbon, c.ribbon
+            )
+            .to_lowercase();
             words.iter().all(|w| hay.contains(w.as_str()))
         })
         .collect()
+}
+
+/// Commands matching `query` in the active language.
+pub fn matches<'a>(commands: &'a [Command], enabled: &[bool], query: &str) -> Vec<&'a Command> {
+    matches_for(crate::i18n::language(), commands, enabled, query)
 }
 
 impl Palette {
@@ -58,7 +75,7 @@ impl Palette {
             ui.set_width(520.0);
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut self.query)
-                    .hint_text(Str::PaletteHint.text())
+                    .hint_text(Str::PaletteHint.show())
                     .desired_width(f32::INFINITY),
             );
             let edit =
@@ -79,21 +96,25 @@ impl Palette {
             }
             ui.separator();
             if found.is_empty() {
-                ui.label(RichText::new(Str::PaletteNone.text()).color(t.muted));
+                ui.label(RichText::new(Str::PaletteNone.show()).color(t.muted));
             }
             egui::ScrollArea::vertical()
                 .max_height(360.0)
                 .show(ui, |ui| {
                     for (i, c) in found.iter().enumerate() {
-                        let mut text = c.label.to_string();
+                        let mut text = crate::i18n::command_display(c);
                         if let Some(key) = c.shortcut {
                             text = format!("{text}    {key}");
                         }
-                        let r = ui.selectable_label(i == self.selected, text);
+                        let r = crate::icons::a11y_label(
+                            ui.selectable_label(i == self.selected, text),
+                            egui::WidgetType::SelectableLabel,
+                            crate::i18n::command_label(c),
+                        );
                         let r = if c.ribbon.is_empty() {
                             r
                         } else {
-                            r.on_hover_text(c.ribbon)
+                            r.on_hover_text(crate::i18n::ribbon_path_display(c.ribbon))
                         };
                         if i == self.selected {
                             r.scroll_to_me(None);
@@ -193,13 +214,13 @@ impl Form {
                 Kind::Integer => text
                     .parse::<i64>()
                     .map(Value::from)
-                    .map_err(|_| format!("{}: a whole number", p.name))?,
+                    .map_err(|_| Str::ParamIntError.fill(&[p.name]))?,
                 Kind::Number => text
                     .parse::<f64>()
                     .ok()
                     .and_then(serde_json::Number::from_f64)
                     .map(Value::Number)
-                    .ok_or_else(|| format!("{}: a number", p.name))?,
+                    .ok_or_else(|| Str::ParamNumError.fill(&[p.name]))?,
                 Kind::Texts => Value::Array(
                     text.split(',')
                         .map(str::trim)
@@ -208,7 +229,7 @@ impl Form {
                         .collect(),
                 ),
                 Kind::Field | Kind::Json => serde_json::from_str(text)
-                    .map_err(|e| format!("{}: not valid JSON ({e})", p.name))?,
+                    .map_err(|e| Str::ParamJsonError.fill(&[p.name, &e.to_string()]))?,
                 _ => Value::String(text.into()),
             };
             m.insert(p.name.into(), v);
@@ -229,7 +250,7 @@ impl Form {
         let command = self.command;
         let modal = egui::Modal::new(egui::Id::new(("form", command.id))).show(ui.ctx(), |ui| {
             ui.set_width(440.0);
-            ui.heading(command.label);
+            ui.heading(crate::i18n::command_display(command));
             ui.add_space(6.0);
             let table = self
                 .fields
@@ -251,7 +272,7 @@ impl Form {
                             ui.label(p.name);
                         } else {
                             ui.checkbox(&mut f.set, p.name)
-                                .on_hover_text(Str::Optional.text());
+                                .on_hover_text(Str::Optional.show());
                         }
                         ui.add_enabled_ui(f.set, |ui| {
                             editor(ui, f, doc, table.as_deref(), page.as_deref());
@@ -267,14 +288,20 @@ impl Form {
                 ui.label(RichText::new(problem).color(t.muted).small());
             }
             ui.horizontal(|ui| {
-                let run = ui.add_enabled(problem.is_none(), egui::Button::new(Str::Run.text()));
+                let run = ui.add_enabled(problem.is_none(), egui::Button::new(Str::Run.show()));
                 let enter = problem.is_none() && ui.input(|i| i.key_pressed(Key::Enter));
                 if (run.clicked() || enter)
                     && let Ok(v) = self.params()
                 {
                     action = Some(Action::Run(command, v));
                 }
-                if ui.button(Str::Cancel.text()).clicked() {
+                if crate::icons::a11y_label(
+                    ui.button(Str::Cancel.show()),
+                    egui::WidgetType::Button,
+                    Str::Cancel.text(),
+                )
+                .clicked()
+                {
                     action = Some(Action::Close);
                 }
             });
@@ -338,7 +365,10 @@ fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page:
             } else {
                 egui::TextEdit::singleline(&mut f.text)
             };
-            let r = ui.add(edit.desired_width(260.0).hint_text(p.kind.word()));
+            let r = ui.add(
+                edit.desired_width(260.0)
+                    .hint_text(crate::i18n::kind_word(p.kind)),
+            );
             crate::icons::name(r, egui::WidgetType::TextEdit, p.name);
         }
     }
@@ -436,5 +466,15 @@ mod tests {
     fn commands_without_required_params_run_straight_away() {
         assert!(matches!(invoke(command("insert.newPage")), Action::Run(..)));
         assert!(matches!(invoke(command("page.rename")), Action::Form(..)));
+    }
+
+    #[test]
+    fn hebrew_palette_search_matches_logical_labels() {
+        let all = vec![true; COMMANDS.len()];
+        let found = matches_for(crate::i18n::Lang::Hebrew, COMMANDS, &all, "עמוד חדש");
+        assert!(
+            found.iter().any(|c| c.id == "insert.newPage"),
+            "expected logical Hebrew label match for insert.newPage"
+        );
     }
 }
