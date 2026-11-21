@@ -87,7 +87,7 @@ pub fn visualizations(
     let (Some(p), Some(v)) = (page, selected) else {
         ui.add_space(8.0);
         crate::icons::a11y_label(
-            ui.label(RichText::new(Str::SelectVisual.show()).color(t.muted)),
+            crate::i18n::wrapped_label(ui, Str::SelectVisual.text(), |r| r.color(t.muted)),
             egui::WidgetType::Label,
             Str::SelectVisual.text(),
         );
@@ -103,7 +103,7 @@ pub fn visualizations(
         let fields = v.wells.get(&well).map(Vec::as_slice).unwrap_or_default();
         if fields.is_empty() {
             crate::icons::a11y_label(
-                ui.label(RichText::new(Str::WellEmpty.show()).color(t.muted)),
+                crate::i18n::wrapped_label(ui, Str::WellEmpty.text(), |r| r.color(t.muted)),
                 egui::WidgetType::Label,
                 Str::WellEmpty.text(),
             );
@@ -112,8 +112,11 @@ pub fn visualizations(
             ui.horizontal(|ui| {
                 ui.label(field_name(f));
                 let r = ui.small_button("×");
-                let label = Str::RemoveField.fill(&[field_name(f)]);
-                if crate::icons::name(r, egui::WidgetType::Button, &label).clicked() {
+                let tooltip = Str::RemoveField.fill(&[field_name(f)]);
+                let a11y = Str::RemoveField.fill_logical(&[field_name(f)]);
+                if crate::icons::name_labeled(r, egui::WidgetType::Button, &tooltip, &a11y)
+                    .clicked()
+                {
                     out.push((
                         "visual.removeField",
                         json!({"page": p.id, "visual": v.id, "well": well.id(), "index": i}),
@@ -153,8 +156,9 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
         ui.horizontal_wrapped(|ui| {
             ui.label(values.join(", "));
             let r = ui.small_button("×");
-            let label = Str::ClearSelection.fill(&[field]);
-            if crate::icons::name(r, egui::WidgetType::Button, &label).clicked() {
+            let tooltip = Str::ClearSelection.fill(&[field]);
+            let a11y = Str::ClearSelection.fill_logical(&[field]);
+            if crate::icons::name_labeled(r, egui::WidgetType::Button, &tooltip, &a11y).clicked() {
                 out.push((
                     "slicer.select",
                     json!({"page": p.id, "visual": v.id, "items": []}),
@@ -164,7 +168,7 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
         ui.add_space(6.0);
     }
     if !any {
-        ui.label(RichText::new(Str::NoFilters.show()).color(t.muted));
+        crate::i18n::wrapped_label(ui, Str::NoFilters.text(), |r| r.color(t.muted));
     }
     out
 }

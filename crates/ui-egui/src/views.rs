@@ -69,7 +69,7 @@ pub fn data_pane(
 ) -> Option<FieldRef> {
     let mut clicked = None;
     if doc.model.tables.is_empty() {
-        ui.label(RichText::new(Str::NoTables.show()).color(t.muted));
+        crate::i18n::wrapped_label(ui, Str::NoTables.text(), |r| r.color(t.muted));
         return None;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -112,7 +112,7 @@ pub fn report_view(ui: &mut Ui, t: &Tokens, doc: &Document) {
     ui.painter().rect_filled(rect, 0.0, t.well);
     let Some(page) = current_page(doc) else {
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new(Str::NoPages.show()).color(t.muted));
+            crate::i18n::wrapped_label(ui, Str::NoPages.text(), |r| r.color(t.muted));
         });
         return;
     };

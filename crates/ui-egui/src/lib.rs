@@ -1026,8 +1026,13 @@ impl Shell {
                     if let Some(c) = self.commands.iter().find(|c| c.id == "insert.newPage") {
                         let r = ui
                             .add_enabled(snap.enabled(self.commands, c.id), egui::Button::new("+"));
-                        if icons::name(r, egui::WidgetType::Button, i18n::command_label(c))
-                            .clicked()
+                        if icons::name_labeled(
+                            r,
+                            egui::WidgetType::Button,
+                            &i18n::command_display(c),
+                            i18n::command_label(c),
+                        )
+                        .clicked()
                         {
                             action = Some(palette::invoke(c));
                         }
@@ -1171,7 +1176,7 @@ impl Shell {
         };
         let has_location = snap.location.is_some();
         let modal = egui::Modal::new(egui::Id::new("close")).show(ui.ctx(), |ui| {
-            ui.label(Str::SaveFirst.fill(&[&name]));
+            i18n::wrapped_label(ui, &Str::SaveFirst.fill_logical(&[&name]), |r| r);
             ui.horizontal(|ui| {
                 if icons::a11y_label(
                     ui.button(Str::Save.show()),

@@ -147,10 +147,11 @@ impl QueryEditor {
                             self.selected = if i == steps.len() { None } else { Some(i) };
                         }
                         if i > 0
-                            && crate::icons::name(
+                            && crate::icons::name_labeled(
                                 ui.small_button("×"),
                                 egui::WidgetType::Button,
                                 &Str::DeleteStepNamed.fill(&[&name]),
+                                &Str::DeleteStepNamed.fill_logical(&[&name]),
                             )
                             .clicked()
                         {
@@ -182,7 +183,7 @@ impl QueryEditor {
 
         egui::CentralPanel::default().show(ui, |ui| {
             let Some(q) = query else {
-                ui.label(RichText::new(Str::NoQueries.show()).color(t.muted));
+                crate::i18n::wrapped_label(ui, Str::NoQueries.text(), |r| r.color(t.muted));
                 return;
             };
             let want = (q.name.clone(), at, snap.seq);

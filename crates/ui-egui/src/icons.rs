@@ -292,11 +292,21 @@ pub fn a11y_label(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui
     r
 }
 
+/// Gives `r` (a control showing a symbol or nothing) `accessible_label` for screen readers
+/// and `tooltip_label` as its hover tooltip.
+pub fn name_labeled(
+    r: egui::Response,
+    typ: egui::WidgetType,
+    tooltip_label: &str,
+    accessible_label: &str,
+) -> egui::Response {
+    a11y_label(r, typ, accessible_label).on_hover_text(tooltip_label)
+}
+
 /// Gives `r` (a control showing a symbol or nothing) the label `label` for screen readers,
 /// and as its tooltip.
 pub fn name(r: egui::Response, typ: egui::WidgetType, label: &str) -> egui::Response {
-    let r = a11y_label(r, typ, label);
-    r.on_hover_text(label)
+    name_labeled(r, typ, label, label)
 }
 
 /// A small square button with just an icon; `accessible_label` is its AccessKit label and

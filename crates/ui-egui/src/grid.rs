@@ -46,7 +46,7 @@ impl Grid {
             .or_else(|| doc.tables.first());
         let Some(table) = table else {
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new(Str::NoTables.show()).color(t.muted));
+                crate::i18n::wrapped_label(ui, Str::NoTables.text(), |r| r.color(t.muted));
             });
             return;
         };
@@ -240,7 +240,13 @@ impl Grid {
                         .vertical()
                         .show_value(false);
                     let r = ui.add(s);
-                    crate::icons::name(r, WidgetType::Slider, Str::RowScroll.text()).changed()
+                    crate::icons::name_labeled(
+                        r,
+                        WidgetType::Slider,
+                        &Str::RowScroll.show(),
+                        Str::RowScroll.text(),
+                    )
+                    .changed()
                 })
                 .inner;
             if changed {
@@ -258,7 +264,13 @@ impl Grid {
                     ui.spacing_mut().slider_width = rect.width();
                     let s = egui::Slider::new(&mut v, 0.0..=max_left as f64).show_value(false);
                     let r = ui.add(s);
-                    crate::icons::name(r, WidgetType::Slider, Str::ColumnScroll.text()).changed()
+                    crate::icons::name_labeled(
+                        r,
+                        WidgetType::Slider,
+                        &Str::ColumnScroll.show(),
+                        Str::ColumnScroll.text(),
+                    )
+                    .changed()
                 })
                 .inner;
             if changed {

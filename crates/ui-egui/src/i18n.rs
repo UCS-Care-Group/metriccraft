@@ -579,34 +579,6 @@ fn mask_atoms(line: &str) -> Vec<String> {
             {
                 j += 1;
             }
-            // Attach trailing Hebrew word-joiner/dash or quote if followed by ASCII/digit (e.g. `ב-2`).
-            if chars.get(j).is_some_and(|(_, c)| *c == '-')
-                && chars
-                    .get(j + 1)
-                    .is_some_and(|(_, next)| next.is_ascii_alphanumeric())
-            {
-                let mut k = j + 1;
-                while k < chars.len() && chars.get(k).is_some_and(|(_, c)| is_ltr_token_char(*c)) {
-                    k += 1;
-                }
-                while k > j + 1
-                    && chars
-                        .get(k - 1)
-                        .is_some_and(|(_, c)| matches!(c, '.' | ':' | '-'))
-                {
-                    k -= 1;
-                }
-                let word_end = chars.get(j).map_or(line.len(), |(b, _)| *b);
-                let suffix_end = chars.get(k).map_or(line.len(), |(b, _)| *b);
-                if let (Some(w), Some(s)) =
-                    (line.get(start..word_end), line.get(word_end..suffix_end))
-                {
-                    out.push(w.to_string());
-                    out.push(s.to_string());
-                }
-                i = k;
-                continue;
-            }
             let end = chars.get(j).map_or(line.len(), |(b, _)| *b);
             if let Some(seg) = line.get(start..end) {
                 out.push(seg.to_string());
@@ -737,6 +709,44 @@ pub fn wrapped_visual_lines(
     out
 }
 
+/// Renders a **logical-order** wrapping label, breaking lines at `ui.available_width()` before
+/// applying visual RTL reordering per line when `rtl` is true.
+pub fn wrapped_label_for(
+    ui: &mut egui::Ui,
+    rtl: bool,
+    logical: &str,
+    style: impl FnOnce(egui::RichText) -> egui::RichText,
+) -> egui::Response {
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    let needs_rtl_wrap = rtl && logical.chars().any(is_rtl_script);
+    let shown = if needs_rtl_wrap {
+        wrapped_visual_lines(
+            ui.ctx(),
+            true,
+            logical,
+            font_id.clone(),
+            ui.available_width(),
+        )
+    } else {
+        logical.to_owned()
+    };
+    let rich = style(egui::RichText::new(shown).font(font_id));
+    if needs_rtl_wrap {
+        ui.add(egui::Label::new(rich).extend())
+    } else {
+        ui.add(egui::Label::new(rich).wrap())
+    }
+}
+
+/// Renders a **logical-order** wrapping label in the active interface language.
+pub fn wrapped_label(
+    ui: &mut egui::Ui,
+    logical: &str,
+    style: impl FnOnce(egui::RichText) -> egui::RichText,
+) -> egui::Response {
+    wrapped_label_for(ui, is_rtl(), logical, style)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -821,6 +831,18 @@ mod tests {
             visual_rtl("ייצוא (CSV)\n  cargo test\nעוד שורה"),
             "(CSV) ייצוא\n  cargo test\nשורה עוד"
         );
+        assert_eq!(
+            Str::SaveFirst.fill_for(Lang::Hebrew, &["report.mcraft"]),
+            "?הסגירה לפני report.mcraft-ב שינויים לשמור"
+        );
+        let new_page = COMMANDS
+            .iter()
+            .find(|c| c.id == "insert.newPage")
+            .expect("insert.newPage registered");
+        assert_eq!(command_label_for(Lang::Hebrew, new_page), "עמוד חדש");
+        assert_eq!(command_display_for(Lang::Hebrew, new_page), "חדש עמוד");
+        assert_eq!(visual_rtl("ב-2"), "2-ב");
+        assert_eq!(visual_rtl("ייצוא (CSV ו-Parquet)"), "(Parquet-ו CSV) ייצוא");
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .textures_delta
@@ -835,5 +857,26 @@ mod tests {
         let first_row = wrapped.lines().next().unwrap_or_default();
         assert!(first_row.contains("בחר"), "got {wrapped:?}");
         assert!(!first_row.contains("רחב"), "got {wrapped:?}");
+
+        let mut label_rect = egui::Rect::NOTHING;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.allocate_ui(egui::vec2(140.0, 200.0), |ui| {
+                    label_rect = wrapped_label_for(
+                        ui,
+                        true,
+                        Str::SelectVisual.text_for(Lang::Hebrew),
+                        |r| r,
+                    )
+                    .rect;
+                });
+            });
+        })
+        .textures_delta
+        .clear();
+        assert!(
+            label_rect.height() >= 24.0,
+            "expected multi-line wrapped label: {label_rect:?}"
+        );
     }
 }

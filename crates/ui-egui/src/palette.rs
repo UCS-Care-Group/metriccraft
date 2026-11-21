@@ -96,7 +96,7 @@ impl Palette {
             }
             ui.separator();
             if found.is_empty() {
-                ui.label(RichText::new(Str::PaletteNone.show()).color(t.muted));
+                crate::i18n::wrapped_label(ui, Str::PaletteNone.text(), |r| r.color(t.muted));
             }
             egui::ScrollArea::vertical()
                 .max_height(360.0)
