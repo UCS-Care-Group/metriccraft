@@ -315,6 +315,7 @@ impl Shell {
                 .families
                 .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
         }
+        #[cfg(any(not(target_arch = "wasm32"), has_hebrew_craft_font))]
         install_hebrew_fallback_fonts(&mut fonts);
         ctx.set_fonts(fonts);
         ctx.set_visuals(self.tokens.visuals());
@@ -1322,6 +1323,7 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
 /// font family without committing binary font assets. Web (`wasm32`) builds require
 /// `CRAFT_FONTS_DIR` pointing to `NotoSansHebrew-Regular.ttf` at build time; otherwise
 /// `Lang::available()` hides Hebrew so the web UI never renders missing-glyph boxes.
+#[cfg(any(not(target_arch = "wasm32"), has_hebrew_craft_font))]
 fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) {
     #[cfg(has_hebrew_craft_font)]
     {
@@ -1372,6 +1374,7 @@ fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) {
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), has_hebrew_craft_font))]
 fn append_font_fallback(fonts: &mut egui::FontDefinitions, name: &str) {
     for family in [
         egui::FontFamily::Proportional,
