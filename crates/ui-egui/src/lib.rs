@@ -120,8 +120,8 @@ pub struct Shell {
     palette: Option<Palette>,
     form: Option<Form>,
     toasts: Vec<Toast>,
-    /// The last message, for the status bar.
-    status: Option<String>,
+    /// The last message `(shown, logical)`, for the status bar.
+    status: Option<(String, String)>,
     recovery: Option<(PathBuf, Vec<RecoveryInfo>)>,
     closing: Closing,
     /// Set when the window may close now; the app closes it.
@@ -451,7 +451,7 @@ impl Shell {
         for event in self.engine.take_events() {
             match event {
                 Event::Done { id, notice } => {
-                    self.status = Some(self.display_of(&id));
+                    self.status = Some((self.display_of(&id), self.label_of(&id).to_owned()));
                     if let Some(n) = notice {
                         self.toasts.push(Toast {
                             text: n,
@@ -463,7 +463,7 @@ impl Shell {
                     }
                 }
                 Event::Failed { id, error } => {
-                    self.status = Some(error.clone());
+                    self.status = Some((i18n::visual_rtl(&error), error.clone()));
                     self.toasts.push(Toast {
                         text: error,
                         error: true,
@@ -764,7 +764,7 @@ impl Shell {
                             Str::Working.fill(&[self.label_of(id)]),
                             Str::Working.fill_logical(&[self.label_of(id)]),
                         ),
-                        (None, Some(s)) => (s.clone(), s.clone()),
+                        (None, Some((shown, logical))) => (shown.clone(), logical.clone()),
                         (None, None) => (Str::Ready.show(), Str::Ready.text().to_owned()),
                     };
                     icons::a11y_label(

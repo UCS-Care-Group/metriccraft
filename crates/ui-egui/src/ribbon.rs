@@ -201,10 +201,14 @@ pub fn show_groups(
                         n += 1;
                     }
                 });
-                ui.label(
-                    RichText::new(crate::i18n::ribbon_group_display(group))
-                        .small()
-                        .color(t.muted),
+                crate::icons::a11y_label(
+                    ui.label(
+                        RichText::new(crate::i18n::ribbon_group_display(group))
+                            .small()
+                            .color(t.muted),
+                    ),
+                    egui::WidgetType::Label,
+                    crate::i18n::ribbon_group_label(group),
                 );
             });
             ui.separator();

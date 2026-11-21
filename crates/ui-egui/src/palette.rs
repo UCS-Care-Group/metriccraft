@@ -1,7 +1,7 @@
 //! The command palette (Ctrl+K) and the forms generated from a command's param schema
 //!: how a command that needs params gets them from the user.
 
-use egui::{Key, RichText, Ui};
+use egui::{Key, Ui};
 use metriccraft_engine::param::{Kind, Param};
 use metriccraft_engine::{Command, Document};
 use serde_json::{Map, Value};
@@ -214,13 +214,13 @@ impl Form {
                 Kind::Integer => text
                     .parse::<i64>()
                     .map(Value::from)
-                    .map_err(|_| Str::ParamIntError.fill(&[p.name]))?,
+                    .map_err(|_| Str::ParamIntError.fill_logical(&[p.name]))?,
                 Kind::Number => text
                     .parse::<f64>()
                     .ok()
                     .and_then(serde_json::Number::from_f64)
                     .map(Value::Number)
-                    .ok_or_else(|| Str::ParamNumError.fill(&[p.name]))?,
+                    .ok_or_else(|| Str::ParamNumError.fill_logical(&[p.name]))?,
                 Kind::Texts => Value::Array(
                     text.split(',')
                         .map(str::trim)
@@ -229,7 +229,7 @@ impl Form {
                         .collect(),
                 ),
                 Kind::Field | Kind::Json => serde_json::from_str(text)
-                    .map_err(|e| Str::ParamJsonError.fill(&[p.name, &e.to_string()]))?,
+                    .map_err(|e| Str::ParamJsonError.fill_logical(&[p.name, &e.to_string()]))?,
                 _ => Value::String(text.into()),
             };
             m.insert(p.name.into(), v);
@@ -250,7 +250,11 @@ impl Form {
         let command = self.command;
         let modal = egui::Modal::new(egui::Id::new(("form", command.id))).show(ui.ctx(), |ui| {
             ui.set_width(440.0);
-            ui.heading(crate::i18n::command_display(command));
+            crate::icons::a11y_label(
+                ui.heading(crate::i18n::command_display(command)),
+                egui::WidgetType::Label,
+                crate::i18n::command_label(command),
+            );
             ui.add_space(6.0);
             let table = self
                 .fields
@@ -285,10 +289,14 @@ impl Form {
             ui.add_space(8.0);
             let problem = self.params().err();
             if let Some(problem) = &problem {
-                ui.label(RichText::new(problem).color(t.muted).small());
+                crate::i18n::wrapped_label(ui, problem, |r| r.color(t.muted).small());
             }
             ui.horizontal(|ui| {
-                let run = ui.add_enabled(problem.is_none(), egui::Button::new(Str::Run.show()));
+                let run = crate::icons::a11y_label(
+                    ui.add_enabled(problem.is_none(), egui::Button::new(Str::Run.show())),
+                    egui::WidgetType::Button,
+                    Str::Run.text(),
+                );
                 let enter = problem.is_none() && ui.input(|i| i.key_pressed(Key::Enter));
                 if (run.clicked() || enter)
                     && let Ok(v) = self.params()

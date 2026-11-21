@@ -256,11 +256,15 @@ pub fn ribbon_segment_for(lang: Lang, segment: &str) -> &'static str {
     }
 }
 
+/// Translates a ribbon group name in logical order for the active language.
+pub fn ribbon_group_label(group: &str) -> &str {
+    let seg = ribbon_segment_for(language(), group);
+    if seg.is_empty() { group } else { seg }
+}
+
 pub fn ribbon_group_display(group: &str) -> String {
-    let lang = language();
-    let seg = ribbon_segment_for(lang, group);
-    let logical = if seg.is_empty() { group } else { seg };
-    if lang.is_rtl() {
+    let logical = ribbon_group_label(group);
+    if is_rtl() {
         visual_rtl(logical)
     } else {
         logical.to_string()
@@ -438,16 +442,6 @@ fn find_path_paren_close(
     span_start: usize,
     open_idx: usize,
 ) -> Option<usize> {
-    if open_idx > span_start
-        && chars
-            .get(open_idx - 1)
-            .is_some_and(|(_, prev)| *prev == ' ')
-        && !chars[span_start..open_idx]
-            .iter()
-            .any(|(_, c)| matches!(c, '/' | '\\'))
-    {
-        return None;
-    }
     let mut depth = 0usize;
     let mut k = open_idx;
     while let Some(&(_, ch)) = chars.get(k) {
@@ -546,9 +540,11 @@ fn mask_atoms(line: &str) -> Vec<String> {
                             .get(j + 1)
                             .is_some_and(|(_, next)| next.is_ascii_digit()))
                     || (c == ' '
-                        && chars
+                        && (chars
                             .get(j + 1)
-                            .is_some_and(|(_, next)| next.is_ascii_alphanumeric()))
+                            .is_some_and(|(_, next)| next.is_ascii_alphanumeric())
+                            || (chars.get(j + 1).is_some_and(|(_, next)| *next == '(')
+                                && find_path_paren_close(&chars, i, j + 1).is_some())))
                 {
                     j += 1;
                 } else {
@@ -837,6 +833,18 @@ mod tests {
         assert_eq!(
             Str::RecoveryFound.fill_for(Lang::Hebrew, &["/tmp/report(2026).mcraft"]),
             "/tmp/report(2026).mcraft :קודמת מהפעלה נשמרה שלא עבודה לשחזר ניתן"
+        );
+        assert_eq!(
+            Str::RecoveryFound.fill_for(Lang::Hebrew, &["/tmp/Budget (2026).mcraft"]),
+            "/tmp/Budget (2026).mcraft :קודמת מהפעלה נשמרה שלא עבודה לשחזר ניתן"
+        );
+        assert_eq!(
+            Str::SaveFirst.fill_for(Lang::Hebrew, &["Budget (2026).mcraft"]),
+            "?הסגירה לפני Budget (2026).mcraft-ב שינויים לשמור"
+        );
+        assert_eq!(
+            Str::SaveFirst.fill_logical_for(Lang::Hebrew, &["Budget (2026).mcraft"]),
+            "לשמור שינויים ב-Budget (2026).mcraft לפני הסגירה?"
         );
         assert_eq!(
             Str::RecoveryFound.fill_for(Lang::Hebrew, &["\u{2066}foo - אב - bar\u{2069}"]),
