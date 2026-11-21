@@ -83,12 +83,12 @@ NOTARIZE=0
 SIGNING=adhoc
 if [ "$IDENTITY" = "-" ]; then
   warn "macOS: ad-hoc signing (no MACOS_SIGN_IDENTITY); artifacts are not notarized"
-elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+elif [ -n "${MACOS_NOTARY_PROFILE:-}" ] || { [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; }; then
   NOTARIZE=1
   SIGNING=notarized
 else
   SIGNING=signed
-  warn "macOS: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete; signed but not notarized"
+  warn "macOS: notarization credentials incomplete (set MACOS_NOTARY_PROFILE or APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID); signed but not notarized"
 fi
 
 echo "==> MetricCraft $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize: $NOTARIZE"
@@ -135,15 +135,21 @@ sign() {
 
 notarize() {
   local file="$1" out id status
+  local auth_args=()
+  if [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
+    auth_args=(--keychain-profile "$MACOS_NOTARY_PROFILE")
+  else
+    auth_args=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+  fi
   echo "==> notarizing $(basename "$file") (this can take a few minutes)"
-  out="$(xcrun notarytool submit "$file" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
-    --team-id "$APPLE_TEAM_ID" --wait --timeout 1h --output-format json)" || true
+  out="$(xcrun notarytool submit "$file" "${auth_args[@]}" \
+    --wait --timeout 1h --output-format json)" || true
   echo "$out"
   id="$(printf '%s' "$out" | plutil -extract id raw -o - - 2>/dev/null || true)"
   status="$(printf '%s' "$out" | plutil -extract status raw -o - - 2>/dev/null || true)"
   if [ "$status" != "Accepted" ]; then
     if [ -n "$id" ]; then
-      xcrun notarytool log "$id" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+      xcrun notarytool log "$id" "${auth_args[@]}" || true
     fi
     echo "error: notarization of $(basename "$file") failed (status: ${status:-unknown})" >&2
     exit 1
@@ -241,10 +247,19 @@ rm -f "$CLI_ZIP"
 ditto -c -k --norsrc --noextattr --keepParent "$CLI_DIR" "$CLI_ZIP"
 if [ "$NOTARIZE" = 1 ]; then notarize "$CLI_ZIP"; fi
 
+host_arch="$(uname -m)"
 if [ "$NO_RUN" = 1 ]; then
   echo "==> skipping metriccraft-cli smoke test (--no-run)"
+elif printf '%s\n' "${WANT[@]}" | grep -qx "$host_arch"; then
+  smoke_dir="$(mktemp -d)"
+  ditto -x -k "$CLI_ZIP" "$smoke_dir"
+  if ! "$smoke_dir/$(basename "$CLI_DIR")/metriccraft-cli" --version; then
+    rm -rf "$smoke_dir"
+    exit 1
+  fi
+  rm -rf "$smoke_dir"
 else
-  "$CLI_DIR/metriccraft-cli" --version
+  echo "==> skipping metriccraft-cli smoke test: built ${WANT[*]} on a $host_arch host"
 fi
 if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "signing=$SIGNING" >>"$GITHUB_OUTPUT"; fi
 echo "==> done (signing: $SIGNING)"
