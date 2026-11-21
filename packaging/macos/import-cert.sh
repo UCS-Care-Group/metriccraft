@@ -35,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf '%s' "$APPLE_CERTIFICATE" | base64 --decode >"$CERT"
+printf '%s' "$APPLE_CERTIFICATE" | base64 -D >"$CERT"
 security delete-keychain "$KEYCHAIN" 2>/dev/null || rm -f "$KEYCHAIN"
 security create-keychain -p "$KC_PASS" "$KEYCHAIN"
 security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -65,8 +65,9 @@ fi
 echo "Imported signing identity $IDENTITY"
 if [ -n "${GITHUB_ENV:-}" ]; then
   { echo "MACOS_SIGN_IDENTITY=$IDENTITY"; echo "MACOS_KEYCHAIN=$KEYCHAIN"; } >>"$GITHUB_ENV"
+  KEEP_KEYCHAIN=1
 else
   echo "MACOS_SIGN_IDENTITY=$IDENTITY"
   echo "MACOS_KEYCHAIN=$KEYCHAIN"
+  echo "note: temporary keychain will be removed on exit" >&2
 fi
-KEEP_KEYCHAIN=1

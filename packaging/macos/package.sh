@@ -95,12 +95,12 @@ echo "==> MetricCraft $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize:
 
 # ---- build -------------------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = 0 ]; then
-  args=()
-  for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
-  if ! (cd "$ROOT" && cargo build --release --locked -p metriccraft -p metriccraft-cli "${args[@]}"); then
-    echo "error: cargo build failed; aborting packaging" >&2
-    exit 1
-  fi
+  for t in "${TARGETS[@]}"; do
+    if ! (cd "$ROOT" && cargo build --release --locked -p metriccraft -p metriccraft-cli --target "$t"); then
+      echo "error: cargo build failed for $t; aborting packaging" >&2
+      exit 1
+    fi
+  done
 fi
 
 if [ "$BUILD_ONLY" = 1 ]; then

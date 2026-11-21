@@ -69,7 +69,14 @@ warn() {
 # Copy repository licence and readme files into a package directory.
 copy_docs() {
   local dest="$1" f
-  for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md COPYRIGHT; do
+  for f in LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md NOTICE; do
+    if [ ! -f "$ROOT/$f" ]; then
+      echo "error: required legal file $ROOT/$f is missing" >&2
+      exit 1
+    fi
+    cp "$ROOT/$f" "$dest/"
+  done
+  for f in README.md LICENSE COPYRIGHT; do
     if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$dest/"; fi
   done
   copy_font_licences "$dest"
