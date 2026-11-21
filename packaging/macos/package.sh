@@ -13,9 +13,11 @@
 #   --no-run       Skip the final CLI smoke check (for isolated signing jobs)
 #
 # Signing (env):
-#   MACOS_SIGN_IDENTITY   codesign identity (name or SHA-1). Default "-" = ad-hoc signing.
+#   MACOS_SIGN_IDENTITY   codesign identity (name or SHA-1). Default "-" = ad-hoc signing
+#                         (local only; fails in GitHub Actions unless MACOS_ALLOW_ADHOC=1).
 #   MACOS_KEYCHAIN        keychain holding MACOS_SIGN_IDENTITY (optional)
-# Notarization (env; requires a real identity plus all three):
+# Notarization (env; requires a real identity plus MACOS_NOTARY_PROFILE or all three):
+#   MACOS_NOTARY_PROFILE  notarytool keychain profile (preferred)
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
 set -euo pipefail
 # shellcheck source=../env.sh
@@ -52,12 +54,10 @@ fi
 export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 SHORT_VERSION="${VERSION%%[-+]*}"
-case "$SHORT_VERSION" in
-  ''|*[!0-9.]*)
-    echo "error: version '$VERSION' does not start with a numeric CFBundleShortVersionString prefix" >&2
-    exit 2
-    ;;
-esac
+if ! [[ "$SHORT_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+  echo "error: version '$VERSION' does not yield a one-to-three-integer CFBundleShortVersionString (got '$SHORT_VERSION')" >&2
+  exit 2
+fi
 
 # Validate version, bundle identifier, deployment target, and build SHA before Info.plist substitution.
 for value in "$APP_ID" "$VERSION" "$SHORT_VERSION" "$MACOSX_DEPLOYMENT_TARGET" "${METRICCRAFT_BUILD_SHA:-unknown}"; do
@@ -82,6 +82,10 @@ CLI_ZIP="$DIST/metriccraft-cli-$VERSION-macos-$ARCH.zip"
 NOTARIZE=0
 SIGNING=adhoc
 if [ "$IDENTITY" = "-" ]; then
+  if [ -n "${GITHUB_ACTIONS:-}" ] && [ "${MACOS_ALLOW_ADHOC:-0}" != 1 ]; then
+    echo "error: MACOS_SIGN_IDENTITY is not set; refusing to package an unsigned release" >&2
+    exit 1
+  fi
   warn "macOS: ad-hoc signing (no MACOS_SIGN_IDENTITY); artifacts are not notarized"
 elif [ -n "${MACOS_NOTARY_PROFILE:-}" ] || { [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; }; then
   NOTARIZE=1
