@@ -731,11 +731,12 @@ pub fn wrapped_label_for(
         logical.to_owned()
     };
     let rich = style(egui::RichText::new(shown).font(font_id));
-    if needs_rtl_wrap {
+    let response = if needs_rtl_wrap {
         ui.add(egui::Label::new(rich).extend())
     } else {
         ui.add(egui::Label::new(rich).wrap())
-    }
+    };
+    crate::icons::a11y_label(response, egui::WidgetType::Label, logical)
 }
 
 /// Renders a **logical-order** wrapping label in the active interface language.
@@ -745,6 +746,20 @@ pub fn wrapped_label(
     style: impl FnOnce(egui::RichText) -> egui::RichText,
 ) -> egui::Response {
     wrapped_label_for(ui, is_rtl(), logical, style)
+}
+
+/// Renders a single-line [`Str`] label visually reordered for egui 0.36 while preserving
+/// logical-order text on its AccessKit label.
+pub fn str_label(
+    ui: &mut egui::Ui,
+    s: Str,
+    style: impl FnOnce(egui::RichText) -> egui::RichText,
+) -> egui::Response {
+    crate::icons::a11y_label(
+        ui.label(style(egui::RichText::new(s.show()))),
+        egui::WidgetType::Label,
+        s.text(),
+    )
 }
 
 #[cfg(test)]

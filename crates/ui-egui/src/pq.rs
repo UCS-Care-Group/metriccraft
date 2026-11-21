@@ -123,7 +123,7 @@ impl QueryEditor {
         egui::Panel::left("pq-queries")
             .default_size(180.0)
             .show(ui, |ui| {
-                ui.label(RichText::new(Str::Queries.show()).strong());
+                crate::i18n::str_label(ui, Str::Queries, |r| r.strong());
                 for q in &doc.queries {
                     let on = self.query.as_deref() == Some(q.name.as_str());
                     if ui.selectable_label(on, q.name.as_str()).clicked() && !on {
@@ -136,22 +136,30 @@ impl QueryEditor {
         egui::Panel::right("pq-steps")
             .default_size(220.0)
             .show(ui, |ui| {
-                ui.label(RichText::new(Str::AppliedSteps.show()).strong());
+                crate::i18n::str_label(ui, Str::AppliedSteps, |r| r.strong());
                 let Some(q) = query else {
                     return;
                 };
-                let names = std::iter::once(Str::SourceStep.show()).chain(step_names(steps));
-                for (i, name) in names.enumerate() {
+                let names =
+                    std::iter::once((Str::SourceStep.show(), Str::SourceStep.text().to_owned()))
+                        .chain(step_names(steps).into_iter().map(|s| (s.clone(), s)));
+                for (i, (shown_name, logical_name)) in names.enumerate() {
                     ui.horizontal(|ui| {
-                        if ui.selectable_label(i == selected, name.as_str()).clicked() {
+                        if crate::icons::a11y_label(
+                            ui.selectable_label(i == selected, shown_name.as_str()),
+                            egui::WidgetType::SelectableLabel,
+                            &logical_name,
+                        )
+                        .clicked()
+                        {
                             self.selected = if i == steps.len() { None } else { Some(i) };
                         }
                         if i > 0
                             && crate::icons::name_labeled(
                                 ui.small_button("×"),
                                 egui::WidgetType::Button,
-                                &Str::DeleteStepNamed.fill(&[&name]),
-                                &Str::DeleteStepNamed.fill_logical(&[&name]),
+                                &Str::DeleteStepNamed.fill(&[&shown_name]),
+                                &Str::DeleteStepNamed.fill_logical(&[&logical_name]),
                             )
                             .clicked()
                         {
@@ -169,7 +177,7 @@ impl QueryEditor {
             .resizable(true)
             .default_size(150.0)
             .show(ui, |ui| {
-                ui.label(RichText::new(Str::QueryM.show()).strong());
+                crate::i18n::str_label(ui, Str::QueryM, |r| r.strong());
                 let m = self
                     .query
                     .as_deref()
@@ -210,7 +218,7 @@ impl QueryEditor {
                     ui.label(RichText::new(e.as_str()).color(t.danger));
                 }
                 None => {
-                    ui.label(RichText::new(Str::LoadingPreview.show()).color(t.muted));
+                    crate::i18n::str_label(ui, Str::LoadingPreview, |r| r.color(t.muted));
                 }
             }
         });

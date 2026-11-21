@@ -652,7 +652,7 @@ impl Shell {
                 ui.add_space(4.0);
                 if self.tab == Tab::View {
                     ui.horizontal(|ui| {
-                        ui.label(Str::AppTheme.show());
+                        i18n::str_label(ui, Str::AppTheme, |r| r);
                         let mut mode = self.prefs.theme;
                         icons::a11y_label(
                             ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.show()),
@@ -668,7 +668,7 @@ impl Shell {
                             self.set_theme(ui.ctx(), mode);
                         }
                         ui.separator();
-                        ui.label(Str::Language.show());
+                        i18n::str_label(ui, Str::Language, |r| r);
                         let mut lang = self.prefs.language;
                         for &choice in Lang::available() {
                             icons::a11y_label(
@@ -707,8 +707,9 @@ impl Shell {
                                 if tips {
                                     keys::badge(ui, r.rect, 'A', &t);
                                 }
-                                let group = RichText::new(Str::PowerQueryGroup.show());
-                                ui.label(group.small().color(t.muted));
+                                i18n::str_label(ui, Str::PowerQueryGroup, |r| {
+                                    r.small().color(t.muted)
+                                });
                             });
                             ui.separator();
                             first = 1;
@@ -758,12 +759,19 @@ impl Shell {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let text = match (snap.busy, &self.status) {
-                        (Some(id), _) => Str::Working.fill(&[self.label_of(id)]),
-                        (None, Some(s)) => s.clone(),
-                        (None, None) => Str::Ready.show(),
+                    let (shown, logical) = match (snap.busy, &self.status) {
+                        (Some(id), _) => (
+                            Str::Working.fill(&[self.label_of(id)]),
+                            Str::Working.fill_logical(&[self.label_of(id)]),
+                        ),
+                        (None, Some(s)) => (s.clone(), s.clone()),
+                        (None, None) => (Str::Ready.show(), Str::Ready.text().to_owned()),
                     };
-                    ui.label(RichText::new(text).color(t.muted));
+                    icons::a11y_label(
+                        ui.label(RichText::new(shown).color(t.muted)),
+                        egui::WidgetType::Label,
+                        &logical,
+                    );
                     if snap.busy.is_some_and(|id| LOADS.contains(&id)) {
                         // Rows read so far, per Query; polled while the load runs.
                         for (query, rows) in self.engine.load_rows() {
@@ -775,8 +783,12 @@ impl Shell {
                                 &metriccraft_core::EN_US,
                             )
                             .unwrap_or_default();
-                            ui.label(
-                                RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
+                            icons::a11y_label(
+                                ui.label(
+                                    RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
+                                ),
+                                egui::WidgetType::Label,
+                                &Str::RowsRead.fill_logical(&[&query, &n]),
                             );
                         }
                         if icons::a11y_label(
@@ -793,18 +805,30 @@ impl Shell {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if snap.dirty {
-                            ui.label(RichText::new(Str::Unsaved.show()).color(t.muted));
+                            i18n::str_label(ui, Str::Unsaved, |r| r.color(t.muted));
                         }
                         // What Undo would undo, with its Origin (`Undo: MCP — 30 changes`).
                         if let Some(undo) = &snap.undo {
-                            ui.label(RichText::new(Str::UndoLabel.fill(&[undo])).color(t.muted));
+                            icons::a11y_label(
+                                ui.label(
+                                    RichText::new(Str::UndoLabel.fill(&[undo])).color(t.muted),
+                                ),
+                                egui::WidgetType::Label,
+                                &Str::UndoLabel.fill_logical(&[undo]),
+                            );
                         }
                         let pages = &snap.doc.report.pages;
                         if let Some(page) = views::current_page(&snap.doc) {
                             let n = pages.iter().position(|p| p.id == page.id).unwrap_or(0) + 1;
-                            let label =
-                                Str::PageNumber.fill(&[&n.to_string(), &pages.len().to_string()]);
-                            ui.label(RichText::new(label).color(t.muted));
+                            let n_s = n.to_string();
+                            let total_s = pages.len().to_string();
+                            let label = Str::PageNumber.fill(&[&n_s, &total_s]);
+                            let logical = Str::PageNumber.fill_logical(&[&n_s, &total_s]);
+                            icons::a11y_label(
+                                ui.label(RichText::new(label).color(t.muted)),
+                                egui::WidgetType::Label,
+                                &logical,
+                            );
                         }
                     });
                 });
@@ -1152,7 +1176,13 @@ impl Shell {
                         ui.set_max_width(360.0);
                         let color = if toast.error { t.danger } else { t.warning };
                         ui.label(RichText::new(toast.text.as_str()).color(color));
-                        if ui.small_button(Str::Dismiss.show()).clicked() {
+                        if icons::a11y_label(
+                            ui.small_button(Str::Dismiss.show()),
+                            egui::WidgetType::Button,
+                            Str::Dismiss.text(),
+                        )
+                        .clicked()
+                        {
                             dismissed = Some(i);
                         }
                     });
