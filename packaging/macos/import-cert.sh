@@ -71,7 +71,5 @@ if [ -n "${GITHUB_ENV:-}" ]; then
   { echo "MACOS_SIGN_IDENTITY=$IDENTITY"; echo "MACOS_KEYCHAIN=$KEYCHAIN"; } >>"$GITHUB_ENV"
   KEEP_KEYCHAIN=1
 else
-  echo "MACOS_SIGN_IDENTITY=$IDENTITY"
-  echo "MACOS_KEYCHAIN=$KEYCHAIN"
-  echo "note: temporary keychain will be removed on exit" >&2
+  warn "GITHUB_ENV is unset; temporary keychain $KEYCHAIN was verified and will be removed on exit"
 fi

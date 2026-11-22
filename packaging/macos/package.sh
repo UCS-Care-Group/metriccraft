@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --no-run) NO_RUN=1; shift ;;
-    -h | --help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -79,6 +79,23 @@ APP="$WORK/MetricCraft.app"
 DMG="$DIST/metriccraft-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/metriccraft-cli-$VERSION-macos-$ARCH.zip"
 
+echo "==> MetricCraft $VERSION for macOS ($ARCH)"
+
+# ---- build -------------------------------------------------------------------------------------
+if [ "$SKIP_BUILD" = 0 ]; then
+  for t in "${TARGETS[@]}"; do
+    if ! (cd "$ROOT" && cargo build --release --locked -p metriccraft -p metriccraft-cli --target "$t"); then
+      echo "error: cargo build failed for $t; aborting packaging" >&2
+      exit 1
+    fi
+  done
+fi
+
+if [ "$BUILD_ONLY" = 1 ]; then
+  echo "==> built; signing and packaging come next"
+  exit 0
+fi
+
 NOTARIZE=0
 SIGNING=adhoc
 if [ "$IDENTITY" = "-" ]; then
@@ -95,22 +112,7 @@ else
   warn "macOS: notarization credentials incomplete (set MACOS_NOTARY_PROFILE or APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID); signed but not notarized"
 fi
 
-echo "==> MetricCraft $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize: $NOTARIZE"
-
-# ---- build -------------------------------------------------------------------------------------
-if [ "$SKIP_BUILD" = 0 ]; then
-  for t in "${TARGETS[@]}"; do
-    if ! (cd "$ROOT" && cargo build --release --locked -p metriccraft -p metriccraft-cli --target "$t"); then
-      echo "error: cargo build failed for $t; aborting packaging" >&2
-      exit 1
-    fi
-  done
-fi
-
-if [ "$BUILD_ONLY" = 1 ]; then
-  echo "==> built; signing and packaging come next"
-  exit 0
-fi
+echo "==> packaging MetricCraft $VERSION for macOS ($ARCH), identity: $IDENTITY, notarize: $NOTARIZE"
 
 rm -rf "$WORK"
 mkdir -p "$WORK/bin"
