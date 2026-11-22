@@ -168,7 +168,7 @@ impl Grid {
             cell.text(
                 head.left_center() + Vec2::new(PAD, 0.0),
                 Align2::LEFT_CENTER,
-                field.name(),
+                crate::i18n::visual_rtl(field.name()),
                 FontId::proportional(13.0),
                 color,
             );
@@ -201,7 +201,7 @@ impl Grid {
                     cell.text(
                         rect.left_center() + Vec2::new(PAD, 0.0),
                         Align2::LEFT_CENTER,
-                        s,
+                        crate::i18n::visual_rtl(&s),
                         font.clone(),
                         t.text,
                     );

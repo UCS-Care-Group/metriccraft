@@ -126,7 +126,15 @@ impl QueryEditor {
                 crate::i18n::str_label(ui, Str::Queries, |r| r.strong());
                 for q in &doc.queries {
                     let on = self.query.as_deref() == Some(q.name.as_str());
-                    if ui.selectable_label(on, q.name.as_str()).clicked() && !on {
+                    let shown = crate::i18n::visual_rtl(&q.name);
+                    if crate::icons::a11y_label(
+                        ui.selectable_label(on, shown),
+                        egui::WidgetType::SelectableLabel,
+                        &q.name,
+                    )
+                    .clicked()
+                        && !on
+                    {
                         self.query = Some(q.name.clone());
                         self.selected = None;
                     }
@@ -142,7 +150,11 @@ impl QueryEditor {
                 };
                 let names =
                     std::iter::once((Str::SourceStep.show(), Str::SourceStep.text().to_owned()))
-                        .chain(step_names(steps).into_iter().map(|s| (s.clone(), s)));
+                        .chain(
+                            step_names(steps)
+                                .into_iter()
+                                .map(|s| (crate::i18n::visual_rtl(&s), s)),
+                        );
                 for (i, (shown_name, logical_name)) in names.enumerate() {
                     ui.horizontal(|ui| {
                         if crate::icons::a11y_label(
@@ -336,5 +348,82 @@ mod tests {
         ] {
             assert_eq!(m_colour(src, &t, &font).text, src);
         }
+    }
+
+    fn collect_text_shapes(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+        for cs in shapes {
+            collect_shape_text(&cs.shape, out);
+        }
+    }
+
+    fn collect_shape_text(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_shape_text(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn document_query_names_render_visual_rtl_and_keep_logical_a11y() {
+        let dir = std::env::temp_dir().join(format!("mcraft-pq-he-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let csv = dir.join("sales.csv");
+        std::fs::write(&csv, "Region,Amount\nNorth,10\n").unwrap();
+
+        let mut engine_app = metriccraft_engine::App::new();
+        engine_app
+            .run("home.getData", &json!({"kind": "csv", "path": csv}))
+            .unwrap();
+        engine_app
+            .run(
+                "query.rename",
+                &json!({"query": "sales", "name": "מכירות 2026"}),
+            )
+            .unwrap();
+        let snap = Snapshot {
+            doc: engine_app.document().clone(),
+            enabled: vec![true; metriccraft_engine::COMMANDS.len()],
+            ..Default::default()
+        };
+
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut editor = QueryEditor::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            editor.show(
+                ui,
+                &Tokens::get(crate::theme::Mode::Light),
+                &snap,
+                metriccraft_engine::COMMANDS,
+                None,
+            );
+        });
+        output.textures_delta.clear();
+
+        let mut painted = Vec::new();
+        collect_text_shapes(&output.shapes, &mut painted);
+        assert!(
+            painted.iter().any(|s| s == "2026 מכירות"),
+            "expected visual RTL query name in painted shapes, got {painted:?}"
+        );
+
+        let a11y = output
+            .platform_output
+            .accesskit_update
+            .expect("accesskit update");
+        assert!(
+            a11y.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("מכירות 2026")),
+            "expected logical Hebrew query name in AccessKit nodes"
+        );
+        assert_eq!(crate::i18n::visual_rtl("סינון שורות"), "שורות סינון");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -78,13 +78,25 @@ pub fn data_pane(
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
                     let on = picked.as_deref() == Some(table.name.as_str());
-                    if ui.selectable_label(on, table.name.as_str()).clicked() {
+                    if crate::icons::a11y_label(
+                        ui.selectable_label(on, crate::i18n::visual_rtl(&table.name)),
+                        egui::WidgetType::SelectableLabel,
+                        &table.name,
+                    )
+                    .clicked()
+                    {
                         *picked = Some(table.name.clone());
                     }
                 })
                 .body(|ui| {
                     for c in table.columns.iter().filter(|c| !c.hidden) {
-                        if ui.selectable_label(false, c.name.as_str()).clicked() {
+                        if crate::icons::a11y_label(
+                            ui.selectable_label(false, crate::i18n::visual_rtl(&c.name)),
+                            egui::WidgetType::SelectableLabel,
+                            &c.name,
+                        )
+                        .clicked()
+                        {
                             clicked = Some(FieldRef::Column {
                                 table: table.name.clone(),
                                 column: c.name.clone(),
@@ -92,8 +104,14 @@ pub fn data_pane(
                         }
                     }
                     for m in table.measures.iter().filter(|m| !m.hidden) {
-                        let label = RichText::new(m.name.as_str()).italics();
-                        if ui.selectable_label(false, label).clicked() {
+                        let label = RichText::new(crate::i18n::visual_rtl(&m.name)).italics();
+                        if crate::icons::a11y_label(
+                            ui.selectable_label(false, label),
+                            egui::WidgetType::SelectableLabel,
+                            &m.name,
+                        )
+                        .clicked()
+                        {
                             clicked = Some(FieldRef::Measure {
                                 name: m.name.clone(),
                             });

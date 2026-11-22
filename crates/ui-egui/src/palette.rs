@@ -357,11 +357,16 @@ fn editor(ui: &mut Ui, f: &mut Field, doc: &Document, table: Option<&str>, page:
         }
         (_, Some(names)) if !names.is_empty() => {
             let r = egui::ComboBox::from_id_salt(("param", p.name))
-                .selected_text(f.text.as_str())
+                .selected_text(crate::i18n::visual_rtl(f.text.as_str()))
                 .width(260.0)
                 .show_ui(ui, |ui| {
                     for n in names {
-                        ui.selectable_value(&mut f.text, n.clone(), n);
+                        let shown = crate::i18n::visual_rtl(&n);
+                        crate::icons::a11y_label(
+                            ui.selectable_value(&mut f.text, n.clone(), shown),
+                            egui::WidgetType::SelectableLabel,
+                            &n,
+                        );
                     }
                 });
             crate::icons::name(r.response, egui::WidgetType::ComboBox, p.name);

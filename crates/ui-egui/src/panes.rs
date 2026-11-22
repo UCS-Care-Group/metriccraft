@@ -110,10 +110,15 @@ pub fn visualizations(
         }
         for (i, f) in fields.iter().enumerate() {
             ui.horizontal(|ui| {
-                ui.label(field_name(f));
+                let name = field_name(f);
+                crate::icons::a11y_label(
+                    ui.label(crate::i18n::visual_rtl(name)),
+                    egui::WidgetType::Label,
+                    name,
+                );
                 let r = ui.small_button("×");
-                let tooltip = Str::RemoveField.fill(&[field_name(f)]);
-                let a11y = Str::RemoveField.fill_logical(&[field_name(f)]);
+                let tooltip = Str::RemoveField.fill(&[name]);
+                let a11y = Str::RemoveField.fill_logical(&[name]);
                 if crate::icons::name_labeled(r, egui::WidgetType::Button, &tooltip, &a11y)
                     .clicked()
                 {
@@ -152,9 +157,18 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
             .iter()
             .map(|i| i.as_str().map_or_else(|| i.to_string(), str::to_string))
             .collect();
-        ui.label(RichText::new(field).strong());
+        crate::icons::a11y_label(
+            ui.label(RichText::new(crate::i18n::visual_rtl(field)).strong()),
+            egui::WidgetType::Label,
+            field,
+        );
         ui.horizontal_wrapped(|ui| {
-            ui.label(values.join(", "));
+            let joined = values.join(", ");
+            crate::icons::a11y_label(
+                ui.label(crate::i18n::visual_rtl(&joined)),
+                egui::WidgetType::Label,
+                &joined,
+            );
             let r = ui.small_button("×");
             let tooltip = Str::ClearSelection.fill(&[field]);
             let a11y = Str::ClearSelection.fill_logical(&[field]);

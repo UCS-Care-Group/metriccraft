@@ -315,7 +315,7 @@ impl Shell {
                 .families
                 .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
         }
-        #[cfg(any(not(target_arch = "wasm32"), has_hebrew_craft_font))]
+        #[cfg(not(target_arch = "wasm32"))]
         install_hebrew_fallback_fonts(&mut fonts);
         ctx.set_fonts(fonts);
         ctx.set_visuals(self.tokens.visuals());
@@ -1044,7 +1044,15 @@ impl Shell {
                     let current = views::current_page(&snap.doc).map(|p| p.id.clone());
                     for page in &snap.doc.report.pages {
                         let on = current.as_deref() == Some(page.id.as_str());
-                        if ui.selectable_label(on, page.name.as_str()).clicked() && !on {
+                        let shown = i18n::visual_rtl(&page.name);
+                        if icons::a11y_label(
+                            ui.selectable_label(on, shown),
+                            egui::WidgetType::SelectableLabel,
+                            &page.name,
+                        )
+                        .clicked()
+                            && !on
+                        {
                             self.engine.run("page.setCurrent", json!({"page": page.id}));
                         }
                     }
@@ -1349,62 +1357,47 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(mods, key?))
 }
 
-/// Registers bundled (`CRAFT_FONTS_DIR`) or desktop system Hebrew fallback fonts on every UI
-/// font family without committing binary font assets. Web (`wasm32`) builds require
-/// `CRAFT_FONTS_DIR` pointing to `NotoSansHebrew-Regular.ttf` at build time; otherwise
-/// `Lang::available()` hides Hebrew so the web UI never renders missing-glyph boxes.
-#[cfg(any(not(target_arch = "wasm32"), has_hebrew_craft_font))]
+/// Registers desktop system Hebrew fallback fonts on every UI font family without committing or
+/// embedding external binary font assets. Web (`wasm32`) builds exclude Hebrew in
+/// `Lang::available()` so the web UI never renders missing-glyph boxes.
+#[cfg(not(target_arch = "wasm32"))]
 fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) {
-    #[cfg(has_hebrew_craft_font)]
-    {
-        const HEBREW_NAME: &str = "Noto Sans Hebrew";
-        let bytes = include_bytes!(env!("HEBREW_CRAFT_FONT_PATH"));
-        fonts.font_data.insert(
-            HEBREW_NAME.into(),
-            Arc::new(egui::FontData::from_static(bytes)),
-        );
-        append_font_fallback(fonts, HEBREW_NAME);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        const CANDIDATES: [(&str, &str); 8] = [
-            (
-                "Arial Hebrew",
-                "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
-            ),
-            ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
-            ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
-            (
-                "Noto Sans Hebrew",
-                "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
-            ),
-            (
-                "Noto Sans Hebrew Arch",
-                "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
-            ),
-            (
-                "DejaVu Sans",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            ),
-            ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
-            ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
-        ];
-        for (name, path) in CANDIDATES {
-            if fonts.font_data.contains_key(name) {
-                continue;
-            }
-            if let Ok(bytes) = std::fs::read(path) {
-                fonts
-                    .font_data
-                    .insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
-                append_font_fallback(fonts, name);
-            }
+    const CANDIDATES: [(&str, &str); 8] = [
+        (
+            "Arial Hebrew",
+            "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
+        ),
+        ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
+        ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
+        (
+            "Noto Sans Hebrew",
+            "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+        ),
+        (
+            "Noto Sans Hebrew Arch",
+            "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
+        ),
+        (
+            "DejaVu Sans",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ),
+        ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
+        ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
+    ];
+    for (name, path) in CANDIDATES {
+        if fonts.font_data.contains_key(name) {
+            continue;
+        }
+        if let Ok(bytes) = std::fs::read(path) {
+            fonts
+                .font_data
+                .insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
+            append_font_fallback(fonts, name);
         }
     }
 }
 
-#[cfg(any(not(target_arch = "wasm32"), has_hebrew_craft_font))]
+#[cfg(not(target_arch = "wasm32"))]
 fn append_font_fallback(fonts: &mut egui::FontDefinitions, name: &str) {
     for family in [
         egui::FontFamily::Proportional,

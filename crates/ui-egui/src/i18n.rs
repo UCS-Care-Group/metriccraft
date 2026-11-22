@@ -18,10 +18,10 @@ pub enum Lang {
 impl Lang {
     pub const ALL: [Lang; 2] = [Lang::English, Lang::Hebrew];
 
-    /// Whether Hebrew text can render in this build (always on desktop; on WASM only when
-    /// `CRAFT_FONTS_DIR` supplied `NotoSansHebrew-Regular.ttf` at compile time).
+    /// Whether Hebrew text can render in this build (always on desktop via system fallback fonts;
+    /// disabled on WASM so the web UI never falls back to missing-glyph boxes).
     pub const fn hebrew_font_available() -> bool {
-        cfg!(any(not(target_arch = "wasm32"), has_hebrew_craft_font))
+        cfg!(not(target_arch = "wasm32"))
     }
 
     /// Languages selectable in the UI for this build target.
