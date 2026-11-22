@@ -75,7 +75,7 @@ escape_sed_repl() {
 }
 
 # Keep in sync with LSMinimumSystemVersion in Info.plist.in.
-WORK="$CARGO_TARGET_DIR/macos-package"
+WORK="$CARGO_TARGET_DIR/macos-package-$ARCH"
 APP="$WORK/MetricCraft.app"
 DMG="$DIST/metriccraft-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/metriccraft-cli-$VERSION-macos-$ARCH.zip"
