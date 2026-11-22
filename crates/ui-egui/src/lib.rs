@@ -1361,40 +1361,123 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
 /// embedding external binary font assets. Web (`wasm32`) builds exclude Hebrew in
 /// `Lang::available()` so the web UI never renders missing-glyph boxes.
 #[cfg(not(target_arch = "wasm32"))]
-fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) {
-    const CANDIDATES: [(&str, &str); 8] = [
-        (
-            "Arial Hebrew",
-            "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
-        ),
-        ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
-        ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
-        (
-            "Noto Sans Hebrew",
-            "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
-        ),
-        (
-            "Noto Sans Hebrew Arch",
-            "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
-        ),
-        (
-            "DejaVu Sans",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ),
-        ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
-        ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
-    ];
-    for (name, path) in CANDIDATES {
-        if fonts.font_data.contains_key(name) {
-            continue;
-        }
-        if let Ok(bytes) = std::fs::read(path) {
-            fonts
-                .font_data
-                .insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
-            append_font_fallback(fonts, name);
+fn is_valid_font_bytes(bytes: &[u8]) -> bool {
+    matches!(
+        bytes.get(..4),
+        Some([0x00, 0x01, 0x00, 0x00] | b"OTTO" | b"true" | b"ttcf")
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_valid_font(path: &std::path::Path) -> Option<Arc<egui::FontData>> {
+    let bytes = std::fs::read(path).ok()?;
+    if !is_valid_font_bytes(&bytes) {
+        eprintln!(
+            "note: skipping invalid Hebrew fallback font file: {}",
+            path.display()
+        );
+        return None;
+    }
+    Some(Arc::new(egui::FontData::from_owned(bytes)))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_hebrew_fallback_fonts(
+    candidates: &[(&'static str, &str)],
+) -> Vec<(&'static str, Arc<egui::FontData>)> {
+    let mut loaded = Vec::new();
+    for env_var in ["METRICCRAFT_FONT_DIR", "CRAFT_FONTS_DIR"] {
+        if let Ok(dir) = std::env::var(env_var) {
+            let trimmed = dir.trim();
+            if !trimmed.is_empty() {
+                let candidate = std::path::Path::new(trimmed).join("NotoSansHebrew-Regular.ttf");
+                if let Some(data) = read_valid_font(&candidate) {
+                    loaded.push(("Noto Sans Hebrew Env", data));
+                    break;
+                }
+            }
         }
     }
+    for &(name, path) in candidates {
+        if let Some(data) = read_valid_font(std::path::Path::new(path)) {
+            loaded.push((name, data));
+        }
+    }
+    loaded
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn hebrew_fallback_fonts() -> &'static [(&'static str, Arc<egui::FontData>)] {
+    static FONTS: std::sync::OnceLock<Vec<(&'static str, Arc<egui::FontData>)>> =
+        std::sync::OnceLock::new();
+    FONTS
+        .get_or_init(|| {
+            const CANDIDATES: [(&str, &str); 13] = [
+                (
+                    "Arial Hebrew",
+                    "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
+                ),
+                ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
+                ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
+                (
+                    "Arial Unicode",
+                    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                ),
+                (
+                    "Noto Sans Hebrew",
+                    "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+                ),
+                (
+                    "Noto Sans Hebrew Arch",
+                    "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
+                ),
+                (
+                    "Noto Sans Hebrew Nix",
+                    "/run/current-system/sw/share/fonts/truetype/NotoSansHebrew-Regular.ttf",
+                ),
+                (
+                    "FreeSans",
+                    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                ),
+                ("FreeSans Arch", "/usr/share/fonts/TTF/FreeSans.ttf"),
+                ("FreeSans GNU", "/usr/share/fonts/gnu-free/FreeSans.ttf"),
+                ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
+                ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
+                ("Tahoma", "C:\\Windows\\Fonts\\tahoma.ttf"),
+            ];
+            let loaded = load_hebrew_fallback_fonts(&CANDIDATES);
+            if loaded.is_empty() {
+                eprintln!(
+                    "note: no Hebrew fallback font found (checked METRICCRAFT_FONT_DIR, CRAFT_FONTS_DIR, and system font paths); Hebrew UI disabled"
+                );
+            }
+            loaded
+        })
+        .as_slice()
+}
+
+pub(crate) fn hebrew_font_available() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        !hebrew_fallback_fonts().is_empty()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) -> bool {
+    let loaded = hebrew_fallback_fonts();
+    for (name, data) in loaded {
+        if fonts.font_data.contains_key(*name) {
+            continue;
+        }
+        fonts.font_data.insert((*name).into(), Arc::clone(data));
+        append_font_fallback(fonts, name);
+    }
+    !loaded.is_empty()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1438,16 +1521,48 @@ mod tests {
             view: View::Model,
             language: Lang::Hebrew,
         };
-        assert_eq!(Prefs::from_json(&p.to_json()), p);
+        let expected_lang = if Lang::hebrew_font_available() {
+            Lang::Hebrew
+        } else {
+            Lang::English
+        };
+        let parsed = Prefs::from_json(&p.to_json());
+        assert_eq!(parsed.theme, p.theme);
+        assert_eq!(parsed.view, p.view);
+        assert_eq!(parsed.language, expected_lang);
         assert_eq!(
             Prefs::from_json(&json!({"language": "iw"})).language,
-            Lang::Hebrew
+            expected_lang
         );
         assert_eq!(
             Prefs::from_json(&json!({"theme": 3, "view": "nope", "language": "x-he"})),
             Prefs::default()
         );
         assert_eq!(Prefs::from_json(&Value::Null), Prefs::default());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn hebrew_font_validation_skips_missing_and_invalid_files() {
+        assert!(is_valid_font_bytes(metriccraft_visuals::text::REGULAR));
+        assert!(!is_valid_font_bytes(b""));
+        assert!(!is_valid_font_bytes(b"not a font"));
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let bogus = std::env::temp_dir().join(format!("metriccraft-bogus-font-{nanos}.ttf"));
+        std::fs::write(&bogus, b"corrupt-not-a-ttf").expect("write bogus font");
+        let missing = "/nonexistent/path/metriccraft-missing.ttf";
+        let bogus_str = bogus.to_string_lossy().into_owned();
+        let loaded = load_hebrew_fallback_fonts(&[("Missing", missing), ("Bogus", &bogus_str)]);
+        let _ = std::fs::remove_file(&bogus);
+        assert!(
+            loaded
+                .iter()
+                .all(|(name, _)| *name != "Missing" && *name != "Bogus"),
+            "missing and corrupt candidates must be rejected"
+        );
     }
 
     #[test]

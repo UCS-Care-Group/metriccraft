@@ -157,18 +157,10 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
             .iter()
             .map(|i| i.as_str().map_or_else(|| i.to_string(), str::to_string))
             .collect();
-        crate::icons::a11y_label(
-            ui.label(RichText::new(crate::i18n::visual_rtl(field)).strong()),
-            egui::WidgetType::Label,
-            field,
-        );
+        crate::i18n::wrapped_data_label(ui, field, |r| r.strong());
         ui.horizontal_wrapped(|ui| {
             let joined = values.join(", ");
-            crate::icons::a11y_label(
-                ui.label(crate::i18n::visual_rtl(&joined)),
-                egui::WidgetType::Label,
-                &joined,
-            );
+            crate::i18n::wrapped_data_label(ui, &joined, |r| r);
             let r = ui.small_button("×");
             let tooltip = Str::ClearSelection.fill(&[field]);
             let a11y = Str::ClearSelection.fill_logical(&[field]);

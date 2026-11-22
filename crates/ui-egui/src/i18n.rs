@@ -18,14 +18,14 @@ pub enum Lang {
 impl Lang {
     pub const ALL: [Lang; 2] = [Lang::English, Lang::Hebrew];
 
-    /// Whether Hebrew text can render in this build (always on desktop via system fallback fonts;
-    /// disabled on WASM so the web UI never falls back to missing-glyph boxes).
-    pub const fn hebrew_font_available() -> bool {
-        cfg!(not(target_arch = "wasm32"))
+    /// Whether a Hebrew-capable fallback font was found and registered for this build.
+    /// Always `false` on WASM so the web UI never falls back to missing-glyph boxes.
+    pub fn hebrew_font_available() -> bool {
+        crate::hebrew_font_available()
     }
 
     /// Languages selectable in the UI for this build target.
-    pub const fn available() -> &'static [Lang] {
+    pub fn available() -> &'static [Lang] {
         if Self::hebrew_font_available() {
             &Self::ALL
         } else {
@@ -744,6 +744,57 @@ pub fn wrapped_label(
     wrapped_label_for(ui, is_rtl(), logical, style)
 }
 
+/// Renders a **logical-order** wrapping label for user data (query, column, filter values),
+/// applying visual RTL reordering whenever `logical` contains RTL script characters even if the
+/// interface language is English.
+pub fn wrapped_data_label(
+    ui: &mut egui::Ui,
+    logical: &str,
+    style: impl FnOnce(egui::RichText) -> egui::RichText,
+) -> egui::Response {
+    wrapped_label_for(ui, true, logical, style)
+}
+
+/// Renders a **logical-order** wrapping selectable label, breaking lines at the button's
+/// available text width before applying visual RTL reordering per line when `rtl` is true.
+pub fn wrapped_selectable_label_for(
+    ui: &mut egui::Ui,
+    rtl: bool,
+    selected: bool,
+    logical: &str,
+    italics: bool,
+) -> egui::Response {
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let needs_rtl_wrap = rtl && logical.chars().any(is_rtl_script);
+    let text_width = (ui.available_width() - 2.0 * ui.spacing().button_padding.x).max(1.0);
+    let shown = if needs_rtl_wrap {
+        wrapped_visual_lines(ui.ctx(), true, logical, font_id.clone(), text_width)
+    } else {
+        logical.to_owned()
+    };
+    let mut rich = egui::RichText::new(shown).font(font_id);
+    if italics {
+        rich = rich.italics();
+    }
+    let button = if needs_rtl_wrap {
+        egui::Button::selectable(selected, rich).wrap_mode(egui::TextWrapMode::Extend)
+    } else {
+        egui::Button::selectable(selected, rich)
+    };
+    crate::icons::a11y_label(ui.add(button), egui::WidgetType::SelectableLabel, logical)
+}
+
+/// Renders a **logical-order** wrapping selectable label for user data (queries, columns,
+/// measures), applying visual RTL reordering whenever `logical` contains RTL script characters.
+pub fn wrapped_selectable_label(
+    ui: &mut egui::Ui,
+    selected: bool,
+    logical: &str,
+    italics: bool,
+) -> egui::Response {
+    wrapped_selectable_label_for(ui, true, selected, logical, italics)
+}
+
 /// Renders a single-line [`Str`] label visually reordered for egui 0.36 while preserving
 /// logical-order text on its AccessKit label.
 pub fn str_label(
@@ -900,6 +951,37 @@ mod tests {
         assert!(
             label_rect.height() >= 24.0,
             "expected multi-line wrapped label: {label_rect:?}"
+        );
+
+        assert_eq!(
+            Str::DeleteStepNamed.fill_for(Lang::Hebrew, &["מכירות 2026"]),
+            "2026 מכירות שלב מחק"
+        );
+        assert_eq!(
+            Str::DeleteStepNamed.fill_logical_for(Lang::Hebrew, &["מכירות 2026"]),
+            "מחק שלב מכירות 2026"
+        );
+
+        let mut selectable_rect = egui::Rect::NOTHING;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.allocate_ui(egui::vec2(120.0, 200.0), |ui| {
+                    selectable_rect = wrapped_selectable_label_for(
+                        ui,
+                        true,
+                        false,
+                        "שאילתת מכירות שנתית מאוד ארוכה",
+                        false,
+                    )
+                    .rect;
+                });
+            });
+        })
+        .textures_delta
+        .clear();
+        assert!(
+            selectable_rect.height() >= 24.0,
+            "expected multi-line wrapped selectable label: {selectable_rect:?}"
         );
     }
 }

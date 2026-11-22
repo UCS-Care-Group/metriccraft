@@ -126,13 +126,7 @@ impl QueryEditor {
                 crate::i18n::str_label(ui, Str::Queries, |r| r.strong());
                 for q in &doc.queries {
                     let on = self.query.as_deref() == Some(q.name.as_str());
-                    let shown = crate::i18n::visual_rtl(&q.name);
-                    if crate::icons::a11y_label(
-                        ui.selectable_label(on, shown),
-                        egui::WidgetType::SelectableLabel,
-                        &q.name,
-                    )
-                    .clicked()
+                    if crate::i18n::wrapped_selectable_label(ui, on, &q.name, false).clicked()
                         && !on
                     {
                         self.query = Some(q.name.clone());
@@ -170,7 +164,7 @@ impl QueryEditor {
                             && crate::icons::name_labeled(
                                 ui.small_button("×"),
                                 egui::WidgetType::Button,
-                                &Str::DeleteStepNamed.fill(&[&shown_name]),
+                                &Str::DeleteStepNamed.fill(&[&logical_name]),
                                 &Str::DeleteStepNamed.fill_logical(&[&logical_name]),
                             )
                             .clicked()

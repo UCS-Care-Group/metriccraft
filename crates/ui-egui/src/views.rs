@@ -1,7 +1,7 @@
 //! The Views (Report, Table, Model) and the Data pane. The Views themselves are `canvas.rs`,
 //! `grid.rs` and `diagram.rs`.
 
-use egui::{Color32, RichText, Ui};
+use egui::{Color32, Ui};
 use metriccraft_engine::Document;
 use metriccraft_visuals::FieldRef;
 
@@ -90,12 +90,8 @@ pub fn data_pane(
                 })
                 .body(|ui| {
                     for c in table.columns.iter().filter(|c| !c.hidden) {
-                        if crate::icons::a11y_label(
-                            ui.selectable_label(false, crate::i18n::visual_rtl(&c.name)),
-                            egui::WidgetType::SelectableLabel,
-                            &c.name,
-                        )
-                        .clicked()
+                        if crate::i18n::wrapped_selectable_label(ui, false, &c.name, false)
+                            .clicked()
                         {
                             clicked = Some(FieldRef::Column {
                                 table: table.name.clone(),
@@ -104,13 +100,7 @@ pub fn data_pane(
                         }
                     }
                     for m in table.measures.iter().filter(|m| !m.hidden) {
-                        let label = RichText::new(crate::i18n::visual_rtl(&m.name)).italics();
-                        if crate::icons::a11y_label(
-                            ui.selectable_label(false, label),
-                            egui::WidgetType::SelectableLabel,
-                            &m.name,
-                        )
-                        .clicked()
+                        if crate::i18n::wrapped_selectable_label(ui, false, &m.name, true).clicked()
                         {
                             clicked = Some(FieldRef::Measure {
                                 name: m.name.clone(),
