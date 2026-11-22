@@ -41,6 +41,9 @@ trap cleanup EXIT
 
 printf '%s' "$APPLE_CERTIFICATE" | base64 -D >"$CERT"
 security delete-keychain "$KEYCHAIN" 2>/dev/null || rm -f "$KEYCHAIN"
+# macOS `security` only accepts -p/-P/-k flags non-interactively (no stdin/fd option), so
+# passwords are briefly visible in argv; run only on dedicated single-tenant ephemeral runners
+# with a rotated CI-only .p12 passphrase, never on shared multi-user hosts.
 security create-keychain -p "$KC_PASS" "$KEYCHAIN"
 security set-keychain-settings -lut 21600 "$KEYCHAIN"
 security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"

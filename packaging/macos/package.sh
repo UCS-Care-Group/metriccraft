@@ -16,7 +16,8 @@
 #   MACOS_SIGN_IDENTITY   codesign identity (name or SHA-1). Default "-" = ad-hoc signing
 #                         (local only; fails in GitHub Actions unless MACOS_ALLOW_ADHOC=1).
 #   MACOS_KEYCHAIN        keychain holding MACOS_SIGN_IDENTITY (optional)
-# Notarization (env; requires a real identity plus MACOS_NOTARY_PROFILE or all three):
+# Notarization (env; requires a real identity plus MACOS_NOTARY_PROFILE or all three;
+# fails in GitHub Actions unless MACOS_ALLOW_UNNOTARIZED=1):
 #   MACOS_NOTARY_PROFILE  notarytool keychain profile (preferred)
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
 set -euo pipefail
@@ -108,6 +109,10 @@ elif [ -n "${MACOS_NOTARY_PROFILE:-}" ] || { [ -n "${APPLE_ID:-}" ] && [ -n "${A
   NOTARIZE=1
   SIGNING=notarized
 else
+  if [ -n "${GITHUB_ACTIONS:-}" ] && [ "${MACOS_ALLOW_UNNOTARIZED:-0}" != 1 ]; then
+    echo "error: notarization credentials incomplete; set MACOS_NOTARY_PROFILE or all of APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID (or MACOS_ALLOW_UNNOTARIZED=1)" >&2
+    exit 1
+  fi
   SIGNING=signed
   warn "macOS: notarization credentials incomplete (set MACOS_NOTARY_PROFILE or APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID); signed but not notarized"
 fi
