@@ -20,6 +20,9 @@
 # fails in GitHub Actions unless MACOS_ALLOW_UNNOTARIZED=1):
 #   MACOS_NOTARY_PROFILE  notarytool keychain profile (preferred)
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+# Note: .app and .dmg artifacts are notarized and stapled for offline Gatekeeper verification;
+# the CLI zip contains a bare Mach-O binary (which xcrun stapler does not support), so it is
+# notarized for online Gatekeeper verification on first quarantined run.
 set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
@@ -37,7 +40,7 @@ while [ $# -gt 0 ]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --no-run) NO_RUN=1; shift ;;
-    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
