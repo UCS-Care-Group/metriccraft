@@ -1357,15 +1357,109 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(mods, key?))
 }
 
-/// Registers desktop system Hebrew fallback fonts on every UI font family without committing or
-/// embedding external binary font assets. Web (`wasm32`) builds exclude Hebrew in
+/// Registers the first valid desktop system Hebrew fallback font on every UI font family without
+/// committing or embedding external binary font assets. Web (`wasm32`) builds exclude Hebrew in
 /// `Lang::available()` so the web UI never renders missing-glyph boxes.
 #[cfg(not(target_arch = "wasm32"))]
+fn read_be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    let slice = bytes.get(offset..offset + 2)?;
+    Some(u16::from_be_bytes([slice[0], slice[1]]))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    let slice = bytes.get(offset..offset + 4)?;
+    Some(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_valid_sfnt_at(bytes: &[u8], offset: usize) -> bool {
+    let Some(magic) = bytes.get(offset..offset + 4) else {
+        return false;
+    };
+    if !matches!(magic, [0x00, 0x01, 0x00, 0x00] | b"OTTO" | b"true") {
+        return false;
+    }
+    let Some(num_tables) = read_be_u16(bytes, offset + 4).map(usize::from) else {
+        return false;
+    };
+    if num_tables == 0 {
+        return false;
+    }
+    let Some(dir_end) = offset
+        .checked_add(12)
+        .and_then(|s| s.checked_add(num_tables * 16))
+    else {
+        return false;
+    };
+    if dir_end > bytes.len() {
+        return false;
+    }
+    let mut has_valid_head = false;
+    for i in 0..num_tables {
+        let rec = offset + 12 + i * 16;
+        let Some(tag) = bytes.get(rec..rec + 4) else {
+            return false;
+        };
+        let Some(tbl_off) = read_be_u32(bytes, rec + 8).and_then(|v| usize::try_from(v).ok())
+        else {
+            return false;
+        };
+        let Some(tbl_len) = read_be_u32(bytes, rec + 12).and_then(|v| usize::try_from(v).ok())
+        else {
+            return false;
+        };
+        let Some(tbl_end) = tbl_off.checked_add(tbl_len) else {
+            return false;
+        };
+        if tbl_end > bytes.len() {
+            return false;
+        }
+        if tag == b"head" {
+            if tbl_len < 54 || read_be_u32(bytes, tbl_off + 12) != Some(0x5F0F_3CF5) {
+                return false;
+            }
+            has_valid_head = true;
+        }
+    }
+    has_valid_head
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_valid_sfnt_structure(bytes: &[u8]) -> bool {
+    if bytes.get(..4) == Some(b"ttcf") {
+        let Some(num_fonts) = read_be_u32(bytes, 8).and_then(|v| usize::try_from(v).ok()) else {
+            return false;
+        };
+        if num_fonts == 0 {
+            return false;
+        }
+        let Some(first_offset) = read_be_u32(bytes, 12).and_then(|v| usize::try_from(v).ok())
+        else {
+            return false;
+        };
+        return has_valid_sfnt_at(bytes, first_offset);
+    }
+    has_valid_sfnt_at(bytes, 0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn is_valid_font_bytes(bytes: &[u8]) -> bool {
-    matches!(
-        bytes.get(..4),
-        Some([0x00, 0x01, 0x00, 0x00] | b"OTTO" | b"true" | b"ttcf")
-    )
+    if !has_valid_sfnt_structure(bytes) {
+        return false;
+    }
+    let mut defs = egui::FontDefinitions::empty();
+    defs.font_data.insert(
+        "hebrew-probe".to_owned(),
+        Arc::new(egui::FontData::from_owned(bytes.to_vec())),
+    );
+    // Parse the full font through epaint's loader so truncated/corrupt faces are skipped instead
+    // of panicking during startup FontDefinitions initialization.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ =
+            egui::epaint::text::FontsImpl::new(egui::epaint::text::TextOptions::default(), defs);
+    }))
+    .is_ok()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1382,84 +1476,78 @@ fn read_valid_font(path: &std::path::Path) -> Option<Arc<egui::FontData>> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn load_hebrew_fallback_fonts(
+fn load_hebrew_fallback_font(
     candidates: &[(&'static str, &str)],
-) -> Vec<(&'static str, Arc<egui::FontData>)> {
-    let mut loaded = Vec::new();
+) -> Option<(&'static str, Arc<egui::FontData>)> {
     for env_var in ["METRICCRAFT_FONT_DIR", "CRAFT_FONTS_DIR"] {
         if let Ok(dir) = std::env::var(env_var) {
             let trimmed = dir.trim();
             if !trimmed.is_empty() {
                 let candidate = std::path::Path::new(trimmed).join("NotoSansHebrew-Regular.ttf");
                 if let Some(data) = read_valid_font(&candidate) {
-                    loaded.push(("Noto Sans Hebrew Env", data));
-                    break;
+                    return Some(("Noto Sans Hebrew Env", data));
                 }
             }
         }
     }
-    for &(name, path) in candidates {
-        if let Some(data) = read_valid_font(std::path::Path::new(path)) {
-            loaded.push((name, data));
-        }
-    }
-    loaded
+    candidates.iter().find_map(|&(name, path)| {
+        read_valid_font(std::path::Path::new(path)).map(|data| (name, data))
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn hebrew_fallback_fonts() -> &'static [(&'static str, Arc<egui::FontData>)] {
-    static FONTS: std::sync::OnceLock<Vec<(&'static str, Arc<egui::FontData>)>> =
+fn hebrew_fallback_font() -> Option<&'static (&'static str, Arc<egui::FontData>)> {
+    static FONT: std::sync::OnceLock<Option<(&'static str, Arc<egui::FontData>)>> =
         std::sync::OnceLock::new();
-    FONTS
-        .get_or_init(|| {
-            const CANDIDATES: [(&str, &str); 13] = [
-                (
-                    "Arial Hebrew",
-                    "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
-                ),
-                ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
-                ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
-                (
-                    "Arial Unicode",
-                    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-                ),
-                (
-                    "Noto Sans Hebrew",
-                    "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
-                ),
-                (
-                    "Noto Sans Hebrew Arch",
-                    "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
-                ),
-                (
-                    "Noto Sans Hebrew Nix",
-                    "/run/current-system/sw/share/fonts/truetype/NotoSansHebrew-Regular.ttf",
-                ),
-                (
-                    "FreeSans",
-                    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-                ),
-                ("FreeSans Arch", "/usr/share/fonts/TTF/FreeSans.ttf"),
-                ("FreeSans GNU", "/usr/share/fonts/gnu-free/FreeSans.ttf"),
-                ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
-                ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
-                ("Tahoma", "C:\\Windows\\Fonts\\tahoma.ttf"),
-            ];
-            let loaded = load_hebrew_fallback_fonts(&CANDIDATES);
-            if loaded.is_empty() {
-                eprintln!(
-                    "note: no Hebrew fallback font found (checked METRICCRAFT_FONT_DIR, CRAFT_FONTS_DIR, and system font paths); Hebrew UI disabled"
-                );
-            }
-            loaded
-        })
-        .as_slice()
+    FONT.get_or_init(|| {
+        const CANDIDATES: [(&str, &str); 13] = [
+            (
+                "Arial Hebrew",
+                "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
+            ),
+            ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
+            ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
+            (
+                "Arial Unicode",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ),
+            (
+                "Noto Sans Hebrew",
+                "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "Noto Sans Hebrew Arch",
+                "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "Noto Sans Hebrew Nix",
+                "/run/current-system/sw/share/fonts/truetype/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "FreeSans",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            ),
+            ("FreeSans Arch", "/usr/share/fonts/TTF/FreeSans.ttf"),
+            ("FreeSans GNU", "/usr/share/fonts/gnu-free/FreeSans.ttf"),
+            ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
+            ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
+            ("Tahoma", "C:\\Windows\\Fonts\\tahoma.ttf"),
+        ];
+        let loaded = load_hebrew_fallback_font(&CANDIDATES);
+        if loaded.is_none() {
+            eprintln!(
+                "note: no Hebrew fallback font found (checked METRICCRAFT_FONT_DIR, CRAFT_FONTS_DIR, and system font paths); Hebrew UI disabled"
+            );
+        }
+        loaded
+    })
+    .as_ref()
 }
 
 pub(crate) fn hebrew_font_available() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        !hebrew_fallback_fonts().is_empty()
+        hebrew_fallback_font().is_some()
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -1469,15 +1557,14 @@ pub(crate) fn hebrew_font_available() -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) -> bool {
-    let loaded = hebrew_fallback_fonts();
-    for (name, data) in loaded {
-        if fonts.font_data.contains_key(*name) {
-            continue;
-        }
+    let Some((name, data)) = hebrew_fallback_font() else {
+        return false;
+    };
+    if !fonts.font_data.contains_key(*name) {
         fonts.font_data.insert((*name).into(), Arc::clone(data));
         append_font_fallback(fonts, name);
     }
-    !loaded.is_empty()
+    true
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1547,21 +1634,48 @@ mod tests {
         assert!(is_valid_font_bytes(metriccraft_visuals::text::REGULAR));
         assert!(!is_valid_font_bytes(b""));
         assert!(!is_valid_font_bytes(b"not a font"));
+        // Truncated SFNT header / truncated real font must be rejected so epaint cannot panic.
+        assert!(!is_valid_font_bytes(&[0x00, 0x01, 0x00, 0x00, 0x00, 0x01]));
+        let truncated_real =
+            &metriccraft_visuals::text::REGULAR[..metriccraft_visuals::text::REGULAR.len() / 2];
+        assert!(!is_valid_font_bytes(truncated_real));
+        // Structurally valid SFNT directory pointing at corrupt `head` bytes must also be rejected.
+        let mut corrupt_sfnt = vec![
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00,
+        ];
+        corrupt_sfnt.extend_from_slice(b"head");
+        corrupt_sfnt.extend_from_slice(&[0u8; 4]);
+        corrupt_sfnt.extend_from_slice(&28u32.to_be_bytes());
+        corrupt_sfnt.extend_from_slice(&4u32.to_be_bytes());
+        corrupt_sfnt.extend_from_slice(&[0xFF; 4]);
+        assert!(!is_valid_font_bytes(&corrupt_sfnt));
 
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
-        let bogus = std::env::temp_dir().join(format!("metriccraft-bogus-font-{nanos}.ttf"));
-        std::fs::write(&bogus, b"corrupt-not-a-ttf").expect("write bogus font");
+        let dir = std::env::temp_dir().join(format!("metriccraft-bogus-font-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("create temp font dir");
+        let bogus = dir.join("bogus.ttf");
+        let valid = dir.join("valid.ttf");
+        let second = dir.join("second.ttf");
+        std::fs::write(&bogus, [0x00, 0x01, 0x00, 0x00, 0x00, 0x01]).expect("write bogus font");
+        std::fs::write(&valid, metriccraft_visuals::text::REGULAR).expect("write valid font");
+        std::fs::write(&second, metriccraft_visuals::text::REGULAR).expect("write second font");
         let missing = "/nonexistent/path/metriccraft-missing.ttf";
         let bogus_str = bogus.to_string_lossy().into_owned();
-        let loaded = load_hebrew_fallback_fonts(&[("Missing", missing), ("Bogus", &bogus_str)]);
-        let _ = std::fs::remove_file(&bogus);
-        assert!(
-            loaded
-                .iter()
-                .all(|(name, _)| *name != "Missing" && *name != "Bogus"),
-            "missing and corrupt candidates must be rejected"
+        let valid_str = valid.to_string_lossy().into_owned();
+        let second_str = second.to_string_lossy().into_owned();
+        let loaded = load_hebrew_fallback_font(&[
+            ("Missing", missing),
+            ("Bogus", &bogus_str),
+            ("Valid", &valid_str),
+            ("Second", &second_str),
+        ]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            loaded.as_ref().map(|(name, _)| *name),
+            Some("Valid"),
+            "missing and truncated candidates must be skipped and only the first valid candidate kept"
         );
     }
 

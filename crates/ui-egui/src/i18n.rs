@@ -196,36 +196,11 @@ pub fn command_display(c: &Command) -> String {
     command_display_for(language(), c)
 }
 
-/// Translates a ribbon tab or group segment.
+/// Translates a ribbon tab or group segment (returns `""` when `lang` is English or unknown so
+/// callers keep the source segment).
 pub fn ribbon_segment_for(lang: Lang, segment: &str) -> &'static str {
     if lang == Lang::English {
-        return match segment {
-            "File" => "File",
-            "Home" => "Home",
-            "Insert" => "Insert",
-            "Modeling" => "Modeling",
-            "View" => "View",
-            "Help" => "Help",
-            "Column tools" => "Column tools",
-            "Transform" => "Transform",
-            "Power Query Editor: Home" => "Power Query Editor: Home",
-            "Data" => "Data",
-            "Queries" => "Queries",
-            "Close" => "Close",
-            "Table" => "Table",
-            "Any Column" => "Any Column",
-            "Manage Columns" => "Manage Columns",
-            "Reduce Rows" => "Reduce Rows",
-            "Combine" => "Combine",
-            "Formatting" => "Formatting",
-            "Properties" => "Properties",
-            "Sort" => "Sort",
-            "Calculations" => "Calculations",
-            "Relationships" => "Relationships",
-            "Pages" => "Pages",
-            "Visuals" => "Visuals",
-            _ => "",
-        };
+        return "";
     }
     match segment {
         "File" => "קובץ",
@@ -402,8 +377,23 @@ fn is_rtl_script(c: char) -> bool {
     )
 }
 
+fn is_combining_mark(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0300..=0x036F
+            | 0x1AB0..=0x1AFF
+            | 0x1DC0..=0x1DFF
+            | 0x20D0..=0x20FF
+            | 0xFE20..=0xFE2F
+    )
+}
+
+fn is_ltr_word_char(c: char) -> bool {
+    !is_rtl_script(c) && (c.is_alphanumeric() || is_combining_mark(c))
+}
+
 fn is_ltr_token_char(c: char) -> bool {
-    c.is_ascii_alphanumeric()
+    is_ltr_word_char(c)
         || matches!(
             c,
             '_' | '+'
@@ -457,7 +447,7 @@ fn find_path_paren_close(
                     .iter()
                     .any(|(_, c)| matches!(c, '/' | '\\'));
                 let followed_by_path_part = chars.get(k + 1).is_some_and(|(_, next)| {
-                    matches!(next, '.' | '/' | '\\') || next.is_ascii_alphanumeric()
+                    matches!(next, '.' | '/' | '\\') || is_ltr_word_char(*next)
                 });
                 return (has_sep || followed_by_path_part).then_some(k);
             }
@@ -514,11 +504,11 @@ fn mask_atoms(line: &str) -> Vec<String> {
             i = j;
             continue;
         }
-        if ch.is_ascii_alphanumeric()
+        if is_ltr_word_char(ch)
             || (matches!(ch, '.' | '/' | '~' | '\\')
                 && chars
                     .get(i + 1)
-                    .is_some_and(|(_, next)| next.is_ascii_alphanumeric() || *next == '/'))
+                    .is_some_and(|(_, next)| is_ltr_word_char(*next) || *next == '/'))
         {
             // Keep multi-word LTR phrases separated by single spaces or slash/dash as one run,
             // plus digit-flanked grouping commas and balanced parentheses inside file paths.
@@ -542,7 +532,7 @@ fn mask_atoms(line: &str) -> Vec<String> {
                     || (c == ' '
                         && (chars
                             .get(j + 1)
-                            .is_some_and(|(_, next)| next.is_ascii_alphanumeric())
+                            .is_some_and(|(_, next)| is_ltr_word_char(*next))
                             || (chars.get(j + 1).is_some_and(|(_, next)| *next == '(')
                                 && find_path_paren_close(&chars, i, j + 1).is_some())))
                 {
@@ -917,6 +907,16 @@ mod tests {
         assert_eq!(command_display_for(Lang::Hebrew, new_page), "חדש עמוד");
         assert_eq!(visual_rtl("ב-2"), "2-ב");
         assert_eq!(visual_rtl("ייצוא (CSV ו-Parquet)"), "(Parquet-ו CSV) ייצוא");
+        assert_eq!(visual_rtl("café מכירות"), "מכירות café");
+        assert_eq!(visual_rtl("cafe\u{0301} מכירות"), "מכירות cafe\u{0301}");
+        assert_eq!(
+            ribbon_path_logical(Lang::English, "Home > Data"),
+            "Home > Data"
+        );
+        assert_eq!(
+            ribbon_path_logical(Lang::Hebrew, "Home > Data"),
+            "בית > נתונים"
+        );
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .textures_delta
