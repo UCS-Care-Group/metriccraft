@@ -29,7 +29,7 @@ There are no release builds yet; build from source. Install Rust with [rustup](h
 (the toolchain is pinned in `rust-toolchain.toml` and installs itself), then:
 
 ```bash
-git clone https://github.com/UCS-Care-Group/metriccraft
+git clone https://github.com/UCSLabs/metriccraft
 cd metriccraft
 cargo run --release -p metriccraft             # empty window: Home > Get Data to load a CSV, XLSX or Parquet file
 cargo run --release -p metriccraft -- PROJECT  # open a Project folder or .mcraft Package
@@ -40,7 +40,7 @@ On Linux the app needs a Wayland or X11 session. If OpenGL misbehaves, try the w
 `cargo run --release -p metriccraft --no-default-features --features wgpu`.
 
 Found a bug or a DAX result that differs from Power BI? Please
-[open an issue](https://github.com/UCS-Care-Group/metriccraft/issues). See
+[open an issue](https://github.com/UCSLabs/metriccraft/issues). See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) before sending code.
 
 ## Milestones
