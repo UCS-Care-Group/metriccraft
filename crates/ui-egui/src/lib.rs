@@ -3,6 +3,8 @@
 //! published [`worker::Snapshot`]. Swappable: nothing below depends on it.
 
 pub mod canvas;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod control;
 pub mod diagram;
 pub mod formula;
 pub mod grid;

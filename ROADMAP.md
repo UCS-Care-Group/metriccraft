@@ -1,6 +1,6 @@
 # Roadmap
 
-Last reviewed: 2026-10-16 · Last updated: 2026-10-16 · Change list: [Revision history](#revision-history)
+Last reviewed: 2026-10-16 · Last updated: 2026-11-24 · Change list: [Revision history](#revision-history)
 
 **Stage:** pre-alpha, working towards the first preview build (`v0.1.0-preview.1`) and then v0.1.
 
@@ -32,10 +32,10 @@ Measured on the reference machine (AMD Ryzen 5 5600X, 32 GB, Linux); details in
 | M3        | DAX: evaluator, MVP functions, parity cases                                  | done        |
 | M4        | Visuals: table, matrix, bar/column, line, card, slicer                       | done        |
 | M5        | Desktop UI: ribbon, Power Query editor, model view, canvas                   | done        |
-| M6        | Control channel, CLI, MCP, web build, release                                | 3/7         |
+| M6        | Control channel, CLI, MCP, web build, release                                | 4/7         |
 
 M6 in order: release workflow (done) → Read commands, Batch, Origin (done) → headless CLI (done) →
-Control channel → MCP server → web build → fuzz soak, acceptance run and v0.1.0.
+Control channel (done) → MCP server → web build → fuzz soak, acceptance run and v0.1.0.
 
 ## After v0.1
 
@@ -46,6 +46,8 @@ Control channel → MCP server → web build → fuzz soak, acceptance run and v
 
 ## Progress log
 
+- **2026-11-24** — M6.4: Control channel (`metriccraft --control`; local TCP on 127.0.0.1 with a
+  per-session token; [`docs/control.md`](docs/control.md)).
 - **2026-10-16** — M6.3: headless `metriccraft-cli` (`describe`, `refresh`, `dax`, `render`,
   `run`, `script`, `commands`; [`docs/cli.md`](docs/cli.md)).
 - **2026-10-16** — M6.2: Read commands (`dax.evaluate`, `document.describe`, `page.render`),
@@ -58,3 +60,4 @@ Control channel → MCP server → web build → fuzz soak, acceptance run and v
 | Date       | Change                                                                  |
 |------------|-------------------------------------------------------------------------|
 | 2026-10-16 | First version: status, headline numbers, milestones, after v0.1, log.   |
+| 2026-11-24 | M6.4 done: Control channel (milestone 4/7, log entry).                  |

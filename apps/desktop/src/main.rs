@@ -1,6 +1,7 @@
 //! MetricCraft desktop app: the engine on its worker thread, the egui window on eframe.
 //!
-//! `metriccraft [PROJECT]` opens a Project folder or `.mcraft` Package.
+//! `metriccraft [--control] [PROJECT]` opens a Project folder or `.mcraft` Package. `--control`
+//! also starts the Control channel (`docs/control.md`).
 
 use std::path::PathBuf;
 
@@ -100,7 +101,14 @@ impl Dialogs {
 }
 
 /// The window, the preferences last written, and the file dialogs.
-struct Desktop(Shell, Prefs, Dialogs, Option<Bench>);
+struct Desktop(
+    Shell,
+    Prefs,
+    Dialogs,
+    Option<Bench>,
+    // Dropped with the window: removes the control file.
+    #[allow(dead_code)] Option<metriccraft_ui_egui::control::Server>,
+);
 
 /// `MCRAFT_UI_BENCH=1` (`cargo xtask ui-bench`): prints `BENCH ui/first_frame` once the first
 /// frame is on screen and, after two idle seconds, `BENCH ui/idle_private <bytes>` (memory of
@@ -166,8 +174,31 @@ impl eframe::App for Desktop {
     }
 }
 
+/// Starts the Control channel and says where it listens (stderr); a failure is only reported.
+fn start_control(engine: &Engine) -> Option<metriccraft_ui_egui::control::Server> {
+    let dir = metriccraft_engine::control::runtime_dir();
+    match metriccraft_ui_egui::control::Server::start(engine.control_link(), dir.as_deref()) {
+        Ok(server) => {
+            eprintln!("control channel on 127.0.0.1:{}", server.port());
+            Some(server)
+        }
+        Err(e) => {
+            eprintln!("control channel not started: {e}");
+            None
+        }
+    }
+}
+
 fn main() -> eframe::Result {
-    let open = std::env::args_os().nth(1).map(PathBuf::from);
+    let mut control = false;
+    let mut open = None;
+    for arg in std::env::args_os().skip(1) {
+        if arg == "--control" {
+            control = true;
+        } else if open.is_none() {
+            open = Some(PathBuf::from(arg));
+        }
+    }
     let prefs = load_prefs();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -186,6 +217,7 @@ fn main() -> eframe::Result {
             if let Some(path) = open {
                 engine.run("file.open", json!({"path": path.display().to_string()}));
             }
+            let server = control.then(|| start_control(&engine)).flatten();
             let (hook, dialogs) = file_dialogs(&cc.egui_ctx);
             let mut shell =
                 Shell::new(engine, prefs, Engine::recoverable()).with_file_dialogs(hook);
@@ -194,7 +226,7 @@ fn main() -> eframe::Result {
                 frames: 0,
                 shown: None,
             });
-            Ok(Box::new(Desktop(shell, prefs, dialogs, bench)))
+            Ok(Box::new(Desktop(shell, prefs, dialogs, bench, server)))
         }),
     )
 }

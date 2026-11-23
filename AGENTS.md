@@ -47,7 +47,7 @@ People trust MetricCraft with their numbers; a crash loses their work. **This ou
 - **UI snapshots:** `cargo xtask snapshot` writes PNGs of every View (light, dark) and the Power Query editor to `observations/snapshots/`.
 - **UI budgets:** `cargo xtask ui-bench` (cold start < 1 s on the reference machine, idle private memory ≤ 100 MB; opens a window for ~2 s, or runs under `xvfb-run`).
 - **Headless:** `cargo run -p metriccraft-cli -- --help` (`docs/cli.md`) describes, queries, renders and edits a Project without a window.
-- Still to come: the control port (M6).
+- **Control channel:** `cargo run -p metriccraft -- --control [PROJECT]`; `docs/control.md`.
 
 ## Roadmap
 `ROADMAP.md` (committed) is the one-page public summary: status line, headline numbers, progress log, revision history. Update it, and the local `plan/`, whenever work lands.

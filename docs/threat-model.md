@@ -3,8 +3,8 @@
 What MetricCraft protects, from whom, and what it does about it. Reports go through
 [`SECURITY.md`](../SECURITY.md).
 
-MetricCraft is a desktop authoring app. Today it reads local files only: it opens no network
-connection and listens on no port. The web build runs in the browser's sandbox on files the user
+MetricCraft is a desktop authoring app. It reads local files and listens on no port, unless
+started with `--control`: then it accepts local programs on `127.0.0.1` only (see below). The web build runs in the browser's sandbox on files the user
 picks.
 
 ## Assets
@@ -14,6 +14,15 @@ picks.
 - **The user's computer**: files outside what they asked MetricCraft to open; memory and CPU.
 
 ## Adversaries and what MetricCraft does about them
+
+### A local program on the Control channel
+
+With `--control` any program on the machine can connect to the port. Only one that holds the
+session token can do anything: the token is 128 random bits, written to a file only the user can
+read, compared in constant time, and a wrong one closes the connection. Requests are hostile input:
+lines over 1 MiB, bad JSON and bad parameters get an error reply, never a crash; connections and
+idle time are capped. A program running as the same user can read the token file, so the channel
+is no defence against that user's own processes. See [`control.md`](control.md).
 
 ### A hostile file
 

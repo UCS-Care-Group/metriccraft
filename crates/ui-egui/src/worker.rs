@@ -105,6 +105,12 @@ enum Job {
     },
     /// Writes a recovery copy if autosave is due (`now`: ms since 1970).
     Autosave(u64),
+    /// A request from the Control channel; the reply goes back down `reply`.
+    #[cfg(not(target_arch = "wasm32"))]
+    Control(
+        metriccraft_engine::control::Request,
+        std::sync::mpsc::Sender<metriccraft_engine::control::Reply>,
+    ),
 }
 
 struct Shared {
@@ -158,6 +164,14 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
                 error: e.to_string(),
             },
         },
+        #[cfg(not(target_arch = "wasm32"))]
+        Job::Control(request, reply) => {
+            // The asker may have hung up; the command ran either way.
+            let _ = reply.send(metriccraft_engine::control::execute(app, &request));
+            *seq = seq.wrapping_add(1);
+            lock(shared).snap = Arc::new(Snapshot::of(app, *seq));
+            return;
+        }
         Job::Autosave(now) => {
             if app.autosave_due(now)
                 && let Some(dir) = metriccraft_engine::recovery_dir()
@@ -176,6 +190,31 @@ fn run(app: &mut App, shared: &Mutex<Shared>, seq: &mut u64, job: Job) {
     let mut s = lock(shared);
     s.snap = Arc::new(Snapshot::of(app, *seq));
     s.events.push(event);
+}
+
+/// Runs Control channel requests on the worker's queue, one at a time with the UI's own.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct ControlLink {
+    jobs: std::sync::mpsc::Sender<Job>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ControlLink {
+    /// Queues `request` and waits for its reply (a long Refresh takes as long as it takes).
+    pub fn call(
+        &self,
+        request: metriccraft_engine::control::Request,
+    ) -> metriccraft_engine::control::Reply {
+        use metriccraft_engine::control::{Kind, Reply};
+        let id = request.id.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stopped = || Reply::error(id.clone(), Kind::Stopped, "the engine stopped");
+        if self.jobs.send(Job::Control(request, tx)).is_err() {
+            return stopped();
+        }
+        rx.recv().unwrap_or_else(|_| stopped())
+    }
 }
 
 /// The UI's handle on the engine.
@@ -241,6 +280,15 @@ impl Engine {
                 app,
                 seq: 0,
             }
+        }
+    }
+
+    /// A handle for the Control channel's server to run requests on the worker (`None` on the
+    /// web, which has no threads and no sockets).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn control_link(&self) -> ControlLink {
+        ControlLink {
+            jobs: self.jobs.clone(),
         }
     }
 

@@ -5,6 +5,7 @@
 
 mod app;
 mod cmd;
+pub mod control;
 mod diagram;
 mod expression;
 mod file;
