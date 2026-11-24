@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Build, sign and (optionally) notarize the macOS release artifacts for MetricCraft:
 #
-#   $DIST/metriccraft-<version>-macos-<arch>.dmg    MetricCraft.app on a drag-to-Applications DMG
-#   $DIST/metriccraft-cli-<version>-macos-<arch>.zip   the headless CLI with licence files
+#   $DIST/metriccraft-<version>-macos-<arch>.dmg         MetricCraft.app on a drag-to-Applications DMG
+#   $DIST/metriccraft-<version>-macos-<arch>.dmg.sha256
+#   $DIST/metriccraft-cli-<version>-macos-<arch>.zip     the headless CLI with licence files
+#   $DIST/metriccraft-cli-<version>-macos-<arch>.zip.sha256
+#
+# Standalone packaging script for local/manual or future CI use; .github/workflows/release.yml
+# currently builds unsigned archives via `cargo xtask dist` with pinned `cargo-about@0.9.2`.
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build | --build-only] [--no-run]
 #
@@ -22,7 +27,7 @@
 #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
 # Note: .app and .dmg artifacts are notarized and stapled for offline Gatekeeper verification;
 # the CLI zip contains a bare Mach-O binary (which xcrun stapler does not support), so it is
-# notarized for online Gatekeeper verification on first quarantined run.
+# notarized for online Gatekeeper verification on first quarantined run. Requires cargo-about 0.9.2.
 set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
@@ -40,7 +45,7 @@ while [ $# -gt 0 ]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --no-run) NO_RUN=1; shift ;;
-    -h | --help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -275,6 +280,9 @@ elif printf '%s\n' "${WANT[@]}" | grep -qx "$host_arch"; then
 else
   echo "==> skipping metriccraft-cli smoke test: built ${WANT[*]} on a $host_arch host"
 fi
+for artifact in "$DMG" "$CLI_ZIP"; do
+  printf '%s  %s\n' "$(sha256 "$artifact")" "$(basename "$artifact")" >"$artifact.sha256"
+done
 if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "signing=$SIGNING" >>"$GITHUB_OUTPUT"; fi
 echo "==> done (signing: $SIGNING)"
-ls -lh "$DMG" "$CLI_ZIP"
+ls -lh "$DMG" "$DMG.sha256" "$CLI_ZIP" "$CLI_ZIP.sha256"

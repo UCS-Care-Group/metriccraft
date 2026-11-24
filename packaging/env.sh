@@ -82,7 +82,7 @@ copy_docs() {
   copy_font_licences "$dest"
 }
 
-# Copy bundled font licences (including optional CRAFT_FONTS_DIR embeds) into dest.
+# Copy bundled font licences into dest.
 copy_font_licences() {
   local dest="$1" f
   if [ ! -f "$ROOT/crates/visuals/fonts/OFL.txt" ]; then
@@ -97,10 +97,6 @@ copy_font_licences() {
       exit 1
     fi
     cp "$ROOT/licenses/egui-default-fonts/$f" "$dest/egui-default-fonts/"
-  done
-  [ -n "${CRAFT_FONTS_DIR:-}" ] || return 0
-  for f in "$CRAFT_FONTS_DIR"/fonts/*/OFL.txt; do
-    if [ -f "$f" ]; then cp "$f" "$dest/OFL-$(basename "$(dirname "$f")").txt"; fi
   done
 }
 

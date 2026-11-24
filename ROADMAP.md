@@ -1,6 +1,6 @@
 # Roadmap
 
-Last reviewed: 2026-10-16 · Last updated: 2026-10-16 · Change list: [Revision history](#revision-history)
+Last reviewed: 2026-11-24 · Last updated: 2026-11-24 · Change list: [Revision history](#revision-history)
 
 **Stage:** pre-alpha, working towards the first preview build (`v0.1.0-preview.1`) and then v0.1.
 
@@ -46,6 +46,8 @@ Control channel → MCP server → web build → fuzz soak, acceptance run and v
 
 ## Progress log
 
+- **2026-11-24** — M6: standalone macOS `.app`, `.dmg`, and CLI `.zip` packaging scripts
+  (`packaging/env.sh`, `packaging/macos/*`; #73).
 - **2026-10-16** — M6.3: headless `metriccraft-cli` (`describe`, `refresh`, `dax`, `render`,
   `run`, `script`, `commands`; [`docs/cli.md`](docs/cli.md)).
 - **2026-10-16** — M6.2: Read commands (`dax.evaluate`, `document.describe`, `page.render`),
@@ -55,6 +57,7 @@ Control channel → MCP server → web build → fuzz soak, acceptance run and v
 
 ## Revision history
 
-| Date       | Change                                                                  |
-|------------|-------------------------------------------------------------------------|
-| 2026-10-16 | First version: status, headline numbers, milestones, after v0.1, log.   |
+| Date       | Change                                                                       |
+|------------|------------------------------------------------------------------------------|
+| 2026-10-16 | First version: status, headline numbers, milestones, after v0.1, log.        |
+| 2026-11-24 | Added standalone macOS `.app`, `.dmg`, and CLI packaging scripts (#73).      |

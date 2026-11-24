@@ -6,3 +6,10 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 Third-party material: the fonts listed in ATTRIBUTION.md (licences alongside, and in
 licenses/egui-default-fonts/). Third-party crates' licences: THIRD-PARTY-LICENSES.html in each
 release archive.
+
+Portions adapted from MailCraft and FieldCraft
+
+The macOS packaging scripts (`packaging/env.sh`, `packaging/macos/`) were adapted from MailCraft
+(https://github.com/UCS-Care-Group/mailcraft) and FieldCraft
+(https://github.com/tangency-labs/fieldcraft), licensed under the MIT License or the Apache
+License, Version 2.0.
