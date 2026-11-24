@@ -56,8 +56,34 @@ cargo xtask dist --target aarch64-apple-darwin --target x86_64-apple-darwin
 
 The archive lands in `target/dist/`.
 
+## macOS signing and DMG packaging (`packaging/macos/`)
+
+`release.yml` continues to build unsigned archives with `cargo xtask dist` (pinning
+`cargo-about@0.9.2`). For standalone or manual macOS `.app` / `.dmg` / CLI `.zip` builds
+with optional Developer ID signing and notarization, run:
+
+```bash
+cargo install cargo-about --locked --version 0.9.2 --features cli
+packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build | --build-only] [--no-run]
+```
+
+- `packaging/env.sh` exports workspace metadata (`VERSION`, `APP_ID`, `DIST`, `CARGO_TARGET_DIR`)
+  and copies legal/font licence files (`LICENSE-MIT`, `LICENSE-APACHE`, `ATTRIBUTION.md`, `NOTICE`,
+  `crates/visuals/fonts/OFL.txt`, `licenses/egui-default-fonts/`).
+- `packaging/macos/package.sh` builds universal or single-arch binaries, renders `Info.plist.in`,
+  signs inside-out with `entitlements.plist` (ad-hoc `-` locally; fails closed in GitHub Actions
+  unless `MACOS_ALLOW_ADHOC=1`), builds `$DIST/metriccraft-<version>-macos-<arch>.dmg` and
+  `$DIST/metriccraft-cli-<version>-macos-<arch>.zip` with `.sha256` sidecars, notarizes/staples
+  the `.app` and `.dmg` when `MACOS_NOTARY_PROFILE` (preferred on shared hosts because
+  `APPLE_PASSWORD` is passed via CLI argv) or all of `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID`
+  are set (failing closed in GitHub Actions on incomplete notarization credentials unless
+  `MACOS_ALLOW_UNNOTARIZED=1`), and notarizes the CLI `.zip` for online Gatekeeper verification.
+- `packaging/macos/import-cert.sh` imports `APPLE_CERTIFICATE` into a temporary CI keychain and
+  fails closed in GitHub Actions unless `MACOS_ALLOW_ADHOC=1`.
+
 ## Revision history
 
-| Date       | Change         |
-|------------|----------------|
-| 2026-10-16 | First version. |
+| Date       | Change                                                                        |
+|------------|-------------------------------------------------------------------------------|
+| 2026-10-16 | First version.                                                                |
+| 2026-11-24 | Document standalone macOS signing and DMG packaging (`packaging/macos/` #73). |

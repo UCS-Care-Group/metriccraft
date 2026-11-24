@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: packaging/macos/package.sh substitutes @APP_ID@, @VERSION@,
+     @SHORT_VERSION@, @BUILD_SHA@ and @MIN_MACOS@. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>MetricCraft</string>
+  <key>CFBundleName</key>
+  <string>MetricCraft</string>
+  <key>CFBundleExecutable</key>
+  <string>MetricCraft</string>
+  <key>CFBundleIdentifier</key>
+  <string>@APP_ID@</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@SHORT_VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHORT_VERSION@</string>
+  <key>MetricCraftVersion</key>
+  <string>@VERSION@</string>
+  <key>MetricCraftBuildCommit</key>
+  <string>@BUILD_SHA@</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <!-- Keep in sync with MACOSX_DEPLOYMENT_TARGET in package.sh. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>@MIN_MACOS@</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © MetricCraft contributors. MIT OR Apache-2.0.</string>
+  <!-- Finder open-document AppleEvents are not wired up yet (and .pbix is unsupported);
+       omit CFBundleDocumentTypes until platform-side open-document handlers are implemented. -->
+</dict>
+</plist>
