@@ -74,7 +74,10 @@ packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build | --b
   signs inside-out with `entitlements.plist` (ad-hoc `-` locally; fails closed in GitHub Actions
   unless `MACOS_ALLOW_ADHOC=1`), builds `$DIST/metriccraft-<version>-macos-<arch>.dmg` and
   `$DIST/metriccraft-cli-<version>-macos-<arch>.zip` with `.sha256` sidecars, notarizes/staples
-  the `.app` and `.dmg`, and notarizes the CLI `.zip` for online Gatekeeper verification.
+  the `.app` and `.dmg` when `MACOS_NOTARY_PROFILE` (preferred on shared hosts because
+  `APPLE_PASSWORD` is passed via CLI argv) or all of `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID`
+  are set (failing closed in GitHub Actions on incomplete notarization credentials unless
+  `MACOS_ALLOW_UNNOTARIZED=1`), and notarizes the CLI `.zip` for online Gatekeeper verification.
 - `packaging/macos/import-cert.sh` imports `APPLE_CERTIFICATE` into a temporary CI keychain and
   fails closed in GitHub Actions unless `MACOS_ALLOW_ADHOC=1`.
 
