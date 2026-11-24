@@ -10,6 +10,7 @@ release archive.
 Portions adapted from MailCraft and FieldCraft
 
 The macOS packaging scripts (`packaging/env.sh`, `packaging/macos/`) were adapted from MailCraft
-(https://github.com/UCS-Care-Group/mailcraft) and FieldCraft
-(https://github.com/tangency-labs/fieldcraft), licensed under the MIT License or the Apache
-License, Version 2.0.
+(https://github.com/UCS-Care-Group/mailcraft, Copyright (c) 2026 the MailCraft contributors)
+and FieldCraft (https://github.com/tangency-labs/fieldcraft, Copyright (c) 2026 FieldCraft
+contributors), licensed under the MIT License (LICENSE-MIT) or the Apache License, Version 2.0
+(LICENSE-APACHE), at your option.

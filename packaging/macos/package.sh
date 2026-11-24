@@ -272,7 +272,8 @@ if [ "$NO_RUN" = 1 ]; then
 elif printf '%s\n' "${WANT[@]}" | grep -qx "$host_arch"; then
   smoke_dir="$(mktemp -d)"
   ditto -x -k "$CLI_ZIP" "$smoke_dir"
-  if ! "$smoke_dir/$(basename "$CLI_DIR")/metriccraft-cli" --version; then
+  if ! "$smoke_dir/$(basename "$CLI_DIR")/metriccraft-cli" --version ||
+    ! "$smoke_dir/$(basename "$CLI_DIR")/metriccraft-cli" --help >/dev/null; then
     rm -rf "$smoke_dir"
     exit 1
   fi
