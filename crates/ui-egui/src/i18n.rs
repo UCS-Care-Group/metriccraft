@@ -305,11 +305,11 @@ pub fn hebrew_command_label(id: &str) -> Option<&'static str> {
         "file.saveAs" => "שמירה בשם",
         "file.remapSource" => "מיפוי מחדש של נתיב מקור",
         "file.recover" => "שחזור",
-        "file.discardRecovery" => "השלך",
+        "file.discardRecovery" => "ביטול שחזור",
         "home.getData" => "ייבוא נתונים",
         "home.refresh" => "רענון",
         "home.closeApply" => "סגירה והחלה",
-        "transform.useFirstRowAsHeaders" => "השתמש בשורה הראשונה ככותרות",
+        "transform.useFirstRowAsHeaders" => "שימוש בשורה הראשונה ככותרות",
         "transform.changeType" => "סוג נתונים",
         "transform.renameColumn" => "שינוי שם",
         "home.removeColumns" => "הסרת עמודות",
@@ -317,7 +317,7 @@ pub fn hebrew_command_label(id: &str) -> Option<&'static str> {
         "transform.filterRows" => "סינון שורות",
         "home.mergeQueries" => "מיזוג שאילתות",
         "query.deleteStep" => "מחיקה",
-        "query.enableLoad" => "הפעל טעינה",
+        "query.enableLoad" => "הפעלת טעינה",
         "query.rename" => "שינוי שם",
         "query.delete" => "מחיקה",
         "query.duplicate" => "שכפול",
@@ -360,7 +360,7 @@ pub fn hebrew_command_label(id: &str) -> Option<&'static str> {
         "selection.select" => "בחירת נקודת נתונים",
         "selection.clear" => "ניקוי בחירה",
         "options.autodetectRelationships" => "זיהוי אוטומטי של קשרים חדשים לאחר טעינת נתונים",
-        "options.autosaveMinutes" => "שמור מידע לשחזור אוטומטי כל N דקות",
+        "options.autosaveMinutes" => "שמירת מידע לשחזור אוטומטי כל N דקות",
         "dax.evaluate" => "הרצת שאילתת DAX",
         "document.describe" => "תיאור מסמך",
         "page.render" => "רינדור עמוד",
@@ -924,13 +924,13 @@ mod tests {
         let wrapped = wrapped_visual_lines(
             &ctx,
             true,
-            "בחר תצוגה על הבד כדי לראות את השדות והמסננים שלה",
+            "יש לבחור תצוגה על הבד כדי לראות את השדות והמסננים שלה",
             egui::FontId::proportional(13.0),
             120.0,
         );
         let first_row = wrapped.lines().next().unwrap_or_default();
-        assert!(first_row.contains("בחר"), "got {wrapped:?}");
-        assert!(!first_row.contains("רחב"), "got {wrapped:?}");
+        assert!(first_row.contains("יש"), "got {wrapped:?}");
+        assert!(!first_row.contains("המסננים"), "got {wrapped:?}");
 
         let mut label_rect = egui::Rect::NOTHING;
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -955,11 +955,11 @@ mod tests {
 
         assert_eq!(
             Str::DeleteStepNamed.fill_for(Lang::Hebrew, &["מכירות 2026"]),
-            "2026 מכירות שלב מחק"
+            "2026 מכירות שלב מחיקת"
         );
         assert_eq!(
             Str::DeleteStepNamed.fill_logical_for(Lang::Hebrew, &["מכירות 2026"]),
-            "מחק שלב מכירות 2026"
+            "מחיקת שלב מכירות 2026"
         );
 
         let mut selectable_rect = egui::Rect::NOTHING;
