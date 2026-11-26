@@ -106,6 +106,13 @@ enum Closing {
     Saving,
 }
 
+/// Last finished-command state shown in the status bar (resolved per frame so language switches update it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Status {
+    Done(String),
+    Failed(String),
+}
+
 /// The commands that load data, with progress and Cancel.
 const LOADS: [&str; 3] = ["home.getData", "home.refresh", "home.closeApply"];
 
@@ -120,8 +127,8 @@ pub struct Shell {
     palette: Option<Palette>,
     form: Option<Form>,
     toasts: Vec<Toast>,
-    /// The last message `(shown, logical)`, for the status bar.
-    status: Option<(String, String)>,
+    /// The last status-bar message source, resolved in the active language each frame.
+    status: Option<Status>,
     recovery: Option<(PathBuf, Vec<RecoveryInfo>)>,
     closing: Closing,
     /// Set when the window may close now; the app closes it.
@@ -451,7 +458,7 @@ impl Shell {
         for event in self.engine.take_events() {
             match event {
                 Event::Done { id, notice } => {
-                    self.status = Some((self.display_of(&id), self.label_of(&id).to_owned()));
+                    self.status = Some(Status::Done(id.clone()));
                     if let Some(n) = notice {
                         self.toasts.push(Toast {
                             text: n,
@@ -463,7 +470,7 @@ impl Shell {
                     }
                 }
                 Event::Failed { id, error } => {
-                    self.status = Some((i18n::visual_rtl(&error), error.clone()));
+                    self.status = Some(Status::Failed(error.clone()));
                     self.toasts.push(Toast {
                         text: error,
                         error: true,
@@ -571,18 +578,40 @@ impl Shell {
         }
     }
 
-    fn label_of(&self, id: &str) -> &'static str {
+    fn label_of_for(&self, lang: Lang, id: &str) -> &'static str {
         self.commands
             .iter()
             .find(|c| c.id == id)
-            .map_or("", i18n::command_label)
+            .map_or("", |c| i18n::command_label_for(lang, c))
     }
 
-    fn display_of(&self, id: &str) -> String {
+    fn display_of_for(&self, lang: Lang, id: &str) -> String {
         self.commands
             .iter()
             .find(|c| c.id == id)
-            .map_or_else(String::new, i18n::command_display)
+            .map_or_else(String::new, |c| i18n::command_display_for(lang, c))
+    }
+
+    fn status_text_for(&self, lang: Lang, busy: Option<&str>) -> (String, String) {
+        match (busy, &self.status) {
+            (Some(id), _) => (
+                Str::Working.fill_for(lang, &[self.label_of_for(lang, id)]),
+                Str::Working.fill_logical_for(lang, &[self.label_of_for(lang, id)]),
+            ),
+            (None, Some(Status::Done(id))) => (
+                self.display_of_for(lang, id),
+                self.label_of_for(lang, id).to_owned(),
+            ),
+            (None, Some(Status::Failed(error))) => (i18n::visual_rtl(error), error.clone()),
+            (None, None) => (
+                Str::Ready.show_for(lang),
+                Str::Ready.text_for(lang).to_owned(),
+            ),
+        }
+    }
+
+    fn status_text(&self, busy: Option<&str>) -> (String, String) {
+        self.status_text_for(i18n::language(), busy)
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -759,14 +788,7 @@ impl Shell {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let (shown, logical) = match (snap.busy, &self.status) {
-                        (Some(id), _) => (
-                            Str::Working.fill(&[self.label_of(id)]),
-                            Str::Working.fill_logical(&[self.label_of(id)]),
-                        ),
-                        (None, Some((shown, logical))) => (shown.clone(), logical.clone()),
-                        (None, None) => (Str::Ready.show(), Str::Ready.text().to_owned()),
-                    };
+                    let (shown, logical) = self.status_text(snap.busy);
                     icons::a11y_label(
                         ui.label(RichText::new(shown).color(t.muted)),
                         egui::WidgetType::Label,
@@ -1483,9 +1505,14 @@ fn load_hebrew_fallback_font(
         if let Ok(dir) = std::env::var(env_var) {
             let trimmed = dir.trim();
             if !trimmed.is_empty() {
-                let candidate = std::path::Path::new(trimmed).join("NotoSansHebrew-Regular.ttf");
-                if let Some(data) = read_valid_font(&candidate) {
-                    return Some(("Noto Sans Hebrew Env", data));
+                for filename in [
+                    "NotoSansHebrew-Regular.ttf",
+                    "NotoSansHebrew[wdth,wght].ttf",
+                ] {
+                    let candidate = std::path::Path::new(trimmed).join(filename);
+                    if let Some(data) = read_valid_font(&candidate) {
+                        return Some(("Noto Sans Hebrew Env", data));
+                    }
                 }
             }
         }
@@ -1685,5 +1712,44 @@ mod tests {
         assert_eq!(s, Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)));
         assert_eq!(parse_shortcut("F2").map(|s| s.logical_key), Some(Key::F2));
         assert_eq!(parse_shortcut("Ctrl+Nope"), None);
+    }
+
+    #[test]
+    fn status_bar_updates_when_language_switches() {
+        let mut shell = Shell::new(
+            Engine::new(metriccraft_engine::App::new(), || {}),
+            Prefs::default(),
+            (None, Vec::new()),
+        );
+        let save_id = "file.save";
+        let save_cmd = shell
+            .commands
+            .iter()
+            .find(|c| c.id == save_id)
+            .expect("file.save registered");
+        let save_en = i18n::command_label_for(Lang::English, save_cmd).to_owned();
+        let save_he_logical = i18n::command_label_for(Lang::Hebrew, save_cmd);
+        let save_he_visual = i18n::command_display_for(Lang::Hebrew, save_cmd);
+
+        shell.status = Some(Status::Done(save_id.to_owned()));
+        assert_eq!(
+            shell.status_text_for(Lang::English, None),
+            (save_en.clone(), save_en)
+        );
+        assert_eq!(
+            shell.status_text_for(Lang::Hebrew, None),
+            (save_he_visual, save_he_logical.to_owned())
+        );
+
+        let err = "שגיאת בדיקה";
+        shell.status = Some(Status::Failed(err.to_owned()));
+        assert_eq!(
+            shell.status_text_for(Lang::Hebrew, None),
+            (i18n::visual_rtl(err), err.to_owned())
+        );
+        assert_eq!(
+            shell.status_text_for(Lang::English, None),
+            (i18n::visual_rtl(err), err.to_owned())
+        );
     }
 }
