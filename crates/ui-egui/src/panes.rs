@@ -65,7 +65,12 @@ pub fn visualizations(
     ui.horizontal_wrapped(|ui| {
         for kind in VisualType::ALL {
             let on = selected.is_some_and(|v| v.kind == kind);
-            if ui.selectable_label(on, visual_name(kind).text()).clicked() && !on {
+            let r = crate::icons::a11y_label(
+                ui.selectable_label(on, visual_name(kind).show()),
+                egui::WidgetType::SelectableLabel,
+                visual_name(kind).text(),
+            );
+            if r.clicked() && !on {
                 out.push(match (page, selected) {
                     (Some(p), Some(v)) => (
                         "visual.changeType",
@@ -81,22 +86,42 @@ pub fn visualizations(
     });
     let (Some(p), Some(v)) = (page, selected) else {
         ui.add_space(8.0);
-        ui.label(RichText::new(Str::SelectVisual.text()).color(t.muted));
+        crate::icons::a11y_label(
+            crate::i18n::wrapped_label(ui, Str::SelectVisual.text(), |r| r.color(t.muted)),
+            egui::WidgetType::Label,
+            Str::SelectVisual.text(),
+        );
         return out;
     };
     ui.separator();
     for &well in v.kind.wells() {
-        ui.label(RichText::new(well_name(well).text()).strong());
+        crate::icons::a11y_label(
+            ui.label(RichText::new(well_name(well).show()).strong()),
+            egui::WidgetType::Label,
+            well_name(well).text(),
+        );
         let fields = v.wells.get(&well).map(Vec::as_slice).unwrap_or_default();
         if fields.is_empty() {
-            ui.label(RichText::new(Str::WellEmpty.text()).color(t.muted));
+            crate::icons::a11y_label(
+                crate::i18n::wrapped_label(ui, Str::WellEmpty.text(), |r| r.color(t.muted)),
+                egui::WidgetType::Label,
+                Str::WellEmpty.text(),
+            );
         }
         for (i, f) in fields.iter().enumerate() {
             ui.horizontal(|ui| {
-                ui.label(field_name(f));
+                let name = field_name(f);
+                crate::icons::a11y_label(
+                    ui.label(crate::i18n::visual_rtl(name)),
+                    egui::WidgetType::Label,
+                    name,
+                );
                 let r = ui.small_button("×");
-                let label = Str::RemoveField.fill(&[field_name(f)]);
-                if crate::icons::name(r, egui::WidgetType::Button, &label).clicked() {
+                let tooltip = Str::RemoveField.fill(&[name]);
+                let a11y = Str::RemoveField.fill_logical(&[name]);
+                if crate::icons::name_labeled(r, egui::WidgetType::Button, &tooltip, &a11y)
+                    .clicked()
+                {
                     out.push((
                         "visual.removeField",
                         json!({"page": p.id, "visual": v.id, "well": well.id(), "index": i}),
@@ -132,12 +157,14 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
             .iter()
             .map(|i| i.as_str().map_or_else(|| i.to_string(), str::to_string))
             .collect();
-        ui.label(RichText::new(field).strong());
+        crate::i18n::wrapped_data_label(ui, field, |r| r.strong());
         ui.horizontal_wrapped(|ui| {
-            ui.label(values.join(", "));
+            let joined = values.join(", ");
+            crate::i18n::wrapped_data_label(ui, &joined, |r| r);
             let r = ui.small_button("×");
-            let label = Str::ClearSelection.fill(&[field]);
-            if crate::icons::name(r, egui::WidgetType::Button, &label).clicked() {
+            let tooltip = Str::ClearSelection.fill(&[field]);
+            let a11y = Str::ClearSelection.fill_logical(&[field]);
+            if crate::icons::name_labeled(r, egui::WidgetType::Button, &tooltip, &a11y).clicked() {
                 out.push((
                     "slicer.select",
                     json!({"page": p.id, "visual": v.id, "items": []}),
@@ -147,7 +174,7 @@ pub fn filters(ui: &mut Ui, t: &Tokens, page: Option<&Page>) -> Vec<Request> {
         ui.add_space(6.0);
     }
     if !any {
-        ui.label(RichText::new(Str::NoFilters.text()).color(t.muted));
+        crate::i18n::wrapped_label(ui, Str::NoFilters.text(), |r| r.color(t.muted));
     }
     out
 }

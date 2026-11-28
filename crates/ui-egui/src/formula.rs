@@ -51,10 +51,7 @@ fn split(text: &str) -> Option<(&str, &str, usize)> {
 /// The parse error of `text`'s expression, its span shifted into `text`.
 fn error(text: &str) -> Option<(Span, String)> {
     let Some((_, expr, at)) = split(text) else {
-        return Some((
-            Span::new(0, text.len()),
-            Str::FormulaShape.text().to_string(),
-        ));
+        return Some((Span::new(0, text.len()), Str::FormulaShape.show()));
     };
     if expr.trim().is_empty() {
         return None;

@@ -43,7 +43,7 @@ impl Diagram {
         let mut out = Vec::new();
         if doc.model.tables.is_empty() {
             ui.centered_and_justified(|ui| {
-                ui.label(egui::RichText::new(Str::NoTables.text()).color(t.muted));
+                crate::i18n::wrapped_label(ui, Str::NoTables.text(), |r| r.color(t.muted));
             });
             return out;
         }
@@ -109,9 +109,9 @@ impl Diagram {
                 painter.rect_stroke(b.rect, 4.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                 let head = Rect::from_min_size(b.rect.min, Vec2::new(WIDTH, HEAD));
                 painter.rect_filled(head, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, t.panel);
-                painter.text(head.left_center() + Vec2::new(8.0, 0.0), Align2::LEFT_CENTER, b.name, FontId::proportional(14.0), t.text);
+                painter.text(head.left_center() + Vec2::new(8.0, 0.0), Align2::LEFT_CENTER, crate::i18n::visual_rtl(b.name), FontId::proportional(14.0), t.text);
                 let hr = ui.interact(head, ui.id().with(("table", b.name)), Sense::drag());
-                let label = Str::TableOf.fill(&[b.name]);
+                let label = Str::TableOf.fill_logical(&[b.name]);
                 hr.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, &label));
                 if hr.drag_started() {
                     self.moving = Some((b.name.to_string(), Vec2::ZERO));
@@ -132,14 +132,14 @@ impl Diagram {
                 }
                 for (c, rect) in &b.rows {
                     let r = ui.interact(*rect, ui.id().with(("column", b.name, *c)), Sense::drag());
-                    let label = Str::ColumnOf.fill(&[c, b.name]);
+                    let label = Str::ColumnOf.fill_logical(&[c, b.name]);
                     r.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, &label));
                     let linking = self.linking.as_ref().is_some_and(|(lt, lc)| lt == b.name && lc == c);
                     let target = self.linking.as_ref().is_some_and(|(lt, _)| lt != b.name) && pointer.is_some_and(|p| rect.contains(p));
                     if linking || target || r.hovered() {
                         painter.rect_filled(rect.shrink(1.0), 2.0, t.hover);
                     }
-                    painter.text(rect.left_center() + Vec2::new(12.0, 0.0), Align2::LEFT_CENTER, *c, FontId::proportional(13.0), t.text);
+                    painter.text(rect.left_center() + Vec2::new(12.0, 0.0), Align2::LEFT_CENTER, crate::i18n::visual_rtl(c), FontId::proportional(13.0), t.text);
                     if r.drag_started() {
                         self.linking = Some((b.name.to_string(), c.to_string()));
                     }

@@ -1,7 +1,7 @@
 //! The Views (Report, Table, Model) and the Data pane. The Views themselves are `canvas.rs`,
 //! `grid.rs` and `diagram.rs`.
 
-use egui::{Color32, RichText, Ui};
+use egui::{Color32, Ui};
 use metriccraft_engine::Document;
 use metriccraft_visuals::FieldRef;
 
@@ -69,7 +69,7 @@ pub fn data_pane(
 ) -> Option<FieldRef> {
     let mut clicked = None;
     if doc.model.tables.is_empty() {
-        ui.label(RichText::new(Str::NoTables.text()).color(t.muted));
+        crate::i18n::wrapped_label(ui, Str::NoTables.text(), |r| r.color(t.muted));
         return None;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -78,13 +78,21 @@ pub fn data_pane(
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
                     let on = picked.as_deref() == Some(table.name.as_str());
-                    if ui.selectable_label(on, table.name.as_str()).clicked() {
+                    if crate::icons::a11y_label(
+                        ui.selectable_label(on, crate::i18n::visual_rtl(&table.name)),
+                        egui::WidgetType::SelectableLabel,
+                        &table.name,
+                    )
+                    .clicked()
+                    {
                         *picked = Some(table.name.clone());
                     }
                 })
                 .body(|ui| {
                     for c in table.columns.iter().filter(|c| !c.hidden) {
-                        if ui.selectable_label(false, c.name.as_str()).clicked() {
+                        if crate::i18n::wrapped_selectable_label(ui, false, &c.name, false)
+                            .clicked()
+                        {
                             clicked = Some(FieldRef::Column {
                                 table: table.name.clone(),
                                 column: c.name.clone(),
@@ -92,8 +100,8 @@ pub fn data_pane(
                         }
                     }
                     for m in table.measures.iter().filter(|m| !m.hidden) {
-                        let label = RichText::new(m.name.as_str()).italics();
-                        if ui.selectable_label(false, label).clicked() {
+                        if crate::i18n::wrapped_selectable_label(ui, false, &m.name, true).clicked()
+                        {
                             clicked = Some(FieldRef::Measure {
                                 name: m.name.clone(),
                             });
@@ -112,7 +120,7 @@ pub fn report_view(ui: &mut Ui, t: &Tokens, doc: &Document) {
     ui.painter().rect_filled(rect, 0.0, t.well);
     let Some(page) = current_page(doc) else {
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new(Str::NoPages.text()).color(t.muted));
+            crate::i18n::wrapped_label(ui, Str::NoPages.text(), |r| r.color(t.muted));
         });
         return;
     };

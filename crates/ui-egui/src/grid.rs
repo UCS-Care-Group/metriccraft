@@ -46,7 +46,7 @@ impl Grid {
             .or_else(|| doc.tables.first());
         let Some(table) = table else {
             ui.centered_and_justified(|ui| {
-                ui.label(RichText::new(Str::NoTables.text()).color(t.muted));
+                crate::i18n::wrapped_label(ui, Str::NoTables.text(), |r| r.color(t.muted));
             });
             return;
         };
@@ -57,7 +57,7 @@ impl Grid {
                 (c.format_string.clone(), c.hidden)
             })
         };
-        let label = Str::TableOf.fill(&[table.name()]);
+        let label = Str::TableOf.fill_logical(&[table.name()]);
         self.show_batch(
             ui,
             t,
@@ -168,7 +168,7 @@ impl Grid {
             cell.text(
                 head.left_center() + Vec2::new(PAD, 0.0),
                 Align2::LEFT_CENTER,
-                field.name(),
+                crate::i18n::visual_rtl(field.name()),
                 FontId::proportional(13.0),
                 color,
             );
@@ -183,7 +183,7 @@ impl Grid {
                 let v = col.value(row);
                 let failed = error(row, c);
                 let s = match &failed {
-                    Some(_) => Str::CellError.text().to_string(),
+                    Some(_) => Str::CellError.show(),
                     None => text(&v, &format),
                 };
                 let y = body.top() + ROW * (i as f32 + 1.0);
@@ -201,7 +201,7 @@ impl Grid {
                     cell.text(
                         rect.left_center() + Vec2::new(PAD, 0.0),
                         Align2::LEFT_CENTER,
-                        s,
+                        crate::i18n::visual_rtl(&s),
                         font.clone(),
                         t.text,
                     );
@@ -240,7 +240,13 @@ impl Grid {
                         .vertical()
                         .show_value(false);
                     let r = ui.add(s);
-                    crate::icons::name(r, WidgetType::Slider, Str::RowScroll.text()).changed()
+                    crate::icons::name_labeled(
+                        r,
+                        WidgetType::Slider,
+                        &Str::RowScroll.show(),
+                        Str::RowScroll.text(),
+                    )
+                    .changed()
                 })
                 .inner;
             if changed {
@@ -258,7 +264,13 @@ impl Grid {
                     ui.spacing_mut().slider_width = rect.width();
                     let s = egui::Slider::new(&mut v, 0.0..=max_left as f64).show_value(false);
                     let r = ui.add(s);
-                    crate::icons::name(r, WidgetType::Slider, Str::ColumnScroll.text()).changed()
+                    crate::icons::name_labeled(
+                        r,
+                        WidgetType::Slider,
+                        &Str::ColumnScroll.show(),
+                        Str::ColumnScroll.text(),
+                    )
+                    .changed()
                 })
                 .inner;
             if changed {

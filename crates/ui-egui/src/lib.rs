@@ -6,6 +6,7 @@ pub mod canvas;
 pub mod diagram;
 pub mod formula;
 pub mod grid;
+pub mod i18n;
 pub mod icons;
 pub mod keys;
 pub mod painter;
@@ -25,6 +26,7 @@ use egui::{Key, KeyboardShortcut, Modifiers, RichText, Ui};
 use metriccraft_engine::{Command, RecoveryInfo};
 use serde_json::{Value, json};
 
+use crate::i18n::Lang;
 use crate::palette::{Action, Form, Palette};
 use crate::ribbon::Tab;
 use crate::strings::Str;
@@ -44,6 +46,7 @@ pub struct Toast {
 pub struct Prefs {
     pub theme: Mode,
     pub view: View,
+    pub language: Lang,
 }
 
 impl Prefs {
@@ -52,7 +55,7 @@ impl Prefs {
             Mode::Light => "light",
             Mode::Dark => "dark",
         };
-        json!({"theme": theme, "view": self.view.key()})
+        json!({"theme": theme, "view": self.view.key(), "language": self.language.code()})
     }
 
     /// Unknown or missing members keep their defaults.
@@ -66,7 +69,17 @@ impl Prefs {
             .and_then(Value::as_str)
             .and_then(View::from_key)
             .unwrap_or_default();
-        Prefs { theme, view }
+        let language = v
+            .get("language")
+            .and_then(Value::as_str)
+            .and_then(Lang::from_tag)
+            .filter(|l| *l != Lang::Hebrew || Lang::hebrew_font_available())
+            .unwrap_or_default();
+        Prefs {
+            theme,
+            view,
+            language,
+        }
     }
 }
 
@@ -93,6 +106,13 @@ enum Closing {
     Saving,
 }
 
+/// Last finished-command state shown in the status bar (resolved per frame so language switches update it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Status {
+    Done(String),
+    Failed(String),
+}
+
 /// The commands that load data, with progress and Cancel.
 const LOADS: [&str; 3] = ["home.getData", "home.refresh", "home.closeApply"];
 
@@ -107,8 +127,8 @@ pub struct Shell {
     palette: Option<Palette>,
     form: Option<Form>,
     toasts: Vec<Toast>,
-    /// The last message, for the status bar.
-    status: Option<String>,
+    /// The last status-bar message source, resolved in the active language each frame.
+    status: Option<Status>,
     recovery: Option<(PathBuf, Vec<RecoveryInfo>)>,
     closing: Closing,
     /// Set when the window may close now; the app closes it.
@@ -153,6 +173,7 @@ impl Shell {
         prefs: Prefs,
         recovery: (Option<PathBuf>, Vec<RecoveryInfo>),
     ) -> Self {
+        i18n::set_language(prefs.language);
         let commands = engine.commands();
         let snap = engine.snapshot();
         let recovery = match recovery {
@@ -301,6 +322,8 @@ impl Shell {
                 .families
                 .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        install_hebrew_fallback_fonts(&mut fonts);
         ctx.set_fonts(fonts);
         ctx.set_visuals(self.tokens.visuals());
     }
@@ -308,6 +331,17 @@ impl Shell {
     /// Switches to the dark App theme (scripts, tests).
     pub fn set_dark(&mut self, ctx: &egui::Context) {
         self.set_theme(ctx, Mode::Dark);
+    }
+
+    /// Switches UI language (`en` / `he`) and updates the active translation state.
+    pub fn set_language(&mut self, lang: Lang) {
+        let resolved = if lang == Lang::Hebrew && !Lang::hebrew_font_available() {
+            Lang::English
+        } else {
+            lang
+        };
+        self.prefs.language = resolved;
+        i18n::set_language(resolved);
     }
 
     /// Picks a View by key (`report`, `table`, `model`); unknown keys are ignored.
@@ -424,7 +458,7 @@ impl Shell {
         for event in self.engine.take_events() {
             match event {
                 Event::Done { id, notice } => {
-                    self.status = Some(self.label_of(&id).to_string());
+                    self.status = Some(Status::Done(id.clone()));
                     if let Some(n) = notice {
                         self.toasts.push(Toast {
                             text: n,
@@ -436,7 +470,7 @@ impl Shell {
                     }
                 }
                 Event::Failed { id, error } => {
-                    self.status = Some(error.clone());
+                    self.status = Some(Status::Failed(error.clone()));
                     self.toasts.push(Toast {
                         text: error,
                         error: true,
@@ -544,11 +578,40 @@ impl Shell {
         }
     }
 
-    fn label_of(&self, id: &str) -> &'static str {
+    fn label_of_for(&self, lang: Lang, id: &str) -> &'static str {
         self.commands
             .iter()
             .find(|c| c.id == id)
-            .map_or("", |c| c.label)
+            .map_or("", |c| i18n::command_label_for(lang, c))
+    }
+
+    fn display_of_for(&self, lang: Lang, id: &str) -> String {
+        self.commands
+            .iter()
+            .find(|c| c.id == id)
+            .map_or_else(String::new, |c| i18n::command_display_for(lang, c))
+    }
+
+    fn status_text_for(&self, lang: Lang, busy: Option<&str>) -> (String, String) {
+        match (busy, &self.status) {
+            (Some(id), _) => (
+                Str::Working.fill_for(lang, &[self.label_of_for(lang, id)]),
+                Str::Working.fill_logical_for(lang, &[self.label_of_for(lang, id)]),
+            ),
+            (None, Some(Status::Done(id))) => (
+                self.display_of_for(lang, id),
+                self.label_of_for(lang, id).to_owned(),
+            ),
+            (None, Some(Status::Failed(error))) => (i18n::visual_rtl(error), error.clone()),
+            (None, None) => (
+                Str::Ready.show_for(lang),
+                Str::Ready.text_for(lang).to_owned(),
+            ),
+        }
+    }
+
+    fn status_text(&self, busy: Option<&str>) -> (String, String) {
+        self.status_text_for(i18n::language(), busy)
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -588,7 +651,7 @@ impl Shell {
             .show(ui, |ui| {
                 keys::anchor(ui, 0, Str::RegionRibbon.text());
                 ui.horizontal(|ui| {
-                    ui.menu_button(Str::TabFile.text(), |ui| {
+                    ui.menu_button(Str::TabFile.show(), |ui| {
                         for c in ribbon::file_menu(self.commands) {
                             if let Some(a) = ribbon::button(ui, &snap, self.commands, c) {
                                 action = Some(a);
@@ -605,7 +668,11 @@ impl Shell {
                     }
                     ui.separator();
                     for tab in self.tabs() {
-                        let r = ui.selectable_value(&mut self.tab, tab, tab.label().text());
+                        let r = icons::a11y_label(
+                            ui.selectable_value(&mut self.tab, tab, tab.label().show()),
+                            egui::WidgetType::SelectableLabel,
+                            tab.label().text(),
+                        );
                         if self.keytips.level == Some(keys::Level::Tabs) {
                             keys::badge(ui, r.rect, keys::tab_letter(tab), &t);
                         }
@@ -614,12 +681,37 @@ impl Shell {
                 ui.add_space(4.0);
                 if self.tab == Tab::View {
                     ui.horizontal(|ui| {
-                        ui.label(Str::AppTheme.text());
+                        i18n::str_label(ui, Str::AppTheme, |r| r);
                         let mut mode = self.prefs.theme;
-                        ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.text());
-                        ui.selectable_value(&mut mode, Mode::Dark, Str::ThemeDark.text());
+                        icons::a11y_label(
+                            ui.selectable_value(&mut mode, Mode::Light, Str::ThemeLight.show()),
+                            egui::WidgetType::SelectableLabel,
+                            Str::ThemeLight.text(),
+                        );
+                        icons::a11y_label(
+                            ui.selectable_value(&mut mode, Mode::Dark, Str::ThemeDark.show()),
+                            egui::WidgetType::SelectableLabel,
+                            Str::ThemeDark.text(),
+                        );
                         if mode != self.prefs.theme {
                             self.set_theme(ui.ctx(), mode);
+                        }
+                        ui.separator();
+                        i18n::str_label(ui, Str::Language, |r| r);
+                        let mut lang = self.prefs.language;
+                        for &choice in Lang::available() {
+                            icons::a11y_label(
+                                ui.selectable_value(
+                                    &mut lang,
+                                    choice,
+                                    choice.display_name().show(),
+                                ),
+                                egui::WidgetType::SelectableLabel,
+                                choice.display_name().text(),
+                            );
+                        }
+                        if lang != self.prefs.language {
+                            self.set_language(lang);
                         }
                     });
                 } else {
@@ -628,17 +720,25 @@ impl Shell {
                         let mut first = 0;
                         if self.tab == Tab::Home {
                             let icon = icons::Icon::Table;
-                            let label = Str::TransformData.text();
+                            let label = Str::TransformData.show();
                             ui.vertical(|ui| {
-                                let r = icons::big_button(ui, icon, label, true, &t);
+                                let r = icons::big_button_labeled(
+                                    ui,
+                                    icon,
+                                    &label,
+                                    Str::TransformData.text(),
+                                    true,
+                                    &t,
+                                );
                                 if r.clicked() {
                                     self.pq.open = true;
                                 }
                                 if tips {
                                     keys::badge(ui, r.rect, 'A', &t);
                                 }
-                                let group = RichText::new(Str::PowerQueryGroup.text());
-                                ui.label(group.small().color(t.muted));
+                                i18n::str_label(ui, Str::PowerQueryGroup, |r| {
+                                    r.small().color(t.muted)
+                                });
                             });
                             ui.separator();
                             first = 1;
@@ -688,12 +788,12 @@ impl Shell {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let text = match (snap.busy, &self.status) {
-                        (Some(id), _) => Str::Working.fill(&[self.label_of(id)]),
-                        (None, Some(s)) => s.clone(),
-                        (None, None) => Str::Ready.text().to_string(),
-                    };
-                    ui.label(RichText::new(text).color(t.muted));
+                    let (shown, logical) = self.status_text(snap.busy);
+                    icons::a11y_label(
+                        ui.label(RichText::new(shown).color(t.muted)),
+                        egui::WidgetType::Label,
+                        &logical,
+                    );
                     if snap.busy.is_some_and(|id| LOADS.contains(&id)) {
                         // Rows read so far, per Query; polled while the load runs.
                         for (query, rows) in self.engine.load_rows() {
@@ -705,11 +805,21 @@ impl Shell {
                                 &metriccraft_core::EN_US,
                             )
                             .unwrap_or_default();
-                            ui.label(
-                                RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
+                            icons::a11y_label(
+                                ui.label(
+                                    RichText::new(Str::RowsRead.fill(&[&query, &n])).color(t.muted),
+                                ),
+                                egui::WidgetType::Label,
+                                &Str::RowsRead.fill_logical(&[&query, &n]),
                             );
                         }
-                        if ui.button(Str::Cancel.text()).clicked() {
+                        if icons::a11y_label(
+                            ui.button(Str::Cancel.show()),
+                            egui::WidgetType::Button,
+                            Str::Cancel.text(),
+                        )
+                        .clicked()
+                        {
                             self.engine.cancel_load();
                         }
                         ui.ctx()
@@ -717,18 +827,30 @@ impl Shell {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if snap.dirty {
-                            ui.label(RichText::new(Str::Unsaved.text()).color(t.muted));
+                            i18n::str_label(ui, Str::Unsaved, |r| r.color(t.muted));
                         }
                         // What Undo would undo, with its Origin (`Undo: MCP — 30 changes`).
                         if let Some(undo) = &snap.undo {
-                            ui.label(RichText::new(Str::UndoLabel.fill(&[undo])).color(t.muted));
+                            icons::a11y_label(
+                                ui.label(
+                                    RichText::new(Str::UndoLabel.fill(&[undo])).color(t.muted),
+                                ),
+                                egui::WidgetType::Label,
+                                &Str::UndoLabel.fill_logical(&[undo]),
+                            );
                         }
                         let pages = &snap.doc.report.pages;
                         if let Some(page) = views::current_page(&snap.doc) {
                             let n = pages.iter().position(|p| p.id == page.id).unwrap_or(0) + 1;
-                            let label =
-                                Str::PageNumber.fill(&[&n.to_string(), &pages.len().to_string()]);
-                            ui.label(RichText::new(label).color(t.muted));
+                            let n_s = n.to_string();
+                            let total_s = pages.len().to_string();
+                            let label = Str::PageNumber.fill(&[&n_s, &total_s]);
+                            let logical = Str::PageNumber.fill_logical(&[&n_s, &total_s]);
+                            icons::a11y_label(
+                                ui.label(RichText::new(label).color(t.muted)),
+                                egui::WidgetType::Label,
+                                &logical,
+                            );
                         }
                     });
                 });
@@ -746,7 +868,14 @@ impl Shell {
                         View::Table => icons::Icon::Table,
                         View::Model => icons::Icon::Model,
                     };
-                    let r = icons::big_button(ui, icon, view.label().text(), true, &t);
+                    let r = icons::big_button_labeled(
+                        ui,
+                        icon,
+                        &view.label().show(),
+                        view.label().text(),
+                        true,
+                        &t,
+                    );
                     if on {
                         let bar = egui::Rect::from_min_size(
                             r.rect.left_top() - egui::vec2(5.0, 0.0),
@@ -877,7 +1006,12 @@ impl Shell {
                 egui::Panel::top("pq-close").show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            close |= ui.button(Str::Close.text()).clicked();
+                            close |= icons::a11y_label(
+                                ui.button(Str::Close.show()),
+                                egui::WidgetType::Button,
+                                Str::Close.text(),
+                            )
+                            .clicked();
                         });
                     });
                 });
@@ -932,14 +1066,29 @@ impl Shell {
                     let current = views::current_page(&snap.doc).map(|p| p.id.clone());
                     for page in &snap.doc.report.pages {
                         let on = current.as_deref() == Some(page.id.as_str());
-                        if ui.selectable_label(on, page.name.as_str()).clicked() && !on {
+                        let shown = i18n::visual_rtl(&page.name);
+                        if icons::a11y_label(
+                            ui.selectable_label(on, shown),
+                            egui::WidgetType::SelectableLabel,
+                            &page.name,
+                        )
+                        .clicked()
+                            && !on
+                        {
                             self.engine.run("page.setCurrent", json!({"page": page.id}));
                         }
                     }
                     if let Some(c) = self.commands.iter().find(|c| c.id == "insert.newPage") {
                         let r = ui
                             .add_enabled(snap.enabled(self.commands, c.id), egui::Button::new("+"));
-                        if icons::name(r, egui::WidgetType::Button, c.label).clicked() {
+                        if icons::name_labeled(
+                            r,
+                            egui::WidgetType::Button,
+                            &i18n::command_display(c),
+                            i18n::command_label(c),
+                        )
+                        .clicked()
+                        {
                             action = Some(palette::invoke(c));
                         }
                     }
@@ -965,15 +1114,21 @@ impl Shell {
         }
         let pct = format!("{pct:.0}");
         ui.label(Str::Percent.fill(&[&pct]));
-        if ui
-            .selectable_label(*z == Zoom::FitWidth, Str::FitWidth.text())
-            .clicked()
+        if icons::a11y_label(
+            ui.selectable_label(*z == Zoom::FitWidth, Str::FitWidth.show()),
+            egui::WidgetType::SelectableLabel,
+            Str::FitWidth.text(),
+        )
+        .clicked()
         {
             *z = Zoom::FitWidth;
         }
-        if ui
-            .selectable_label(*z == Zoom::FitPage, Str::FitPage.text())
-            .clicked()
+        if icons::a11y_label(
+            ui.selectable_label(*z == Zoom::FitPage, Str::FitPage.show()),
+            egui::WidgetType::SelectableLabel,
+            Str::FitPage.text(),
+        )
+        .clicked()
         {
             *z = Zoom::FitPage;
         }
@@ -1000,13 +1155,32 @@ impl Shell {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(Str::RecoveryFound.fill(&[&what]));
-                    if usable && ui.button(Str::Recover.text()).clicked() {
+                    if usable
+                        && icons::a11y_label(
+                            ui.button(Str::Recover.show()),
+                            egui::WidgetType::Button,
+                            Str::Recover.text(),
+                        )
+                        .clicked()
+                    {
                         chosen = Some("file.recover");
                     }
-                    if ui.button(Str::Discard.text()).clicked() {
+                    if icons::a11y_label(
+                        ui.button(Str::Discard.show()),
+                        egui::WidgetType::Button,
+                        Str::Discard.text(),
+                    )
+                    .clicked()
+                    {
                         chosen = Some("file.discardRecovery");
                     }
-                    if ui.button(Str::Dismiss.text()).clicked() {
+                    if icons::a11y_label(
+                        ui.button(Str::Dismiss.show()),
+                        egui::WidgetType::Button,
+                        Str::Dismiss.text(),
+                    )
+                    .clicked()
+                    {
                         chosen = Some("");
                     }
                 });
@@ -1032,7 +1206,13 @@ impl Shell {
                         ui.set_max_width(360.0);
                         let color = if toast.error { t.danger } else { t.warning };
                         ui.label(RichText::new(toast.text.as_str()).color(color));
-                        if ui.small_button(Str::Dismiss.text()).clicked() {
+                        if icons::a11y_label(
+                            ui.small_button(Str::Dismiss.show()),
+                            egui::WidgetType::Button,
+                            Str::Dismiss.text(),
+                        )
+                        .clicked()
+                        {
                             dismissed = Some(i);
                         }
                     });
@@ -1057,9 +1237,15 @@ impl Shell {
         };
         let has_location = snap.location.is_some();
         let modal = egui::Modal::new(egui::Id::new("close")).show(ui.ctx(), |ui| {
-            ui.label(Str::SaveFirst.fill(&[&name]));
+            i18n::wrapped_label(ui, &Str::SaveFirst.fill_logical(&[&name]), |r| r);
             ui.horizontal(|ui| {
-                if ui.button(Str::Save.text()).clicked() {
+                if icons::a11y_label(
+                    ui.button(Str::Save.show()),
+                    egui::WidgetType::Button,
+                    Str::Save.text(),
+                )
+                .clicked()
+                {
                     if has_location {
                         self.closing = Closing::Saving;
                         self.engine.run("file.save", json!({}));
@@ -1070,10 +1256,22 @@ impl Shell {
                         }
                     }
                 }
-                if ui.button(Str::DontSave.text()).clicked() {
+                if icons::a11y_label(
+                    ui.button(Str::DontSave.show()),
+                    egui::WidgetType::Button,
+                    Str::DontSave.text(),
+                )
+                .clicked()
+                {
                     self.quit_requested = true;
                 }
-                if ui.button(Str::Cancel.text()).clicked() {
+                if icons::a11y_label(
+                    ui.button(Str::Cancel.show()),
+                    egui::WidgetType::Button,
+                    Str::Cancel.text(),
+                )
+                .clicked()
+                {
                     self.closing = Closing::No;
                 }
             });
@@ -1104,7 +1302,7 @@ impl egui_dock::TabViewer for PaneViewer<'_> {
     }
 
     fn title(&mut self, tab: &mut Pane) -> egui::WidgetText {
-        tab.label().text().into()
+        tab.label().show().into()
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Pane) {
@@ -1181,6 +1379,237 @@ fn parse_shortcut(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(mods, key?))
 }
 
+/// Registers the first valid desktop system Hebrew fallback font on every UI font family without
+/// committing or embedding external binary font assets. Web (`wasm32`) builds exclude Hebrew in
+/// `Lang::available()` so the web UI never renders missing-glyph boxes.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    let slice = bytes.get(offset..offset + 2)?;
+    Some(u16::from_be_bytes([slice[0], slice[1]]))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    let slice = bytes.get(offset..offset + 4)?;
+    Some(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_valid_sfnt_at(bytes: &[u8], offset: usize) -> bool {
+    let Some(magic) = bytes.get(offset..offset + 4) else {
+        return false;
+    };
+    if !matches!(magic, [0x00, 0x01, 0x00, 0x00] | b"OTTO" | b"true") {
+        return false;
+    }
+    let Some(num_tables) = read_be_u16(bytes, offset + 4).map(usize::from) else {
+        return false;
+    };
+    if num_tables == 0 {
+        return false;
+    }
+    let Some(dir_end) = offset
+        .checked_add(12)
+        .and_then(|s| s.checked_add(num_tables * 16))
+    else {
+        return false;
+    };
+    if dir_end > bytes.len() {
+        return false;
+    }
+    let mut has_valid_head = false;
+    for i in 0..num_tables {
+        let rec = offset + 12 + i * 16;
+        let Some(tag) = bytes.get(rec..rec + 4) else {
+            return false;
+        };
+        let Some(tbl_off) = read_be_u32(bytes, rec + 8).and_then(|v| usize::try_from(v).ok())
+        else {
+            return false;
+        };
+        let Some(tbl_len) = read_be_u32(bytes, rec + 12).and_then(|v| usize::try_from(v).ok())
+        else {
+            return false;
+        };
+        let Some(tbl_end) = tbl_off.checked_add(tbl_len) else {
+            return false;
+        };
+        if tbl_end > bytes.len() {
+            return false;
+        }
+        if tag == b"head" {
+            if tbl_len < 54 || read_be_u32(bytes, tbl_off + 12) != Some(0x5F0F_3CF5) {
+                return false;
+            }
+            has_valid_head = true;
+        }
+    }
+    has_valid_head
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_valid_sfnt_structure(bytes: &[u8]) -> bool {
+    if bytes.get(..4) == Some(b"ttcf") {
+        let Some(num_fonts) = read_be_u32(bytes, 8).and_then(|v| usize::try_from(v).ok()) else {
+            return false;
+        };
+        if num_fonts == 0 {
+            return false;
+        }
+        let Some(first_offset) = read_be_u32(bytes, 12).and_then(|v| usize::try_from(v).ok())
+        else {
+            return false;
+        };
+        return has_valid_sfnt_at(bytes, first_offset);
+    }
+    has_valid_sfnt_at(bytes, 0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_valid_font_bytes(bytes: &[u8]) -> bool {
+    if !has_valid_sfnt_structure(bytes) {
+        return false;
+    }
+    let mut defs = egui::FontDefinitions::empty();
+    defs.font_data.insert(
+        "hebrew-probe".to_owned(),
+        Arc::new(egui::FontData::from_owned(bytes.to_vec())),
+    );
+    // Parse the full font through epaint's loader so truncated/corrupt faces are skipped instead
+    // of panicking during startup FontDefinitions initialization.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ =
+            egui::epaint::text::FontsImpl::new(egui::epaint::text::TextOptions::default(), defs);
+    }))
+    .is_ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_valid_font(path: &std::path::Path) -> Option<Arc<egui::FontData>> {
+    let bytes = std::fs::read(path).ok()?;
+    if !is_valid_font_bytes(&bytes) {
+        eprintln!(
+            "note: skipping invalid Hebrew fallback font file: {}",
+            path.display()
+        );
+        return None;
+    }
+    Some(Arc::new(egui::FontData::from_owned(bytes)))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_hebrew_fallback_font(
+    candidates: &[(&'static str, &str)],
+) -> Option<(&'static str, Arc<egui::FontData>)> {
+    for env_var in ["METRICCRAFT_FONT_DIR", "CRAFT_FONTS_DIR"] {
+        if let Ok(dir) = std::env::var(env_var) {
+            let trimmed = dir.trim();
+            if !trimmed.is_empty() {
+                for filename in [
+                    "NotoSansHebrew-Regular.ttf",
+                    "NotoSansHebrew[wdth,wght].ttf",
+                ] {
+                    let candidate = std::path::Path::new(trimmed).join(filename);
+                    if let Some(data) = read_valid_font(&candidate) {
+                        return Some(("Noto Sans Hebrew Env", data));
+                    }
+                }
+            }
+        }
+    }
+    candidates.iter().find_map(|&(name, path)| {
+        read_valid_font(std::path::Path::new(path)).map(|data| (name, data))
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn hebrew_fallback_font() -> Option<&'static (&'static str, Arc<egui::FontData>)> {
+    static FONT: std::sync::OnceLock<Option<(&'static str, Arc<egui::FontData>)>> =
+        std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        const CANDIDATES: [(&str, &str); 13] = [
+            (
+                "Arial Hebrew",
+                "/System/Library/Fonts/Supplemental/Arial Hebrew.ttf",
+            ),
+            ("SF Hebrew", "/System/Library/Fonts/SFHebrew.ttf"),
+            ("Arial Hebrew Local", "/Library/Fonts/Arial Hebrew.ttf"),
+            (
+                "Arial Unicode",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ),
+            (
+                "Noto Sans Hebrew",
+                "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "Noto Sans Hebrew Arch",
+                "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "Noto Sans Hebrew Nix",
+                "/run/current-system/sw/share/fonts/truetype/NotoSansHebrew-Regular.ttf",
+            ),
+            (
+                "FreeSans",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            ),
+            ("FreeSans Arch", "/usr/share/fonts/TTF/FreeSans.ttf"),
+            ("FreeSans GNU", "/usr/share/fonts/gnu-free/FreeSans.ttf"),
+            ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
+            ("Segoe UI", "C:\\Windows\\Fonts\\segoeui.ttf"),
+            ("Tahoma", "C:\\Windows\\Fonts\\tahoma.ttf"),
+        ];
+        let loaded = load_hebrew_fallback_font(&CANDIDATES);
+        if loaded.is_none() {
+            eprintln!(
+                "note: no Hebrew fallback font found (checked METRICCRAFT_FONT_DIR, CRAFT_FONTS_DIR, and system font paths); Hebrew UI disabled"
+            );
+        }
+        loaded
+    })
+    .as_ref()
+}
+
+pub(crate) fn hebrew_font_available() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        hebrew_fallback_font().is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_hebrew_fallback_fonts(fonts: &mut egui::FontDefinitions) -> bool {
+    let Some((name, data)) = hebrew_fallback_font() else {
+        return false;
+    };
+    if !fonts.font_data.contains_key(*name) {
+        fonts.font_data.insert((*name).into(), Arc::clone(data));
+        append_font_fallback(fonts, name);
+    }
+    true
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn append_font_fallback(fonts: &mut egui::FontDefinitions, name: &str) {
+    for family in [
+        egui::FontFamily::Proportional,
+        egui::FontFamily::Monospace,
+        egui::FontFamily::Name(painter::REGULAR.into()),
+        egui::FontFamily::Name(painter::BOLD.into()),
+    ] {
+        if let Some(list) = fonts.families.get_mut(&family)
+            && !list.iter().any(|existing| existing == name)
+        {
+            list.push(name.to_owned());
+        }
+    }
+}
+
 /// Milliseconds since 1970 (0 on the web, where autosave is off).
 fn now_ms() -> u64 {
     #[cfg(not(target_arch = "wasm32"))]
@@ -1204,13 +1633,77 @@ mod tests {
         let p = Prefs {
             theme: Mode::Dark,
             view: View::Model,
+            language: Lang::Hebrew,
         };
-        assert_eq!(Prefs::from_json(&p.to_json()), p);
+        let expected_lang = if Lang::hebrew_font_available() {
+            Lang::Hebrew
+        } else {
+            Lang::English
+        };
+        let parsed = Prefs::from_json(&p.to_json());
+        assert_eq!(parsed.theme, p.theme);
+        assert_eq!(parsed.view, p.view);
+        assert_eq!(parsed.language, expected_lang);
         assert_eq!(
-            Prefs::from_json(&json!({"theme": 3, "view": "nope"})),
+            Prefs::from_json(&json!({"language": "iw"})).language,
+            expected_lang
+        );
+        assert_eq!(
+            Prefs::from_json(&json!({"theme": 3, "view": "nope", "language": "x-he"})),
             Prefs::default()
         );
         assert_eq!(Prefs::from_json(&Value::Null), Prefs::default());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn hebrew_font_validation_skips_missing_and_invalid_files() {
+        assert!(is_valid_font_bytes(metriccraft_visuals::text::REGULAR));
+        assert!(!is_valid_font_bytes(b""));
+        assert!(!is_valid_font_bytes(b"not a font"));
+        // Truncated SFNT header / truncated real font must be rejected so epaint cannot panic.
+        assert!(!is_valid_font_bytes(&[0x00, 0x01, 0x00, 0x00, 0x00, 0x01]));
+        let truncated_real =
+            &metriccraft_visuals::text::REGULAR[..metriccraft_visuals::text::REGULAR.len() / 2];
+        assert!(!is_valid_font_bytes(truncated_real));
+        // Structurally valid SFNT directory pointing at corrupt `head` bytes must also be rejected.
+        let mut corrupt_sfnt = vec![
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00,
+        ];
+        corrupt_sfnt.extend_from_slice(b"head");
+        corrupt_sfnt.extend_from_slice(&[0u8; 4]);
+        corrupt_sfnt.extend_from_slice(&28u32.to_be_bytes());
+        corrupt_sfnt.extend_from_slice(&4u32.to_be_bytes());
+        corrupt_sfnt.extend_from_slice(&[0xFF; 4]);
+        assert!(!is_valid_font_bytes(&corrupt_sfnt));
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("metriccraft-bogus-font-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("create temp font dir");
+        let bogus = dir.join("bogus.ttf");
+        let valid = dir.join("valid.ttf");
+        let second = dir.join("second.ttf");
+        std::fs::write(&bogus, [0x00, 0x01, 0x00, 0x00, 0x00, 0x01]).expect("write bogus font");
+        std::fs::write(&valid, metriccraft_visuals::text::REGULAR).expect("write valid font");
+        std::fs::write(&second, metriccraft_visuals::text::REGULAR).expect("write second font");
+        let missing = "/nonexistent/path/metriccraft-missing.ttf";
+        let bogus_str = bogus.to_string_lossy().into_owned();
+        let valid_str = valid.to_string_lossy().into_owned();
+        let second_str = second.to_string_lossy().into_owned();
+        let loaded = load_hebrew_fallback_font(&[
+            ("Missing", missing),
+            ("Bogus", &bogus_str),
+            ("Valid", &valid_str),
+            ("Second", &second_str),
+        ]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            loaded.as_ref().map(|(name, _)| *name),
+            Some("Valid"),
+            "missing and truncated candidates must be skipped and only the first valid candidate kept"
+        );
     }
 
     #[test]
@@ -1219,5 +1712,44 @@ mod tests {
         assert_eq!(s, Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)));
         assert_eq!(parse_shortcut("F2").map(|s| s.logical_key), Some(Key::F2));
         assert_eq!(parse_shortcut("Ctrl+Nope"), None);
+    }
+
+    #[test]
+    fn status_bar_updates_when_language_switches() {
+        let mut shell = Shell::new(
+            Engine::new(metriccraft_engine::App::new(), || {}),
+            Prefs::default(),
+            (None, Vec::new()),
+        );
+        let save_id = "file.save";
+        let save_cmd = shell
+            .commands
+            .iter()
+            .find(|c| c.id == save_id)
+            .expect("file.save registered");
+        let save_en = i18n::command_label_for(Lang::English, save_cmd).to_owned();
+        let save_he_logical = i18n::command_label_for(Lang::Hebrew, save_cmd);
+        let save_he_visual = i18n::command_display_for(Lang::Hebrew, save_cmd);
+
+        shell.status = Some(Status::Done(save_id.to_owned()));
+        assert_eq!(
+            shell.status_text_for(Lang::English, None),
+            (save_en.clone(), save_en)
+        );
+        assert_eq!(
+            shell.status_text_for(Lang::Hebrew, None),
+            (save_he_visual, save_he_logical.to_owned())
+        );
+
+        let err = "שגיאת בדיקה";
+        shell.status = Some(Status::Failed(err.to_owned()));
+        assert_eq!(
+            shell.status_text_for(Lang::Hebrew, None),
+            (i18n::visual_rtl(err), err.to_owned())
+        );
+        assert_eq!(
+            shell.status_text_for(Lang::English, None),
+            (i18n::visual_rtl(err), err.to_owned())
+        );
     }
 }
