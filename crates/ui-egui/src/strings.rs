@@ -123,7 +123,7 @@ impl Str {
     /// Complete list of `Str` variants for test-time translation coverage checks.
     /// Keep in sync with `Str` (exhaustiveness is enforced by `Str::text_for` and `tests::str_all_has_no_duplicates`).
     #[cfg(test)]
-    pub const ALL: [Str; 101] = [
+    pub const ALL: [Str; 102] = [
         Str::AppName,
         Str::Untitled,
         Str::TabFile,
@@ -225,6 +225,7 @@ impl Str {
         Str::ColumnOf,
         Str::RowScroll,
         Str::ColumnScroll,
+        Str::Zoom,
     ];
 
     /// Logical string in `lang` (for native OS controls, AccessKit labels, and placeholder substitution).
@@ -431,7 +432,7 @@ impl Str {
                 "אין שאילתות עדיין. יש לייבא נתונים כדי להוסיף שאילתה."
             }
             (Lang::Hebrew, Str::PreviewOf) => "תצוגה מקדימה של {}",
-            (Lang::Hebrew, Str::LoadingPreview) => "טוען תצוגה מקדימה…",
+            (Lang::Hebrew, Str::LoadingPreview) => "טעינת תצוגה מקדימה…",
             (Lang::Hebrew, Str::TableOf) => "טבלת {}",
             (Lang::Hebrew, Str::FormulaShape) => "יש לכתוב בצורה שם = ביטוי",
             (Lang::Hebrew, Str::NewMeasureName) => "מדד",
